@@ -1,5 +1,3 @@
-const XLSX = require('xlsx');
-
 const REQUIRED_SHEETS = [
   'Dashboard',
   'Inputs',
@@ -13,13 +11,16 @@ const REQUIRED_SHEETS = [
 
 const EXCEL_ERRORS = ['#REF!', '#VALUE!', '#DIV/0!', '#NAME?', '#N/A', '#NULL!', '#NUM!'];
 
-function checkForErrors(sheet) {
+function checkForErrors(worksheet) {
   const errors = [];
-  for (const cell of Object.values(sheet)) {
-    if (cell && cell.w && EXCEL_ERRORS.some(e => String(cell.w).includes(e))) {
-      errors.push(cell.w);
-    }
-  }
+  worksheet.eachRow((row) => {
+    row.eachCell((cell) => {
+      const cellValue = cell.value ? String(cell.value) : '';
+      if (EXCEL_ERRORS.some(e => cellValue.includes(e))) {
+        errors.push(cellValue);
+      }
+    });
+  });
   return errors;
 }
 
@@ -70,9 +71,9 @@ function preValidate(parsed) {
   const WORKBOOK_RAW = parsed._raw;
   if (WORKBOOK_RAW) {
     for (const name of REQUIRED_SHEETS) {
-      const rawSheet = WORKBOOK_RAW.Sheets[name];
-      if (rawSheet) {
-        const errors = checkForErrors(rawSheet);
+      const worksheet = WORKBOOK_RAW.getWorksheet(name);
+      if (worksheet) {
+        const errors = checkForErrors(worksheet);
         if (errors.length > 0) {
           results.push({
             check: `No formula errors: ${name}`,

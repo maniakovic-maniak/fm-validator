@@ -1,55 +1,49 @@
-const XLSX = require('xlsx');
-
 const EXCEL_ERRORS = ['#REF!', '#VALUE!', '#DIV/0!', '#NAME?', '#N/A', '#NULL!', '#NUM!'];
 
-function fixFormulaErrors(workbook, sheetName) {
+function fixFormulaErrors(worksheet, sheetName) {
   const fixes = [];
-  const sheet = workbook.Sheets[sheetName];
-  if (!sheet) return fixes;
 
-  for (const [cellAddr, cell] of Object.entries(sheet)) {
-    if (cellAddr.startsWith('!')) continue;
-    if (cell && cell.w && EXCEL_ERRORS.some(e => String(cell.w).includes(e))) {
-      const originalValue = cell.w;
-      cell.v = 0;
-      cell.w = '0';
-      cell.t = 'n';
-      delete cell.f;
-      fixes.push({
-        sheet: sheetName,
-        cell: cellAddr,
-        issue: `Formula error: ${originalValue}`,
-        fix: 'Replaced with 0 — review required',
-        fixable: true
-      });
-    }
-  }
+  worksheet.eachRow((row, rowNumber) => {
+    row.eachCell((cell) => {
+      const cellValue = cell.value ? String(cell.value) : '';
+      if (EXCEL_ERRORS.some(e => cellValue.includes(e))) {
+        const originalValue = cellValue;
+        cell.value = 0;
+        cell.dataType = 'n';
+        fixes.push({
+          sheet: sheetName,
+          cell: cell.address,
+          issue: `Formula error: ${originalValue}`,
+          fix: 'Replaced with 0 — review required',
+          fixable: true
+        });
+      }
+    });
+  });
   return fixes;
 }
 
-function fixEmptyCells(workbook, sheetName, requiredColumns) {
+function fixEmptyCells(worksheet, sheetName, requiredColumns) {
   const fixes = [];
-  const sheet = workbook.Sheets[sheetName];
-  if (!sheet) return fixes;
 
-  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return; // Skip header row
 
-  for (let row = range.s.r + 1; row <= range.e.r; row++) {
     for (const col of requiredColumns) {
-      const colIndex = XLSX.utils.decode_col(col);
-      const cellAddr = XLSX.utils.encode_cell({ r: row, c: colIndex });
-      if (!sheet[cellAddr] || sheet[cellAddr].v === null || sheet[cellAddr].v === '') {
-        sheet[cellAddr] = { v: 'N/A', w: 'N/A', t: 's' };
+      const cell = row.getCell(col);
+      if (!cell.value || cell.value === null || cell.value === '') {
+        cell.value = 'N/A';
+        cell.dataType = 's';
         fixes.push({
           sheet: sheetName,
-          cell: cellAddr,
+          cell: cell.address,
           issue: 'Empty mandatory cell',
           fix: 'Filled with N/A — review required',
           fixable: true
         });
       }
     }
-  }
+  });
   return fixes;
 }
 

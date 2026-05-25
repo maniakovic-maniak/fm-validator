@@ -1,6 +1,6 @@
 const { google } = require('googleapis');
 const { getAuth } = require('./auth');
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,22 +27,32 @@ async function downloadFile(fileId) {
   return destPath;
 }
 
-function parseExcel(filePath) {
-  const workbook = XLSX.readFile(filePath, {
-    cellFormula: true,
-    cellNF: true,
-  });
+async function parseExcel(filePath) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
 
   const sheets = {};
-  for (const name of workbook.SheetNames) {
-    sheets[name] = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
-      defval: null,
-      raw: false,
-    });
+  for (const worksheet of workbook.worksheets) {
+    const jsonData = [];
+    const rows = worksheet.getSheetValues();
+    if (rows && rows.length > 0) {
+      const headers = rows[1]; // First row is headers
+      for (let i = 2; i < rows.length; i++) {
+        const row = rows[i];
+        const obj = {};
+        if (row) {
+          headers.forEach((header, index) => {
+            obj[header] = row[index] || null;
+          });
+          jsonData.push(obj);
+        }
+      }
+    }
+    sheets[worksheet.name] = jsonData;
   }
 
   return {
-    sheetNames: workbook.SheetNames,
+    sheetNames: workbook.worksheets.map(ws => ws.name),
     sheets,
     _raw: workbook
   };
@@ -52,7 +62,7 @@ async function fetchAndParse(fileId) {
   console.log(`Downloading file ${fileId}...`);
   const filePath = await downloadFile(fileId);
   console.log(`Parsing...`);
-  const parsed = parseExcel(filePath);
+  const parsed = await parseExcel(filePath);
   console.log(`Found ${parsed.sheetNames.length} sheets: ${parsed.sheetNames.join(', ')}`);
   return parsed;
 }

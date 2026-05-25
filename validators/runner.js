@@ -1,4 +1,4 @@
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,9 +27,11 @@ class ValidatorRunner {
    * @param {string} filePath - Path to the Excel file
    * @returns {object} Validation results
    */
-  validate(filePath) {
+  async validate(filePath) {
     try {
-      const workbook = XLSX.readFile(filePath);
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(filePath);
+
       const results = {
         timestamp: new Date().toISOString(),
         fileName: path.basename(filePath),
@@ -143,9 +145,10 @@ class ValidatorRunner {
   checkSheetsExist(workbook, check) {
     const missingSheets = [];
     const sheets = check.sheets || [];
+    const sheetNames = workbook.worksheets.map(ws => ws.name);
 
     sheets.forEach(sheetName => {
-      if (!workbook.SheetNames.includes(sheetName)) {
+      if (!sheetNames.includes(sheetName)) {
         missingSheets.push(sheetName);
       }
     });
@@ -166,19 +169,16 @@ class ValidatorRunner {
     const errors = [];
     const errorPatterns = [/#REF!/, /#NAME?/, /#VALUE!/, /#DIV\/0!/, /#NUM!/, /#N\/A/, /#NULL!/];
 
-    workbook.SheetNames.forEach(sheetName => {
-      const ws = workbook.Sheets[sheetName];
-      if (!ws) return;
-
-      Object.keys(ws).forEach(cellRef => {
-        const cell = ws[cellRef];
-        if (cell && cell.v && typeof cell.v === 'string') {
+    workbook.worksheets.forEach(worksheet => {
+      worksheet.eachRow((row) => {
+        row.eachCell((cell) => {
+          const cellValue = cell.value ? String(cell.value) : '';
           errorPatterns.forEach(pattern => {
-            if (pattern.test(cell.v)) {
-              errors.push({ sheet: sheetName, cell: cellRef, value: cell.v });
+            if (pattern.test(cellValue)) {
+              errors.push({ sheet: worksheet.name, cell: cell.address, value: cellValue });
             }
           });
-        }
+        });
       });
     });
 
@@ -196,18 +196,18 @@ class ValidatorRunner {
    */
   checkSheetEmpty(workbook, check) {
     const sheetName = check.sheet;
-    const ws = workbook.Sheets[sheetName];
+    const worksheet = workbook.getWorksheet(sheetName);
 
-    if (!ws) {
+    if (!worksheet) {
       return { passed: true, message: `Sheet "${sheetName}" does not exist` };
     }
 
     // Count non-empty cells
     let cellCount = 0;
-    Object.keys(ws).forEach(cellRef => {
-      if (cellRef !== '!ref' && cellRef !== '!margins' && ws[cellRef].v) {
-        cellCount++;
-      }
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        if (cell.value) cellCount++;
+      });
     });
 
     return {

@@ -7,7 +7,6 @@ const { applyFixes } = require('./src/fixer');
 const { buildReportAndHighlight } = require('./src/report-tab');
 const { uploadToDrive } = require('./src/writer');
 const { sendNotification } = require('./src/notifier');
-const XLSX = require('xlsx');
 const path = require('path');
 
 const FILE_ID = process.argv[2];
