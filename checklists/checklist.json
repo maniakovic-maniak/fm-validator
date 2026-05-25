@@ -1,0 +1,182 @@
+{
+  "version": "1.2",
+  "name": "checklist",
+  "description": "Core audit checklist — 18 essential rules for financial model validation",
+  "active": true,
+  "fix_policy": "fix_all",
+  "report_tab": {
+    "name": "Validation Report",
+    "position": "last",
+    "highlight_yellow": "auto-fixed cells",
+    "highlight_pink": "needs attention cells"
+  },
+  "tier1": [
+    {
+      "id": "T1-001",
+      "label": "Required sheets present",
+      "type": "sheet_exists",
+      "sheets": [
+        "Dashboard",
+        "Inputs",
+        "Cons",
+        "Ops",
+        "IFS",
+        "AFS",
+        "Debt",
+        "Equity"
+      ],
+      "fixable": false,
+      "fix_instruction": "Cannot auto-create missing sheets — escalate to human"
+    },
+    {
+      "id": "T1-002",
+      "label": "No Excel formula errors",
+      "type": "no_formula_errors",
+      "fixable": true,
+      "fix_instruction": "Replace error cell with 0 and flag for review"
+    },
+    {
+      "id": "T1-003",
+      "label": "Model Issues tab is empty",
+      "type": "sheet_empty",
+      "sheet": "Model Issues",
+      "fixable": false,
+      "fix_instruction": "Resolve all items in Model Issues tab before resubmitting"
+    },
+    {
+      "id": "T1-004",
+      "section": "5.1",
+      "label": "Balance sheet check row exists",
+      "description": "Confirm the model contains a balance sheet check row or cell showing Assets minus Liabilities minus Equity. This is a structural check — we verify the row exists, not the value.",
+      "type": "sheet_exists",
+      "sheets": [
+        "AFS",
+        "IFS"
+      ],
+      "fixable": false,
+      "fix_instruction": "Add a balance sheet check row to AFS or IFS showing Assets - Liabilities - Equity = 0"
+    },
+    {
+      "id": "T1-005",
+      "section": "5.1",
+      "label": "Cash flow reconciliation row exists",
+      "description": "Confirm the model contains a row reconciling change in cash on the balance sheet to net cash flow from the cash flow statement.",
+      "type": "sheet_exists",
+      "sheets": [
+        "AFS",
+        "IFS",
+        "Cons"
+      ],
+      "fixable": false,
+      "fix_instruction": "Add a cash reconciliation check row: Change in BS cash = Operating CF + Investing CF + Financing CF"
+    },
+    {
+      "id": "T1-006",
+      "section": "5.3",
+      "label": "No negative PP&E values",
+      "type": "no_negative_values",
+      "sheet": "AFS",
+      "keyword": "PP&E",
+      "fixable": false,
+      "fix_instruction": "PP&E cannot be negative — review asset roll-forward on AFS sheet"
+    }
+  ],
+  "tier2": [
+    {
+      "id": "T2-001",
+      "section": "5.1",
+      "label": "Balance sheet balances for every period",
+      "description": "For every modelled period, Assets minus Liabilities minus Equity should equal zero (within rounding tolerance of +/- 1). If the balance sheet does not balance, this is a critical error. Look for a check row in the AFS or IFS sheet. Flag the cell and period where the imbalance occurs.",
+      "fixable": false,
+      "fix_instruction": "Balance sheet does not balance — review equity roll-forward, retained earnings, and debt schedules on AFS/IFS/Debt sheets"
+    },
+    {
+      "id": "T2-002",
+      "section": "5.1",
+      "label": "Change in cash equals net cash flow for every period",
+      "description": "For every period, the change in balance sheet cash (closing minus opening) must equal the sum of operating, investing, and financing cash flows. A mismatch indicates a missing link or double-counted item. Flag the period and cell where the discrepancy occurs.",
+      "fixable": false,
+      "fix_instruction": "Cash flow does not reconcile to balance sheet cash movement — review operating, investing and financing CF sections"
+    },
+    {
+      "id": "T2-003",
+      "section": "5.2",
+      "label": "Net income flows through to retained earnings",
+      "description": "Opening retained earnings plus net income minus dividends and other distributions should equal closing retained earnings for every period. Check the equity section of the balance sheet or the equity roll-forward schedule. Flag any period where this identity does not hold.",
+      "fixable": false,
+      "fix_instruction": "Retained earnings roll-forward does not reconcile — review P&L net income link to equity schedule"
+    },
+    {
+      "id": "T2-004",
+      "section": "5.2",
+      "label": "Equity movements reconcile between balance sheet and cash flow",
+      "description": "Share issues, buybacks, and other equity movements should appear consistently in both the balance sheet equity section and the financing activities section of the cash flow statement. Flag any equity movement that appears in one but not the other.",
+      "fixable": false,
+      "fix_instruction": "Equity movement appears in balance sheet but not cash flow (or vice versa) — review financing activities section"
+    },
+    {
+      "id": "T2-005",
+      "section": "5.3",
+      "label": "Working capital movements reconcile between balance sheet and operating cash flow",
+      "description": "Changes in receivables, payables, inventory and other operating working capital items on the balance sheet must equal the corresponding working capital movements in operating cash flow. There should be no unexplained residual or catch-all 'other' line masking discrepancies. Flag any working capital item where the balance sheet movement does not match the cash flow adjustment.",
+      "fixable": false,
+      "fix_instruction": "Working capital movement on balance sheet does not match operating cash flow — review receivables, payables and inventory links"
+    },
+    {
+      "id": "T2-006",
+      "section": "5.3",
+      "label": "No logically impossible balance sheet positions",
+      "description": "Check for logically impossible values: negative inventory, negative gross PP&E, negative trade receivables, or negative trade payables where these are not explicitly modelled as credit balances. Flag any cell containing such a value.",
+      "fixable": false,
+      "fix_instruction": "Logically impossible balance sheet value found — review the flagged line item and correct the formula or assumption"
+    },
+    {
+      "id": "T2-007",
+      "section": "5.4",
+      "label": "Income tax calculation is reconcilable",
+      "description": "Income tax expense should be calculable from taxable profits with a clear effective rate. The effective tax rate should be reasonable relative to the statutory rate (typically within 5-15 percentage points for a mining operation). Flag if the effective rate is zero when taxable profits are positive, or if the tax charge appears disconnected from the profit and loss.",
+      "fixable": false,
+      "fix_instruction": "Tax calculation appears disconnected from taxable profits — review tax schedule and effective rate reconciliation on Inputs or tax sub-module"
+    },
+    {
+      "id": "T2-008",
+      "section": "5.4",
+      "label": "Deferred tax treatment is disclosed",
+      "description": "If deferred tax assets or liabilities appear on the balance sheet, confirm they reconcile with temporary differences between accounting and tax values. If deferred tax is not modelled, confirm this simplification is acceptable for the model's purpose. Flag if deferred tax balances exist but no reconciliation or disclosure is visible.",
+      "fixable": false,
+      "fix_instruction": "Deferred tax balance exists without reconciliation — add a deferred tax schedule or document the simplification on the Inputs sheet"
+    },
+    {
+      "id": "T2-009",
+      "section": "5.1",
+      "label": "Segment revenues sum to total revenue",
+      "description": "Check that the sum of individual segment revenue rows equals the total revenue figure on the Cons sheet. Flag the cell reference if a mismatch is found.",
+      "fixable": false,
+      "fix_instruction": "Revenue mismatch cannot be auto-fixed — review Cons sheet row totals"
+    },
+    {
+      "id": "T2-010",
+      "section": "5.2",
+      "label": "EBITDA margin is plausible for a mining operation",
+      "description": "EBITDA margin for a mining operation should typically be between 10% and 70%. Flag if outside this range as uncertain.",
+      "fixable": false,
+      "fix_instruction": "Review EBITDA margin assumptions in Inputs sheet"
+    },
+    {
+      "id": "T2-011",
+      "section": "5.2",
+      "label": "Debt repayment schedule is coherent",
+      "description": "Check that debt drawdowns and repayments on the Debt sheet follow a logical sequence — drawdowns before or during construction, repayments during the cash generation period.",
+      "fixable": false,
+      "fix_instruction": "Review debt schedule timing on Debt sheet"
+    },
+    {
+      "id": "T2-012",
+      "section": "5.2",
+      "label": "Capital expenditure is front-loaded",
+      "description": "Capex should be highest in the construction and development years and reduce significantly once operations begin. Flag if operational period Capex exceeds development period Capex without explanation.",
+      "fixable": false,
+      "fix_instruction": "Review Capex timing on Ops sheet"
+    }
+  ]
+}

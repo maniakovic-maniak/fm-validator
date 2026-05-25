@@ -1,0 +1,21 @@
+{
+  "description": "Checklist configuration — controls which checklist is active for this project",
+  "activeChecklist": "checklist.json",
+  "availableChecklists": [
+    {
+      "name": "checklist.json",
+      "description": "Core audit checklist — 18 essential rules",
+      "path": "./checklist.json",
+      "active": true,
+      "purpose": "default"
+    },
+    {
+      "name": "checklist-full.json",
+      "description": "Full audit checklist — all 10 sections based on reliance-grade financial model standards (FAST + Big Four)",
+      "path": "./checklist-full.json",
+      "active": false,
+      "purpose": "comprehensive"
+    }
+  ],
+  "switchInstructions": "To switch checklists, update 'activeChecklist' to the filename you want to use (e.g., 'checklist-full.json'), or set 'active' to true for the desired checklist and false for others in availableChecklists."
+}
