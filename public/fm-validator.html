@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Financial Model Validator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f5f4f0;
+      --surface: #ffffff;
+      --surface-2: #f0efe9;
+      --border: rgba(0,0,0,0.1);
+      --border-strong: rgba(0,0,0,0.18);
+      --text: #1a1917;
+      --text-2: #5a5955;
+      --text-3: #9a9894;
+      --success-bg: #eaf3de;
+      --success-text: #27500a;
+      --danger-bg: #fcebeb;
+      --danger-text: #791f1f;
+      --warning-bg: #faeeda;
+      --warning-text: #633806;
+      --radius: 10px;
+      --radius-lg: 14px;
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 40px 24px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 620px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .page-header h1 {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-3);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .page-header p {
+      font-size: 13px;
+      color: var(--text-3);
+    }
+
+    .screen {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
+      display: none;
+    }
+
+    .screen.active { display: block; }
+
+    .page-title {
+      font-size: 17px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .page-sub {
+      font-size: 13px;
+      color: var(--text-2);
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    /* Upload */
+    .drop-zone {
+      border: 1.5px dashed var(--border-strong);
+      border-radius: var(--radius-lg);
+      padding: 36px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface-2);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .drop-zone.dragover {
+      border-color: var(--text);
+      background: rgba(26, 25, 23, 0.02);
+    }
+
+    .drop-icon { font-size: 28px; color: var(--text-3); margin-bottom: 4px; }
+    .drop-main { font-size: 14px; font-weight: 500; color: var(--text); }
+    .drop-sub { font-size: 13px; color: var(--text-2); }
+    .drop-hint { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+
+    .btn-ghost, .btn-primary, .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: var(--radius);
+      padding: 9px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: none;
+    }
+
+    .btn-ghost {
+      background: var(--surface);
+      color: var(--text);
+      border: 0.5px solid var(--border-strong);
+      padding: 8px 16px;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    .btn-ghost:hover {
+      background: var(--surface-2);
+    }
+
+    .btn-primary {
+      background: var(--text);
+      color: var(--surface);
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border: 0.5px solid var(--border-strong);
+    }
+
+    .btn-secondary:hover {
+      background: var(--surface-2);
+    }
+
+    .btn-sm {
+      padding: 6px 14px;
+      font-size: 13px;
+    }
+
+    .file-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface-2);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      margin-top: 16px;
+    }
+
+    .file-pill-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .file-pill-size {
+      font-size: 12px;
+      color: var(--text-3);
+      font-family: 'DM Mono', monospace;
+    }
+
+    .actions-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    /* Progress */
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .progress-note { font-size: 13px; color: var(--text-2); }
+    .progress-pct {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+    }
+
+    .progress-track {
+      background: var(--surface-2);
+      border-radius: 99px;
+      height: 5px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: var(--text);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--surface-2);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+    }
+
+    .stat-val {
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+    }
+
+    .stat-val.success { color: var(--success-text); }
+    .stat-val.danger { color: var(--danger-text); }
+
+    .stat-lbl {
+      font-size: 12px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+
+    .checklist {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      font-size: 13px;
+    }
+
+    .check-row.pass { background: var(--success-bg); }
+    .check-row.fail { background: var(--danger-bg); }
+
+    .check-icon { font-size: 15px; color: var(--text-3); }
+    .check-icon.pass { color: var(--success-text); }
+    .check-icon.fail { color: var(--danger-text); }
+
+    .check-label {
+      font-size: 13px;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .check-label.pass { color: var(--success-text); }
+    .check-label.fail { color: var(--danger-text); }
+    .check-label.muted { color: var(--text-2); }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 9px;
+      border-radius: 99px;
+      white-space: nowrap;
+    }
+
+    .badge-pass { background: #d4edba; color: var(--success-text); }
+    .badge-fail { background: #f7c1c1; color: var(--danger-text); }
+    .badge-run { background: var(--surface-2); color: var(--text-3); border: 0.5px solid var(--border); }
+
+    /* Report */
+    .result-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: 99px;
+      margin-bottom: 14px;
+    }
+
+    .result-badge.success {
+      background: var(--success-bg);
+      color: var(--success-text);
+    }
+
+    .result-badge.warn {
+      background: var(--warning-bg);
+      color: var(--warning-text);
+    }
+
+    .result-badge.danger {
+      background: var(--danger-bg);
+      color: var(--danger-text);
+    }
+
+    .divider {
+      height: 0.5px;
+      background: var(--border);
+      margin: 20px 0;
+    }
+
+    .report-card {
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .report-icon {
+      font-size: 22px;
+      color: var(--text-2);
+      flex-shrink: 0;
+    }
+
+    .report-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .report-meta {
+      font-size: 12px;
+      color: var(--text-3);
+      margin-top: 2px;
+      font-family: 'DM Mono', monospace;
+    }
+
+    .report-actions {
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .failure-box {
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      background: var(--danger-bg);
+      border: 0.5px solid rgba(226,75,74,0.2);
+    }
+
+    .failure-box-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--danger-text);
+      margin-bottom: 8px;
+    }
+
+    .failure-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--danger-text);
+      margin-bottom: 4px;
+      line-height: 1.4;
+    }
+
+    .failure-item:last-child { margin-bottom: 0; }
+    .failure-item i { margin-top: 2px; font-size: 13px; flex-shrink: 0; }
+
+    .hidden-input {
+      display: none;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(26,25,23,0.2);
+      border-top-color: var(--text);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .error-message {
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      margin-bottom: 16px;
+      border: 0.5px solid rgba(226,75,74,0.2);
+    }
+
+    @media (max-width: 600px) {
+      body { padding: 24px 16px; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .screen { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Financial Model Validator</h1>
+  <p>Validate your Excel file to ensure model integrity</p>
+</div>
+
+<div class="container">
+
+  <!-- SCREEN 1: UPLOAD -->
+  <div id="screen-upload" class="screen active">
+    <p class="page-title">Validate financial model</p>
+    <p class="page-sub">Upload an Excel file to run the checklist validation</p>
+
+    <div id="error-message"></div>
+
+    <div class="drop-zone" id="drop-zone">
+      <i class="ti ti-upload drop-icon"></i>
+      <span class="drop-main">Drag and drop your file here</span>
+      <span class="drop-sub">or</span>
+      <button class="btn-ghost" id="browse-btn"><i class="ti ti-folder" style="font-size:16px"></i>Browse files</button>
+      <span class="drop-hint">.xlsx files only &nbsp;·&nbsp; max 20 MB</span>
+      <input type="file" id="file-input" class="hidden-input" accept=".xlsx" />
+    </div>
+
+    <div id="file-pill" class="file-pill" style="display:none;">
+      <i class="ti ti-file" style="font-size:18px;color:var(--text-2)"></i>
+      <span class="file-pill-name" id="file-name"></span>
+      <span class="file-pill-size" id="file-size"></span>
+      <i class="ti ti-x" id="remove-file" style="font-size:15px;color:var(--text-3);cursor:pointer;"></i>
+    </div>
+
+    <div class="actions-row">
+      <button class="btn-primary" id="validate-btn" disabled>
+        <i class="ti ti-player-play" style="font-size:15px"></i>Run validation
+      </button>
+    </div>
+  </div>
+
+  <!-- SCREEN 2: PROGRESS -->
+  <div id="screen-progress" class="screen">
+    <p class="page-title">Validating…</p>
+    <p class="page-sub" id="progress-file-name"></p>
+
+    <div class="progress-header">
+      <span class="progress-note">Checking validation rules</span>
+      <span class="progress-pct" id="progress-pct">0%</span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-val success" id="stat-passed">0</div>
+        <div class="stat-lbl">Passed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val danger" id="stat-failed">0</div>
+        <div class="stat-lbl">Failed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" id="stat-total">0</div>
+        <div class="stat-lbl">Total</div>
+      </div>
+    </div>
+
+    <div class="checklist" id="checklist-container"></div>
+  </div>
+
+  <!-- SCREEN 3: REPORT -->
+  <div id="screen-report" class="screen">
+    <span class="result-badge" id="result-badge"></span>
+
+    <p class="page-title">Validation report ready</p>
+    <p class="page-sub" id="report-subtitle"></p>
+
+    <div class="divider"></div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-val success" id="final-passed">0</div>
+        <div class="stat-lbl">Passed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val danger" id="final-failed">0</div>
+        <div class="stat-lbl">Failed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" id="final-score">0%</div>
+        <div class="stat-lbl">Score</div>
+      </div>
+    </div>
+
+    <div id="failures-container"></div>
+
+    <div class="actions-row">
+      <button class="btn-primary" id="resubmit-btn">
+        <i class="ti ti-refresh" style="font-size:15px"></i>Validate another
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  class ValidatorApp {
+    constructor() {
+      this.selectedFile = null;
+      this.validationResults = null;
+      this.animationProgress = 0;
+      this.initEventListeners();
+      this.animateProgress();
+    }
+
+    initEventListeners() {
+      // File input
+      const dropZone = document.getElementById('drop-zone');
+      const fileInput = document.getElementById('file-input');
+      const browseBtn = document.getElementById('browse-btn');
+      const removeFileBtn = document.getElementById('remove-file');
+
+      browseBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', (e) => this.handleFileSelect(e.target.files[0]));
+
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+
+      dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+      });
+
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+          this.handleFileSelect(files[0]);
+        }
+      });
+
+      removeFileBtn.addEventListener('click', () => this.clearFile());
+
+      // Validation
+      document.getElementById('validate-btn').addEventListener('click', () => this.runValidation());
+      document.getElementById('resubmit-btn').addEventListener('click', () => this.resetForm());
+    }
+
+    handleFileSelect(file) {
+      if (!file.name.endsWith('.xlsx')) {
+        this.showError('Only .xlsx files are allowed');
+        return;
+      }
+
+      if (file.size > 20 * 1024 * 1024) {
+        this.showError('File size exceeds 20 MB limit');
+        return;
+      }
+
+      this.selectedFile = file;
+      this.showFileInfo();
+      this.hideError();
+      document.getElementById('validate-btn').disabled = false;
+    }
+
+    showFileInfo() {
+      const filePill = document.getElementById('file-pill');
+      const fileName = document.getElementById('file-name');
+      const fileSize = document.getElementById('file-size');
+
+      fileName.textContent = this.selectedFile.name;
+      fileSize.textContent = this.formatFileSize(this.selectedFile.size);
+      filePill.style.display = 'flex';
+    }
+
+    clearFile() {
+      this.selectedFile = null;
+      document.getElementById('file-pill').style.display = 'none';
+      document.getElementById('file-input').value = '';
+      document.getElementById('validate-btn').disabled = true;
+    }
+
+    formatFileSize(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return Math.round((bytes / Math.pow(k, i)) * 10) / 10 + ' ' + sizes[i];
+    }
+
+    async runValidation() {
+      if (!this.selectedFile) return;
+
+      this.switchScreen('screen-progress');
+      const formData = new FormData();
+      formData.append('file', this.selectedFile);
+
+      try {
+        document.getElementById('progress-file-name').textContent = this.selectedFile.name;
+
+        const response = await fetch('/api/validate', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.message || 'Validation failed');
+        }
+
+        this.validationResults = result.data;
+        this.animationProgress = 100;
+
+        setTimeout(() => {
+          this.displayResults();
+          this.switchScreen('screen-report');
+        }, 500);
+
+      } catch (error) {
+        console.error('Error:', error);
+        this.showError(error.message || 'Validation request failed');
+        this.switchScreen('screen-upload');
+      }
+    }
+
+    displayResults() {
+      const data = this.validationResults;
+
+      // Update stats
+      document.getElementById('final-passed').textContent = data.stats.passed;
+      document.getElementById('final-failed').textContent = data.stats.failed;
+      document.getElementById('final-score').textContent = data.stats.passRate + '%';
+
+      // Update subtitle
+      const timestamp = new Date(data.timestamp).toLocaleString();
+      const subtitle = `${data.fileName} · ${data.stats.total} items checked · ${timestamp}`;
+      document.getElementById('report-subtitle').textContent = subtitle;
+
+      // Result badge
+      const badge = document.getElementById('result-badge');
+      if (data.stats.failed === 0) {
+        badge.className = 'result-badge success';
+        badge.innerHTML = '<i class="ti ti-check" style="font-size:14px"></i> Validation passed!';
+      } else {
+        badge.className = 'result-badge warn';
+        badge.innerHTML = `<i class="ti ti-alert-triangle" style="font-size:14px"></i> Completed with ${data.stats.failed} failure(s)`;
+      }
+
+      // Failures
+      const failuresContainer = document.getElementById('failures-container');
+      if (data.results.failed.length > 0) {
+        const failureBox = document.createElement('div');
+        failureBox.className = 'failure-box';
+
+        const title = document.createElement('div');
+        title.className = 'failure-box-title';
+        title.textContent = 'Items requiring attention';
+        failureBox.appendChild(title);
+
+        data.results.failed.forEach(failure => {
+          const item = document.createElement('div');
+          item.className = 'failure-item';
+          item.innerHTML = `<i class="ti ti-x"></i> <span>${failure.label}</span>`;
+          failureBox.appendChild(item);
+        });
+
+        failuresContainer.innerHTML = '';
+        failuresContainer.appendChild(failureBox);
+      } else {
+        failuresContainer.innerHTML = '';
+      }
+    }
+
+    animateProgress() {
+      const progressFill = document.getElementById('progress-fill');
+      const progressPct = document.getElementById('progress-pct');
+
+      setInterval(() => {
+        if (document.getElementById('screen-progress').classList.contains('active')) {
+          if (this.animationProgress < 95) {
+            this.animationProgress += Math.random() * 30;
+          }
+          progressFill.style.width = Math.min(this.animationProgress, 100) + '%';
+          progressPct.textContent = Math.floor(Math.min(this.animationProgress, 100)) + '%';
+
+          // Update stats with simulated progress
+          document.getElementById('stat-passed').textContent = Math.floor(
+            (this.validationResults?.stats.passed || 0) * (Math.min(this.animationProgress, 100) / 100)
+          );
+          document.getElementById('stat-failed').textContent = Math.floor(
+            (this.validationResults?.stats.failed || 0) * (Math.min(this.animationProgress, 100) / 100)
+          );
+          document.getElementById('stat-total').textContent = Math.floor(
+            (this.validationResults?.stats.total || 0) * (Math.min(this.animationProgress, 100) / 100)
+          );
+        }
+      }, 200);
+    }
+
+    switchScreen(screenId) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(screenId).classList.add('active');
+    }
+
+    resetForm() {
+      this.clearFile();
+      this.animationProgress = 0;
+      this.validationResults = null;
+      this.switchScreen('screen-upload');
+      this.hideError();
+    }
+
+    showError(message) {
+      const errorDiv = document.getElementById('error-message');
+      errorDiv.className = 'error-message';
+      errorDiv.textContent = message;
+    }
+
+    hideError() {
+      document.getElementById('error-message').textContent = '';
+      document.getElementById('error-message').className = '';
+    }
+  }
+
+  // Initialize app when DOM is ready
+  document.addEventListener('DOMContentLoaded', () => {
+    new ValidatorApp();
+  });
+</script>
+
+</body>
+</html>
