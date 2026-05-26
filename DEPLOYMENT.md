@@ -10,7 +10,16 @@ This is a Node.js/Express application that provides a web interface for validati
 - ✅ Detailed validation reports with pass/fail statistics
 - ✅ Support for multiple checklist profiles
 - ✅ File size limit: 20 MB
-- ✅ Format support: .xlsx only
+- ✅ Format support: .xlsx and .xlsm
+- ✅ **Secure: Uses ExcelJS for safe file parsing** (no vulnerable dependencies)
+
+## Security
+**Last Updated: May 26, 2026**
+- Uses ExcelJS for secure Excel file parsing (replaces deprecated xlsx)
+- Multer v2.0.1 (all DoS vulnerabilities patched)
+- UUID v11 (buffer bounds checks enabled)
+- Regular dependency audits via `npm audit`
+- No high-severity vulnerabilities
 
 ## System Requirements
 - **Node.js**: v14 or higher
@@ -307,6 +316,7 @@ pm2 logs fm-validator --err
 ```
 
 ## Version History
+- **1.0.1** - Security update: Migrated from xlsx to ExcelJS, upgraded multer to 2.0.1, upgraded uuid to 11.1.1. Removed all high-severity vulnerabilities.
 - **1.0.0** - Initial release with 18-rule core checklist and 38-rule full checklist
 
 ## License
