@@ -1,8 +1,5 @@
 {
   "version": "1.2",
-  "name": "checklist",
-  "description": "Core audit checklist — 18 essential rules for financial model validation",
-  "active": true,
   "fix_policy": "fix_all",
   "report_tab": {
     "name": "Validation Report",

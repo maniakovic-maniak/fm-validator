@@ -4,7 +4,7 @@ const YELLOW = 'FFFFFF00';
 const PINK   = 'FFFFC0CB';
 
 function isValidCell(cell) {
-  if (!cell || cell === 'N/A' || cell === 'null' || cell === '') return false;
+  if (!cell || cell === 'N/A' || cell === 'null' || cell === '' || cell === 'Unknown') return false;
   return /^[A-Z]+[0-9]+$/.test(cell.toString().trim());
 }
 
@@ -14,26 +14,28 @@ async function buildReportAndHighlight(inputPath, outputPath, allIssues, allFixe
 
   // ── Highlight auto-fixed cells YELLOW ────────────────────────────────
   for (const fix of allFixes) {
-    if (!fix.sheet || !isValidCell(fix.cell)) continue;
+    if (!fix.sheet) continue;
+    if (!isValidCell(fix.cell)) fix.cell = 'A1';
     const sheet = workbook.getWorksheet(fix.sheet);
     if (!sheet) continue;
     try {
       sheet.getCell(fix.cell).fill = {
         type: 'pattern', pattern: 'solid', fgColor: { argb: YELLOW }
       };
-    } catch (e) { /* skip invalid cell */ }
+    } catch (e) { /* skip */ }
   }
 
   // ── Highlight flagged cells PINK ──────────────────────────────────────
   for (const issue of allIssues) {
-    if (!issue.sheet || !isValidCell(issue.cell)) continue;
+    if (!issue.sheet) continue;
+    if (!isValidCell(issue.cell)) issue.cell = 'A1';
     const sheet = workbook.getWorksheet(issue.sheet);
     if (!sheet) continue;
     try {
       sheet.getCell(issue.cell).fill = {
         type: 'pattern', pattern: 'solid', fgColor: { argb: PINK }
       };
-    } catch (e) { /* skip invalid cell */ }
+    } catch (e) { /* skip */ }
   }
 
   // ── Remove old report tab ─────────────────────────────────────────────
@@ -96,7 +98,7 @@ async function buildReportAndHighlight(inputPath, outputPath, allIssues, allFixe
       const row = report.addRow([
         i + 1,
         f.sheet || '',
-        f.cell || '',
+        f.cell || 'A1',
         f.issue || '',
         f.fix || '',
         ''
@@ -137,10 +139,11 @@ async function buildReportAndHighlight(inputPath, outputPath, allIssues, allFixe
     report.addRow(['', '', '', 'No items require attention', '', '']);
   } else {
     flagged.forEach((f, i) => {
+      const cellRef = isValidCell(f.cell) ? f.cell : 'A1';
       const row = report.addRow([
         i + 1,
         f.sheet || '',
-        isValidCell(f.cell) ? f.cell : 'N/A',
+        cellRef,
         f.issue || f.reason || f.label || '',
         f.fix_instruction || 'Review and fix manually',
         ''
@@ -151,9 +154,8 @@ async function buildReportAndHighlight(inputPath, outputPath, allIssues, allFixe
         });
       }
       if (f.sheet) {
-        const targetCell = isValidCell(f.cell) ? f.cell : 'A1';
         const linkCell = row.getCell(6);
-        linkCell.value = { text: `→ ${f.sheet}`, hyperlink: `#'${f.sheet}'!${targetCell}` };
+        linkCell.value = { text: `→ ${f.sheet}`, hyperlink: `#'${f.sheet}'!${cellRef}` };
         linkCell.font = { color: { argb: 'FFB45309' }, underline: true, bold: true };
         linkCell.alignment = { horizontal: 'center' };
       }
@@ -162,7 +164,7 @@ async function buildReportAndHighlight(inputPath, outputPath, allIssues, allFixe
 
   report.addRow([]);
   const footer = report.addRow([
-    'Yellow = auto-fixed  |  Pink = needs your attention  |  Click → links to jump to the relevant sheet and cell.'
+    'Yellow cell = auto-fixed  |  Pink cell = needs your attention  |  Click → links to jump to the relevant sheet and cell.'
   ]);
   report.mergeCells(`A${footer.number}:F${footer.number}`);
   footer.getCell(1).font = { italic: true, color: { argb: 'FF6B7280' } };

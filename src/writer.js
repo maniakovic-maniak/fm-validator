@@ -28,14 +28,16 @@ async function uploadToDrive(outputPath, outputName, folderId) {
     process.stdout.write(`   Uploading to Drive... ${pct}%\r`);
   });
 
+  const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
   const response = await drive.files.create({
     requestBody: {
       name: outputName,
       parents: [folderId],
-      mimeType: 'application/vnd.ms-excel.sheet.macroenabled.12'
+      mimeType: MIME
     },
     media: {
-      mimeType: 'application/vnd.ms-excel.sheet.macroenabled.12',
+      mimeType: MIME,
       body: fileStream
     },
     fields: 'id, name, webViewLink'

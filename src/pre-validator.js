@@ -1,26 +1,16 @@
 const REQUIRED_SHEETS = [
-  'Dashboard',
-  'Inputs',
-  'Cons',
-  'Ops',
-  'IFS',
-  'AFS',
-  'Debt',
-  'Equity'
+  'Dashboard', 'Inputs', 'Cons', 'Ops', 'IFS', 'AFS', 'Debt', 'Equity'
 ];
-
 const EXCEL_ERRORS = ['#REF!', '#VALUE!', '#DIV/0!', '#NAME?', '#N/A', '#NULL!', '#NUM!'];
 
-function checkForErrors(worksheet) {
+function checkForErrors(sheet) {
   const errors = [];
-  worksheet.eachRow((row) => {
-    row.eachCell((cell) => {
-      const cellValue = cell.value ? String(cell.value) : '';
-      if (EXCEL_ERRORS.some(e => cellValue.includes(e))) {
-        errors.push(cellValue);
-      }
-    });
-  });
+  for (const [addr, cell] of Object.entries(sheet)) {
+    if (addr.startsWith('!')) continue;
+    if (cell && cell.w && EXCEL_ERRORS.some(e => String(cell.w).includes(e))) {
+      errors.push(cell.w);
+    }
+  }
   return errors;
 }
 
@@ -28,7 +18,6 @@ function preValidate(parsed) {
   const results = [];
   let passed = true;
 
-  // Check 1 — file has sheets at all
   if (!parsed.sheetNames || parsed.sheetNames.length === 0) {
     return {
       passed: false,
@@ -37,7 +26,6 @@ function preValidate(parsed) {
   }
   results.push({ check: 'File readable', status: 'pass', reason: null });
 
-  // Check 2 — required sheets present
   const missing = REQUIRED_SHEETS.filter(
     s => !parsed.sheetNames.map(n => n.trim()).includes(s)
   );
@@ -52,7 +40,6 @@ function preValidate(parsed) {
     results.push({ check: 'Required sheets present', status: 'pass', reason: null });
   }
 
-  // Check 3 — no completely empty required sheets
   for (const name of REQUIRED_SHEETS) {
     const sheet = parsed.sheets[name];
     if (sheet && sheet.length === 0) {
@@ -67,13 +54,13 @@ function preValidate(parsed) {
     }
   }
 
-  // Check 4 — no Excel formula errors in key sheets
-  const WORKBOOK_RAW = parsed._raw;
-  if (WORKBOOK_RAW) {
+  // Formula error check using xlsx _raw
+  const raw = parsed._raw;
+  if (raw && raw.Sheets) {
     for (const name of REQUIRED_SHEETS) {
-      const worksheet = WORKBOOK_RAW.getWorksheet(name);
-      if (worksheet) {
-        const errors = checkForErrors(worksheet);
+      const sheet = raw.Sheets[name];
+      if (sheet) {
+        const errors = checkForErrors(sheet);
         if (errors.length > 0) {
           results.push({
             check: `No formula errors: ${name}`,

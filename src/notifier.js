@@ -1,6 +1,5 @@
 const { Resend } = require('resend');
 require('dotenv').config();
-
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendNotification(outcome) {
@@ -23,6 +22,12 @@ async function sendNotification(outcome) {
     ? `<p style="color:#B45309"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} could not be auto-fixed and need your review.</strong><br>Open the Validation Report tab in the file for exact cell locations.</p>`
     : `<p style="color:#27500A"><strong>✅ All issues were auto-fixed. No action required.</strong></p>`;
 
+  let downloadUrl = webViewLink;
+  const fileIdMatch = webViewLink && webViewLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileIdMatch) {
+    downloadUrl = `https://drive.google.com/uc?export=download&id=${fileIdMatch[1]}`;
+  }
+
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
       <h2 style="color:#1A2B4A">Validation complete</h2>
@@ -34,7 +39,7 @@ async function sendNotification(outcome) {
       <p><strong>Needs attention:</strong> ${needsAttention}</p>
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
       ${attentionBlock}
-      <a href="${webViewLink}" style="display:inline-block;margin-top:16px;background:#1A2B4A;color:white;padding:10px 20px;border-radius:6px;text-decoration:none">Open validated file in Drive</a>
+      <a href="${downloadUrl}" style="display:inline-block;margin-top:16px;background:#1A2B4A;color:white;padding:10px 20px;border-radius:6px;text-decoration:none">Download Validated File</a>
     </div>
   `;
 
