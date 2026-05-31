@@ -91,9 +91,10 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
   try {
     // ── Step 1: Parse ──────────────────────────────────────────────────
     console.log('[1/5] Parsing file...');
-    const parsed = await parseExcelJS(filePath);
+    const parsed = parseExcel(filePath);
     const workbook = parsed._raw;
     console.log(`   Found ${parsed.sheetNames.length} sheets`);
+
 
     // ── Step 2: Pre-validation gate ────────────────────────────────────
     console.log('[2/5] Pre-validation gate...');

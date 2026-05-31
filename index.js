@@ -66,7 +66,9 @@ async function run() {
 
     const fixable = allFailures.filter(r => r.fixable);
     const flagged = allFailures.filter(r => !r.fixable);
-    allFlagged = [...allFlagged, ...flagged];
+    const existingKeys = new Set(allFlagged.map(f => `${f.id}-${f.sheet}-${f.cell}`));
+    const newFlagged = flagged.filter(f => !existingKeys.has(`${f.id}-${f.sheet}-${f.cell}`));
+    allFlagged = [...allFlagged, ...newFlagged];
 
     if (fixable.length === 0) {
       console.log(`   ℹ️  No auto-fixable issues remain — ${flagged.length} items flagged`);
