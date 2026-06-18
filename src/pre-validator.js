@@ -1,23 +1,18 @@
-const REQUIRED_SHEETS = [
-  'Dashboard', 'Inputs', 'Cons', 'Ops', 'IFS', 'AFS', 'Debt', 'Equity'
+const KNOWN_FINANCIAL_SHEETS = [
+  'Dashboard', 'Inputs', 'Cons', 'Ops', 'IFS', 'AFS', 'Debt', 'Equity',
+  'P&L', 'Income Statement', 'Profit and Loss', 'Balance Sheet', 'Cash Flow',
+  'Assumptions', 'Revenue', 'Costs', 'Expenses', 'Summary', 'Overview',
+  'Financial Statements', 'Model', 'Forecast', 'Budget', 'Actuals',
+  'Capex', 'Working Capital', 'Tax', 'Depreciation', 'Headcount',
+  'Sensitivity', 'Scenarios', 'Checks', 'Audit', 'Cover', 'README',
+  'Unit Economics', 'Reserves', 'Timing', 'D&T', 'Leases'
 ];
-const EXCEL_ERRORS = ['#REF!', '#VALUE!', '#DIV/0!', '#NAME?', '#N/A', '#NULL!', '#NUM!'];
-
-function checkForErrors(sheet) {
-  const errors = [];
-  for (const [addr, cell] of Object.entries(sheet)) {
-    if (addr.startsWith('!')) continue;
-    if (cell && cell.w && EXCEL_ERRORS.some(e => String(cell.w).includes(e))) {
-      errors.push(cell.w);
-    }
-  }
-  return errors;
-}
 
 function preValidate(parsed) {
   const results = [];
   let passed = true;
 
+  // Check 1 — file readable
   if (!parsed.sheetNames || parsed.sheetNames.length === 0) {
     return {
       passed: false,
@@ -26,54 +21,46 @@ function preValidate(parsed) {
   }
   results.push({ check: 'File readable', status: 'pass', reason: null });
 
-  const missing = REQUIRED_SHEETS.filter(
-    s => !parsed.sheetNames.map(n => n.trim()).includes(s)
+  // Check 2 — minimum sheet structure
+  const sheetNamesClean = parsed.sheetNames.map(n => n.trim());
+  const matchedSheets = sheetNamesClean.filter(name =>
+    KNOWN_FINANCIAL_SHEETS.some(known =>
+      name.toLowerCase().includes(known.toLowerCase()) ||
+      known.toLowerCase().includes(name.toLowerCase())
+    )
   );
-  if (missing.length > 0) {
+
+  if (matchedSheets.length < 2) {
     results.push({
-      check: 'Required sheets present',
+      check: 'Minimum sheet structure present',
       status: 'fail',
-      reason: `Missing sheets: ${missing.join(', ')}`
+      reason: `Only ${matchedSheets.length} recognisable financial sheet(s) found. Found: ${sheetNamesClean.join(', ')}`
     });
     passed = false;
   } else {
-    results.push({ check: 'Required sheets present', status: 'pass', reason: null });
+    results.push({
+      check: 'Minimum sheet structure present',
+      status: 'pass',
+      reason: `Found ${matchedSheets.length} recognisable financial model sheets`
+    });
   }
 
-  for (const name of REQUIRED_SHEETS) {
+  // Check 3 — no completely empty matched sheets
+  for (const name of matchedSheets.slice(0, 8)) {
     const sheet = parsed.sheets[name];
-    if (sheet && sheet.length === 0) {
+    if (sheet !== undefined && sheet.length === 0) {
       results.push({
         check: `Sheet not empty: ${name}`,
         status: 'fail',
         reason: `Sheet "${name}" has no data`
       });
       passed = false;
-    } else if (sheet) {
+    } else if (sheet !== undefined) {
       results.push({ check: `Sheet not empty: ${name}`, status: 'pass', reason: null });
     }
   }
 
-  // Formula error check using xlsx _raw
-  const raw = parsed._raw;
-  if (raw && raw.Sheets) {
-    for (const name of REQUIRED_SHEETS) {
-      const sheet = raw.Sheets[name];
-      if (sheet) {
-        const errors = checkForErrors(sheet);
-        if (errors.length > 0) {
-          results.push({
-            check: `No formula errors: ${name}`,
-            status: 'fail',
-            reason: `Found errors in "${name}": ${[...new Set(errors)].join(', ')}`
-          });
-          passed = false;
-        } else {
-          results.push({ check: `No formula errors: ${name}`, status: 'pass', reason: null });
-        }
-      }
-    }
-  }
+  // Formula errors are detected and flagged in Tier 1 — not a pre-validation stop
 
   return { passed, results };
 }

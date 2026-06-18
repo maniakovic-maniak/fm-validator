@@ -1,80 +1,140 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const fs = require('fs');
+const path = require('path');
 const checklist = require('../config/checklist.json');
 
 const client = new Anthropic();
 
-const SYSTEM_PROMPT = `You are a financial model validator specialising in mining and resource project financial models.
+// Load soul and universal skill — always loaded once at startup
+const soulPath  = path.join(__dirname, '../config/soul.md');
+const skillPath = path.join(__dirname, '../config/skill.md');
+const SOUL  = fs.existsSync(soulPath)  ? fs.readFileSync(soulPath, 'utf8')  : '';
+const SKILL = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, 'utf8') : '';
 
-You will receive:
-1. A list of validation rules with id, label, and description
-2. A summary of key data extracted from a financial model Excel file
+// Domain skill and model context — set dynamically per run
+let DOMAIN        = '';
+let MODEL_CONTEXT = '';
 
-For each rule return one of three statuses:
-- "pass": rule is clearly satisfied
-- "fail": rule is clearly violated  
-- "uncertain": data is ambiguous or insufficient to judge
+function setDomainSkill(content) {
+  DOMAIN = content || '';
+}
 
-For any fail or uncertain, include the sheet name and cell reference where possible.
+function setModelContext(context) {
+  MODEL_CONTEXT = context || '';
+}
 
-Return ONLY valid JSON, no other text:
-{
-  "results": [
-    { 
-      "id": "T2-001", 
-      "status": "pass", 
-      "reason": "...",
-      "sheet": "Cons",
-      "cell": "B12",
-      "fixable": false,
-      "fix_instruction": "..."
-    }
-  ]
-}`;
+function buildSystemPrompt() {
+  const parts = [SOUL, SKILL, DOMAIN, MODEL_CONTEXT].filter(Boolean);
+  return parts.join('\n\n---\n\n');
+}
 
-function summariseSheet(rows, maxRows = 8) {
+// Extracts meaningful rows from a sheet.
+// Strategy: send first 6 + last 6 columns per row.
+// This captures: label column + early periods + late periods
+// without sending all 50+ quarterly columns.
+function extractMeaningfulRows(rows, maxRows = 20) {
   if (!rows || rows.length === 0) return [];
-  return rows.slice(0, maxRows).map(row => {
-    const summary = {};
-    const keys = Object.keys(row).slice(0, 6);
-    for (const k of keys) summary[k] = row[k];
-    return summary;
+
+  // Filter out completely empty rows
+  const meaningful = rows.filter(row => {
+    const vals = Object.values(row);
+    return vals.some(v => v !== null && v !== '' && v !== undefined);
+  });
+
+  // Prioritise rows with numeric values (actual financial data)
+  const numeric = meaningful.filter(row =>
+    Object.values(row).some(v => v !== null && !isNaN(parseFloat(v)))
+  );
+
+  const nonNumeric = meaningful.filter(row =>
+    !Object.values(row).some(v => v !== null && !isNaN(parseFloat(v)))
+  );
+
+  const selected = [...numeric.slice(0, maxRows), ...nonNumeric.slice(0, 5)].slice(0, maxRows);
+
+  // Apply first 6 + last 6 column strategy
+  return selected.map(row => {
+    const keys = Object.keys(row);
+    if (keys.length <= 12) return row; // already small — send as-is
+    const firstSix = keys.slice(0, 6);
+    const lastSix  = keys.slice(-6);
+    const combined = [...new Set([...firstSix, ...lastSix])];
+    const trimmed  = {};
+    combined.forEach(k => { trimmed[k] = row[k]; });
+    return trimmed;
   });
 }
 
 async function runTier2(parsed) {
-  const dataSubset = {};
-  const sheetsToCheck = ['Cons', 'Ops', 'Inputs', 'Debt', 'Equity'];
+  // Core financial sheets — all 7 needed for full rule coverage
+  // Cons, IFS, AFS: three-statement integration (Section 5)
+  // Inputs: assumption checks (Section 3)
+  // Debt: debt roll-forward, covenants, waterfall (Section 6)
+  // Ops: revenue = price × volume, capacity (Section 7)
+  // Equity: equity reconciliation (Section 5.4)
+  const sheetsToCheck = ['Cons', 'IFS', 'AFS', 'Inputs', 'Debt', 'Ops', 'Equity'];
 
+  const dataSubset = {};
   for (const name of sheetsToCheck) {
     if (parsed.sheets[name]) {
-      dataSubset[name] = summariseSheet(parsed.sheets[name]);
+      dataSubset[name] = extractMeaningfulRows(parsed.sheets[name]);
     }
   }
 
-  const userMessage = JSON.stringify({
+  const payload = {
+    sheetNames: parsed.sheetNames,
     rules: checklist.tier2,
     data: dataSubset
-  });
+  };
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-5',
-    max_tokens: 4000,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userMessage }]
-  });
+  const estimatedTokens = Math.round(JSON.stringify(payload).length / 3);
+  console.log(`   Tier 2 data: ~${estimatedTokens} tokens`);
+
+  // Trim further if still too large
+  if (estimatedTokens > 80000) {
+    console.log('   Trimming to 10 rows per sheet...');
+    for (const name of sheetsToCheck) {
+      if (dataSubset[name]) {
+        dataSubset[name] = dataSubset[name].slice(0, 10);
+      }
+    }
+  }
 
   try {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 8000,
+      system: buildSystemPrompt(),
+      messages: [{ role: 'user', content: JSON.stringify(payload) }]
+    });
+
     const raw = response.content[0].text;
-    const clean = raw.replace(/```json|```/g, '').trim();
-    const results = JSON.parse(clean).results;
+    const start = raw.indexOf('{');
+    const end   = raw.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('No JSON found in response');
+
+    const results = JSON.parse(raw.substring(start, end + 1)).results || [];
+
     return results.map(r => ({
       ...r,
       cell: r.cell && r.cell !== 'Unknown' && r.cell !== 'N/A' ? r.cell : 'A1'
     }));
+
   } catch (e) {
-    console.error('Tier 2 parse error:', e.message);
-    return [];
+    console.error('   ❌ Tier 2 error:', e.message);
+    // Return a sentinel result so the UI knows Tier 2 failed
+    return [{
+      id: 'T2-ERROR',
+      status: 'uncertain',
+      confidence: 0,
+      reason: `Tier 2 validation could not complete: ${e.message}. Manual review required.`,
+      sheet: 'N/A',
+      cell: 'A1',
+      fixable: false,
+      severity: 'high',
+      fix_instruction: 'Tier 2 (Claude AI checks) did not complete. Re-run the validation or review the model manually.'
+    }];
   }
 }
 
-module.exports = { runTier2 };
+module.exports = { runTier2, setDomainSkill, setModelContext };

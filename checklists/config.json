@@ -4,18 +4,18 @@
   "availableChecklists": [
     {
       "name": "checklist.json",
-      "description": "Core audit checklist — 18 essential rules",
+      "description": "Full reliance-grade audit checklist v3.0 — 38 rules across 10 sections with confidence scoring. Designed for use with soul.md + skill.md + skill-mining.md.",
       "path": "./checklist.json",
       "active": true,
       "purpose": "default"
     },
     {
-      "name": "checklist-full.json",
-      "description": "Full audit checklist — all 10 sections based on reliance-grade financial model standards (FAST + Big Four)",
-      "path": "./checklist-full.json",
+      "name": "checklist-mvp.json",
+      "description": "MVP checklist — 18 rules covering Section 5 (three-statement integration) only. Use for quick validation or testing.",
+      "path": "./checklist-mvp.json",
       "active": false,
-      "purpose": "comprehensive"
+      "purpose": "testing"
     }
   ],
-  "switchInstructions": "To switch checklists, update 'activeChecklist' to the filename you want to use (e.g., 'checklist-full.json'), or set 'active' to true for the desired checklist and false for others in availableChecklists."
+  "switchInstructions": "To switch to MVP checklist for testing: cp checklists/checklist-mvp.json config/checklist.json. To switch back to full: cp checklists/checklist.json config/checklist.json"
 }
