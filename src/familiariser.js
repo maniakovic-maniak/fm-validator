@@ -114,7 +114,7 @@ async function familiariseModel(parsed) {
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: 'claude-sonnet-4-6',
       max_tokens: 2000,
       system: FAMILIARISER_PROMPT,
       messages: [{

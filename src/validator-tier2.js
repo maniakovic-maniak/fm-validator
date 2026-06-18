@@ -102,7 +102,7 @@ async function runTier2(parsed) {
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: 'claude-sonnet-4-6',
       max_tokens: 8000,
       system: buildSystemPrompt(),
       messages: [{ role: 'user', content: JSON.stringify(payload) }]
