@@ -69,7 +69,7 @@ async function classifyModel(parsed) {
       messages: [{ role: 'user', content: JSON.stringify(payload) }]
     });
 
-    const raw = response.content[0].text;
+    const raw = response.content[0].text.replace(/```json|```/g, '').trim();
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     if (start === -1 || end === -1) throw new Error('No JSON in response');

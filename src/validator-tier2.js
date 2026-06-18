@@ -103,12 +103,12 @@ async function runTier2(parsed) {
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 8000,
+      max_tokens: 16000,
       system: buildSystemPrompt(),
       messages: [{ role: 'user', content: JSON.stringify(payload) }]
     });
 
-    const raw = response.content[0].text;
+    const raw = response.content[0].text.replace(/```json|```/g, '').trim();
 
     // Try object format first { "results": [...] }
     let results = [];

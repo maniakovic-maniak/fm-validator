@@ -115,7 +115,7 @@ async function familiariseModel(parsed) {
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 4000,
       system: FAMILIARISER_PROMPT,
       messages: [{
         role: 'user',
@@ -123,7 +123,7 @@ async function familiariseModel(parsed) {
       }]
     });
 
-    const raw = response.content[0].text;
+    const raw = response.content[0].text.replace(/```json|```/g, '').trim();
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     if (start === -1 || end === -1) throw new Error('No JSON in familiarisation response');
