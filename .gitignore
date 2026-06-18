@@ -6,3 +6,9 @@ dist/
 build/
 token.json
 credentials.json
+processed/
+uploads/
+*.xlsm
+*.xlsx
+*.xlsb
+*.xls
