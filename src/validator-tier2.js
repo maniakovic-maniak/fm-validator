@@ -109,11 +109,27 @@ async function runTier2(parsed) {
     });
 
     const raw = response.content[0].text;
-    const start = raw.indexOf('{');
-    const end   = raw.lastIndexOf('}');
-    if (start === -1 || end === -1) throw new Error('No JSON found in response');
 
-    const results = JSON.parse(raw.substring(start, end + 1)).results || [];
+    // Try object format first { "results": [...] }
+    let results = [];
+    const objStart = raw.indexOf('{');
+    const objEnd   = raw.lastIndexOf('}');
+    if (objStart !== -1 && objEnd !== -1) {
+      try {
+        results = JSON.parse(raw.substring(objStart, objEnd + 1)).results || [];
+      } catch (parseErr) {
+        // Try array format [ {...}, {...} ]
+        const arrStart = raw.indexOf('[');
+        const arrEnd   = raw.lastIndexOf(']');
+        if (arrStart !== -1 && arrEnd !== -1) {
+          try {
+            results = JSON.parse(raw.substring(arrStart, arrEnd + 1));
+          } catch (e2) {
+            throw new Error('Could not parse Tier 2 response as JSON object or array');
+          }
+        }
+      }
+    }
 
     return results.map(r => ({
       ...r,

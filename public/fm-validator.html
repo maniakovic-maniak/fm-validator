@@ -350,16 +350,16 @@
         <!-- Stats -->
         <div class="stats-grid">
           <div class="stat-card">
-            <div class="stat-val success" id="stat-passed">—</div>
-            <div class="stat-lbl">Passed</div>
+            <div class="stat-val" id="stat-passed">—</div>
+            <div class="stat-lbl">Issues found</div>
           </div>
           <div class="stat-card">
             <div class="stat-val danger" id="stat-failed">—</div>
-            <div class="stat-lbl">Failed</div>
+            <div class="stat-lbl">Needs attention</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val" id="stat-remaining">—</div>
-            <div class="stat-lbl">Remaining</div>
+            <div class="stat-val" style="color:#9ca3af" id="stat-remaining">N/A</div>
+            <div class="stat-lbl" style="color:#9ca3af">Fixed</div>
           </div>
           <div class="stat-card" style="display:none" id="stat-fixed-card">
             <div class="stat-val" style="color:#92400e" id="stat-fixed">—</div>
@@ -416,12 +416,12 @@
 
         <div class="stats-grid" style="margin-bottom:20px;grid-template-columns:repeat(4,1fr)">
           <div class="stat-card">
-            <div class="stat-val success" id="report-passed">—</div>
-            <div class="stat-lbl">Passed</div>
+            <div class="stat-val" id="report-passed">—</div>
+            <div class="stat-lbl">Issues found</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val" style="color:#92400e" id="report-fixed">—</div>
-            <div class="stat-lbl">Fixed</div>
+            <div class="stat-val" style="color:#9ca3af" id="report-fixed">N/A</div>
+            <div class="stat-lbl" style="color:#9ca3af">Fixed</div>
           </div>
           <div class="stat-card">
             <div class="stat-val danger" id="report-failed">—</div>
@@ -547,8 +547,8 @@
     'Pre-validation gate',
     'Tier 1 — structural checks',
     'Tier 2 — Claude semantic checks',
-    'Applying fixes and highlighting cells',
-    'Saving to Drive and sending notification'
+    'Building validation report',
+    'Uploading report and sending notification'
   ];
 
   let progressTimer = null;
@@ -587,13 +587,8 @@
     if (result && result.stats) {
       const s = result.stats;
       const total = (s.autoFixed||0) + (s.needsAttention||0);
-      document.getElementById('stat-passed').textContent   = total - (s.needsAttention||0);
-      document.getElementById('stat-failed').textContent   = s.needsAttention || 0;
-      document.getElementById('stat-remaining').textContent = '0';
-      if (s.autoFixed > 0) {
-        document.getElementById('stat-fixed-card').style.display = 'block';
-        document.getElementById('stat-fixed').textContent = s.autoFixed;
-      }
+      document.getElementById('stat-passed').textContent = s.total || (s.autoFixed||0) + (s.needsAttention||0);
+      document.getElementById('stat-failed').textContent = s.needsAttention || 0;
     }
   }
 
@@ -686,8 +681,7 @@
     document.getElementById('report-sub').textContent =
       `${selectedFile.name} · ${total} items checked · ${new Date().toLocaleString('en-AU')}`;
 
-    document.getElementById('report-passed').textContent = total - (stats.needsAttention||0);
-    document.getElementById('report-fixed').textContent  = stats.autoFixed ?? 0;
+    document.getElementById('report-passed').textContent = stats.total ?? total;
     document.getElementById('report-failed').textContent = stats.needsAttention ?? 0;
     document.getElementById('report-score').textContent  = (stats.score ?? 0) + '%';
 
