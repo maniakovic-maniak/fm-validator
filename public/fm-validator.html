@@ -578,7 +578,17 @@
     }, 80);
   }
 
-  function stopProgress(result) {
+  
+    function esc(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+    function stopProgress(result) {
     clearInterval(progressTimer);
     stepIds.forEach((id,i) => setStep(id, 'pass', stepLabels[i]));
     setProgress(100, 'Complete');
@@ -712,8 +722,8 @@
         <div class="attention-item">
           <i class="ti ti-x"></i>
           <div>
-            <div>${f.issue || f.reason || f.check || ''}</div>
-            ${f.sheet ? `<div class="attention-loc">${f.sheet}${f.cell && f.cell !== 'A1' ? ' · '+f.cell : ''}</div>` : ''}
+            <div>${esc(f.issue || f.reason || f.check || '')}</div>
+            ${f.sheet ? `<div class="attention-loc">${esc(f.sheet)}${f.cell && f.cell !== 'A1' ? ' · '+esc(f.cell) : ''}</div>` : ''}
           </div>
         </div>`).join('');
     }
@@ -726,7 +736,7 @@
       document.getElementById('fixed-list').innerHTML = fixes.map(f => `
         <div class="failure-item" style="color:var(--warning-text)">
           <i class="ti ti-check" style="color:var(--warning-text)"></i>
-          <div>${f.issue || ''} ${f.sheet ? '<span style="font-family:DM Mono,monospace;font-size:11px;opacity:.7">'+f.sheet+(f.cell?' · '+f.cell:'')+'</span>' : ''}</div>
+          <div>${esc(f.issue || '')} ${f.sheet ? '<span style="font-family:DM Mono,monospace;font-size:11px;opacity:.7">'+esc(f.sheet)+(f.cell?' · '+esc(f.cell):'')+'</span>' : ''}</div>
         </div>`).join('')
         + (more > 0 ? `<div style="font-size:12px;color:var(--warning-text);opacity:.7;margin-top:4px">+ ${more} more in the Validation Report tab</div>` : '');
     }
