@@ -5,26 +5,15 @@ const checklist = require('../config/checklist.json');
 
 const client = new Anthropic();
 
-// Load soul and universal skill — always loaded once at startup
+// Load soul and universal skill — always loaded once at startup, never change
 const soulPath  = path.join(__dirname, '../config/soul.md');
 const skillPath = path.join(__dirname, '../config/skill.md');
 const SOUL  = fs.existsSync(soulPath)  ? fs.readFileSync(soulPath, 'utf8')  : '';
 const SKILL = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, 'utf8') : '';
 
-// Domain skill and model context — set dynamically per run
-let DOMAIN        = '';
-let MODEL_CONTEXT = '';
-
-function setDomainSkill(content) {
-  DOMAIN = content || '';
-}
-
-function setModelContext(context) {
-  MODEL_CONTEXT = context || '';
-}
-
-function buildSystemPrompt() {
-  const parts = [SOUL, SKILL, DOMAIN, MODEL_CONTEXT].filter(Boolean);
+// No module-level mutable state — domain and modelContext are passed per request
+function buildSystemPrompt(domain, modelContext) {
+  const parts = [SOUL, SKILL, domain, modelContext].filter(Boolean);
   return parts.join('\n\n---\n\n');
 }
 
@@ -35,13 +24,11 @@ function buildSystemPrompt() {
 function extractMeaningfulRows(rows, maxRows = 20) {
   if (!rows || rows.length === 0) return [];
 
-  // Filter out completely empty rows
   const meaningful = rows.filter(row => {
     const vals = Object.values(row);
     return vals.some(v => v !== null && v !== '' && v !== undefined);
   });
 
-  // Prioritise rows with numeric values (actual financial data)
   const numeric = meaningful.filter(row =>
     Object.values(row).some(v => v !== null && !isNaN(parseFloat(v)))
   );
@@ -52,10 +39,9 @@ function extractMeaningfulRows(rows, maxRows = 20) {
 
   const selected = [...numeric.slice(0, maxRows), ...nonNumeric.slice(0, 5)].slice(0, maxRows);
 
-  // Apply first 6 + last 6 column strategy
   return selected.map(row => {
     const keys = Object.keys(row);
-    if (keys.length <= 12) return row; // already small — send as-is
+    if (keys.length <= 12) return row;
     const firstSix = keys.slice(0, 6);
     const lastSix  = keys.slice(-6);
     const combined = [...new Set([...firstSix, ...lastSix])];
@@ -65,14 +51,13 @@ function extractMeaningfulRows(rows, maxRows = 20) {
   });
 }
 
-async function runTier2(parsed) {
-  // Core financial sheets — all 7 needed for full rule coverage
-  // Cons, IFS, AFS: three-statement integration (Section 5)
-  // Inputs: assumption checks (Section 3)
-  // Debt: debt roll-forward, covenants, waterfall (Section 6)
-  // Ops: revenue = price × volume, capacity (Section 7)
-  // Equity: equity reconciliation (Section 5.4)
-  const sheetsToCheck = ['Cons', 'IFS', 'AFS', 'Inputs', 'Debt', 'Ops', 'Equity'];
+// domain and modelContext passed per request — no shared mutable state
+async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null } = {}) {
+
+  // Use key_sheets from familiariser if available, otherwise fall back to defaults
+  const sheetsToCheck = keySheets && keySheets.length > 0
+    ? keySheets
+    : ['Cons', 'IFS', 'AFS', 'Inputs', 'Debt', 'Ops', 'Equity'];
 
   const dataSubset = {};
   for (const name of sheetsToCheck) {
@@ -90,7 +75,6 @@ async function runTier2(parsed) {
   const estimatedTokens = Math.round(JSON.stringify(payload).length / 3);
   console.log(`   Tier 2 data: ~${estimatedTokens} tokens`);
 
-  // Trim further if still too large
   if (estimatedTokens > 80000) {
     console.log('   Trimming to 10 rows per sheet...');
     for (const name of sheetsToCheck) {
@@ -104,13 +88,12 @@ async function runTier2(parsed) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 16000,
-      system: buildSystemPrompt(),
+      system: buildSystemPrompt(domain, modelContext),
       messages: [{ role: 'user', content: JSON.stringify(payload) }]
     });
 
     const raw = response.content[0].text.replace(/```json|```/g, '').trim();
 
-    // Try object format first { "results": [...] }
     let results = [];
     const objStart = raw.indexOf('{');
     const objEnd   = raw.lastIndexOf('}');
@@ -118,7 +101,6 @@ async function runTier2(parsed) {
       try {
         results = JSON.parse(raw.substring(objStart, objEnd + 1)).results || [];
       } catch (parseErr) {
-        // Try array format [ {...}, {...} ]
         const arrStart = raw.indexOf('[');
         const arrEnd   = raw.lastIndexOf(']');
         if (arrStart !== -1 && arrEnd !== -1) {
@@ -138,7 +120,6 @@ async function runTier2(parsed) {
 
   } catch (e) {
     console.error('   ❌ Tier 2 error:', e.message);
-    // Return a sentinel result so the UI knows Tier 2 failed
     return [{
       id: 'T2-ERROR',
       status: 'uncertain',
@@ -153,4 +134,4 @@ async function runTier2(parsed) {
   }
 }
 
-module.exports = { runTier2, setDomainSkill, setModelContext };
+module.exports = { runTier2 };

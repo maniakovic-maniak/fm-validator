@@ -11,7 +11,7 @@ const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser
 const { loadDomainSkill }                        = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
 const { runTier1 }                               = require('./src/validator-tier1');
-const { runTier2, setDomainSkill, setModelContext } = require('./src/validator-tier2');
+const { runTier2 } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
 const { sendNotification }                       = require('./src/notifier');
@@ -104,8 +104,6 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     console.log(`   Model type: ${modelType} — ${modelSummary.industry || 'unknown'}`);
 
     const domain = loadDomainSkill(modelType);
-    setDomainSkill(domain.content);
-    setModelContext(modelContext);
     console.log(`   Domain skill loaded: ${domain.file}`);
 
     // ── Step 4: Pre-validation gate ────────────────────────────────────
@@ -132,7 +130,7 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     const t1Results  = runTier1(parsed);
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
-    const t2Results  = await runTier2(parsed);
+    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets });
     const t2Failures = t2Results.filter(r => r.status !== 'pass');
 
     console.log(`   Tier 1: ${t1Results.length - t1Failures.length} pass, ${t1Failures.length} fail`);

@@ -91,8 +91,7 @@ function loadDomainSkill(modelType) {
   const skillDir = path.join(__dirname, '../config');
   const candidates = [
     `skill-${modelType}.md`,
-    'skill-generic.md',
-    'skill-mining.md'
+    'skill-generic.md'
   ];
 
   for (const filename of candidates) {
