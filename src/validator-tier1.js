@@ -52,39 +52,33 @@ function runTier1(parsed) {
       });
     }
 
-    // ── Formula errors — grouped by sheet, flag-only, never fix ─────────────
+    // ── Formula errors — grouped by sheet, flag-only ─────────────────────────
     if (rule.type === 'no_formula_errors') {
       if (parsed._raw && parsed._type === 'exceljs') {
         const errors = scanFormulaErrors(parsed._raw);
-
         if (errors.length === 0) {
           results.push({
-            id: rule.id, label: rule.label, severity: 'critical',
+            id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
             status: 'pass', fixable: false,
             fix_instruction: rule.fix_instruction, reason: null
           });
         } else {
-          // Group by sheet — one finding per sheet, not per cell
           const bySheet = {};
           errors.forEach(({ sheet, cell, error }) => {
             if (!bySheet[sheet]) bySheet[sheet] = { cells: [], errors: new Set() };
             bySheet[sheet].cells.push(cell);
             bySheet[sheet].errors.add(error);
           });
-
           for (const [sheet, data] of Object.entries(bySheet)) {
             const cellList = data.cells.slice(0, 5).join(', ') +
               (data.cells.length > 5 ? ` (+${data.cells.length - 5} more)` : '');
             results.push({
               id: `${rule.id}-${sheet}`,
               label: `Formula errors in ${sheet}: ${[...data.errors].join(', ')}`,
-              sheet,
-              cell: data.cells[0] || 'A1',
-              type: 'formula_error',
-              severity: 'critical',
-              status: 'fail',
-              fixable: false,
-              fix_instruction: 'Investigate and correct at source. Never replace with a hardcoded value or mask with IFERROR. Identify the root cause: broken link, missing reference, division by zero, or lookup failure.',
+              sheet, cell: data.cells[0] || 'A1',
+              type: 'formula_error', severity: rule.severity || 'fatal',
+              status: 'fail', fixable: false,
+              fix_instruction: rule.fix_instruction,
               reason: `${data.cells.length} formula error(s) in ${sheet}: ${cellList}`
             });
           }
@@ -92,7 +86,7 @@ function runTier1(parsed) {
       }
     }
 
-    // ── No negative values (e.g. PP&E) ──────────────────────────────────────
+    // ── No negative values (e.g. PP&E, Cash) ────────────────────────────────
     if (rule.type === 'no_negative_values') {
       const sheetName = rule.sheet;
       const keyword = (rule.keyword || '').toLowerCase();
@@ -132,8 +126,105 @@ function runTier1(parsed) {
             fix_instruction: rule.fix_instruction, reason: null
           });
         }
+      } else {
+        // Sheet not found — pass silently (not all models have AFS)
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'high',
+          status: 'pass', fixable: false,
+          fix_instruction: rule.fix_instruction,
+          reason: null
+        });
       }
     }
+
+    // ── No external workbook links ───────────────────────────────────────────
+    // exceljs does not expose external link data directly from cell values.
+    // We scan for cell values containing '[' which is the Excel external ref marker.
+    // This is a best-effort check — formula text inspection required for full coverage.
+    if (rule.type === 'no_external_links') {
+      if (parsed._raw && parsed._type === 'exceljs') {
+        const externalRefs = [];
+        parsed._raw.eachSheet(ws => {
+          ws.eachRow({ includeEmpty: false }, row => {
+            row.eachCell({ includeEmpty: false }, cell => {
+              if (cell.formula && typeof cell.formula === 'string' && cell.formula.includes('[')) {
+                externalRefs.push({ sheet: ws.name, cell: cell.address, formula: cell.formula.substring(0, 60) });
+              }
+            });
+          });
+        });
+        if (externalRefs.length === 0) {
+          results.push({
+            id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+            status: 'pass', fixable: false, fix_instruction: rule.fix_instruction, reason: null
+          });
+        } else {
+          const bySheet = {};
+          externalRefs.forEach(({ sheet, cell }) => {
+            if (!bySheet[sheet]) bySheet[sheet] = [];
+            bySheet[sheet].push(cell);
+          });
+          for (const [sheet, cells] of Object.entries(bySheet)) {
+            const cellList = cells.slice(0, 3).join(', ') + (cells.length > 3 ? ` (+${cells.length - 3} more)` : '');
+            results.push({
+              id: `${rule.id}-${sheet}`,
+              label: `External workbook links found in ${sheet}`,
+              sheet, cell: cells[0] || 'A1',
+              severity: rule.severity || 'fatal',
+              status: 'fail', fixable: false,
+              fix_instruction: rule.fix_instruction,
+              reason: `${cells.length} external link(s) in ${sheet}: ${cellList}`
+            });
+          }
+        }
+      } else {
+        // Cannot check without exceljs — return uncertain
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+          status: 'uncertain', fixable: false, fix_instruction: rule.fix_instruction,
+          reason: 'External link detection requires exceljs workbook. Cannot verify from current parser state.'
+        });
+      }
+    }
+
+    // ── Actuals and forecast separated by flags ──────────────────────────────
+    // Check for a Timing or flag sheet with an actual/forecast switch row.
+    // This is a presence check — full verification requires formula inspection.
+    if (rule.type === 'actuals_forecast_separated') {
+      const sheetNamesClean = parsed.sheetNames.map(n => n.trim().toLowerCase());
+      const flagSheets = ['timing', 'flags', 'timeline', 'inputs', 'assumptions'];
+      const found = flagSheets.some(s => sheetNamesClean.includes(s));
+
+      if (!found) {
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+          status: 'fail', fixable: false, fix_instruction: rule.fix_instruction,
+          reason: 'No Timing, Flags, or Inputs sheet found. Actuals/forecast separation cannot be verified.'
+        });
+      } else {
+        // Check if any of the candidate sheets have a row mentioning actual/forecast
+        let hasFlag = false;
+        for (const name of parsed.sheetNames) {
+          if (!flagSheets.includes(name.trim().toLowerCase())) continue;
+          const rows = parsed.sheets[name] || [];
+          for (const row of rows.slice(0, 30)) {
+            const vals = Object.values(row).map(v => String(v || '').toLowerCase());
+            if (vals.some(v => v.includes('actual') || v.includes('forecast') || v.includes('flag'))) {
+              hasFlag = true;
+              break;
+            }
+          }
+          if (hasFlag) break;
+        }
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+          status: hasFlag ? 'pass' : 'uncertain', fixable: false,
+          fix_instruction: rule.fix_instruction,
+          reason: hasFlag ? null : 'Timing sheet exists but no actual/forecast flag row detected in first 30 rows. Manual verification required.'
+        });
+      }
+    }
+
   }
 
   return results;
