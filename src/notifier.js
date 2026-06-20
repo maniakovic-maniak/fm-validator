@@ -1,4 +1,14 @@
 const { Resend } = require('resend');
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 require('dotenv').config();
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -15,8 +25,8 @@ async function sendNotification(outcome) {
   const isClean = needsAttention === 0;
 
   const subject = isClean
-    ? `✅ Validated — no issues: ${originalName}`
-    : `⚠️  Validated — ${needsAttention} item${needsAttention > 1 ? 's' : ''} need attention: ${originalName}`;
+    ? `✅ Validated — no issues: ${escHtml(originalName)}`
+    : `⚠️  Validated — ${needsAttention} item${needsAttention > 1 ? 's' : ''} need attention: ${escHtml(originalName)}`;
 
   const attentionBlock = needsAttention > 0
     ? `<p style="color:#B45309"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} could not be auto-fixed and need your review.</strong><br>Open the Validation Report tab in the file for exact cell locations.</p>`
@@ -31,11 +41,10 @@ async function sendNotification(outcome) {
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
       <h2 style="color:#1A2B4A">Validation complete</h2>
-      <p><strong>File:</strong> ${originalName}</p>
-      <p><strong>Output:</strong> ${outputName}</p>
+      <p><strong>File:</strong> ${escHtml(originalName)}</p>
+      <p><strong>Output:</strong> ${escHtml(outputName)}</p>
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
       <p><strong>Total issues found:</strong> ${totalIssues}</p>
-      <p><strong>Auto-fixed:</strong> ${autoFixed}</p>
       <p><strong>Needs attention:</strong> ${needsAttention}</p>
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
       ${attentionBlock}

@@ -8,7 +8,7 @@ const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 async function uploadFile(filePath, fileName, folderId, drive) {
   // Delete previous version if exists
   const existing = await drive.files.list({
-    q: `name='${fileName}' and '${folderId}' in parents and trashed=false`,
+    q: `name='${fileName.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed=false`,
     fields: 'files(id)'
   });
   if (existing.data.files.length > 0) {
