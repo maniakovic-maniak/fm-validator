@@ -1,11 +1,10 @@
 require('dotenv').config();
 const { fetchAndParse }                    = require('./src/parser');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
-const { classifyModel, loadDomainSkill }   = require('./src/classifier');
+const { loadDomainSkill }   = require('./src/classifier');
 const { preValidate }                      = require('./src/pre-validator');
 const { runTier1 }                         = require('./src/validator-tier1');
 const { runTier2 } = require('./src/validator-tier2');
-const { applyFixes }                       = require('./src/fixer');
 const { buildReportFile }                  = require('./src/report-tab');
 const { uploadBothFiles }                  = require('./src/writer');
 const { sendNotification }                 = require('./src/notifier');
