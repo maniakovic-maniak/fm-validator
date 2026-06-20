@@ -5,7 +5,7 @@
   "source_document": "financial_model_audit_checklist.docx",
   "source_standard": "FAST + Big Four (PwC guidelines)",
   "active": true,
-  "fix_policy": "fix_all",
+  "fix_policy": "flag_only",
   "tier1": [
     {
       "id": "T1-001",
@@ -15,8 +15,8 @@
       "test": "no_formula_errors",
       "severity": "critical",
       "type": "no_formula_errors",
-      "fixable": true,
-      "fix_instruction": "Replace error cell with 0 and flag for review. Do not use blanket IFERROR to mask errors."
+      "fixable": false,
+      "fix_instruction": "Formula errors must be investigated and corrected at source by the modeller. Never replace with a hardcoded value or mask with IFERROR. Locate the root cause: broken link, missing reference, division by zero, or lookup failure."
     },
     {
       "id": "T1-002",
@@ -28,13 +28,46 @@
       "type": "sheet_exists_flexible",
       "sheets_minimum_count": 2,
       "sheets_known": [
-        "Dashboard", "Inputs", "Cons", "Ops", "IFS", "AFS", "Debt", "Equity",
-        "P&L", "Income Statement", "Profit and Loss", "Balance Sheet", "Cash Flow",
-        "Assumptions", "Revenue", "Costs", "Expenses", "Summary", "Overview",
-        "Financial Statements", "Model", "Forecast", "Budget", "Actuals",
-        "Capex", "Working Capital", "Tax", "Depreciation", "Headcount",
-        "Sensitivity", "Scenarios", "Checks", "Audit", "Cover", "README",
-        "Unit Economics", "Reserves", "Timing", "D&T", "Leases"
+        "Dashboard",
+        "Inputs",
+        "Cons",
+        "Ops",
+        "IFS",
+        "AFS",
+        "Debt",
+        "Equity",
+        "P&L",
+        "Income Statement",
+        "Profit and Loss",
+        "Balance Sheet",
+        "Cash Flow",
+        "Assumptions",
+        "Revenue",
+        "Costs",
+        "Expenses",
+        "Summary",
+        "Overview",
+        "Financial Statements",
+        "Model",
+        "Forecast",
+        "Budget",
+        "Actuals",
+        "Capex",
+        "Working Capital",
+        "Tax",
+        "Depreciation",
+        "Headcount",
+        "Sensitivity",
+        "Scenarios",
+        "Checks",
+        "Audit",
+        "Cover",
+        "README",
+        "Unit Economics",
+        "Reserves",
+        "Timing",
+        "D&T",
+        "Leases"
       ],
       "fixable": false,
       "fix_instruction": "File must contain at least 2 recognisable financial model sheets. Verify the correct file was uploaded."
@@ -59,7 +92,10 @@
       "test": "sheet_exists",
       "severity": "critical",
       "type": "sheet_exists",
-      "sheets": ["AFS", "IFS"],
+      "sheets": [
+        "AFS",
+        "IFS"
+      ],
       "fixable": false,
       "fix_instruction": "Add a balance sheet check row showing Assets minus Liabilities minus Equity equals zero for every period."
     },
@@ -71,7 +107,11 @@
       "test": "sheet_exists",
       "severity": "critical",
       "type": "sheet_exists",
-      "sheets": ["AFS", "IFS", "Cons"],
+      "sheets": [
+        "AFS",
+        "IFS",
+        "Cons"
+      ],
       "fixable": false,
       "fix_instruction": "Add a cash reconciliation check row: change in balance sheet cash equals operating plus investing plus financing cash flows."
     },
