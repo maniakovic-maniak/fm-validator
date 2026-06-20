@@ -9,7 +9,12 @@ const EXCEL_ERROR_CODES = ['#REF!', '#VALUE!', '#DIV/0!', '#NAME?', '#N/A', '#NU
 async function downloadFile(fileId) {
   const auth = await getAuth();
   const drive = google.drive({ version: 'v3', auth });
-  const destPath = path.join(process.cwd(), 'processed', `${fileId}.xlsm`);
+
+  // Fetch the real filename from Drive metadata
+  const meta = await drive.files.get({ fileId, fields: 'name' });
+  const originalName = meta.data.name || `${fileId}.xlsx`;
+  const destPath = path.join(process.cwd(), 'processed', originalName);
+
   const dest = fs.createWriteStream(destPath);
   await new Promise((resolve, reject) => {
     drive.files.get(
