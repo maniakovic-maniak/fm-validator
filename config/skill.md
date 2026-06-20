@@ -537,3 +537,171 @@ If multiple uncertain results cluster around the same area
 (e.g. all Section 5 rules returning uncertain), this is itself
 a finding: the data extract does not contain sufficient financial
 data to validate that section — escalate for manual review.
+
+### test: outputs_live_not_pasted
+Look for dashboard or summary sheets where key metrics appear as static numbers rather than formula-driven values.
+Signs of pasted values: cells showing numbers with no formula bar reference, values that do not change when you modify an upstream assumption, or ranges where surrounding cells have formulas but isolated cells do not.
+If you cannot inspect formula text directly, look for inconsistency — a metric that appears on both a calculation sheet and a dashboard where the dashboard value differs in format or rounding. Flag as uncertain with this explanation.
+Confidence: high only if you can confirm outputs change with inputs. Otherwise uncertain.
+
+### test: assumptions_supported
+Look for material assumptions on the Inputs sheet that appear to be round numbers, management targets, or residual balancing figures rather than evidence-derived values.
+Signs of unsupported assumptions: price per unit exactly equal to a round number with no source note, growth rates identical across all years with no rationale, margin assumptions that exactly equal a stated management target.
+If source notes or evidence references are present next to material assumptions, pass. If key assumptions have no annotation and appear implausible given the model context, flag as uncertain and identify the specific assumptions.
+Do not fail this test unless the assumption is clearly impossible or contradicts other model data.
+
+### test: logic_flow_direction
+Assess whether the sheet structure flows logically — inputs feed calculations, calculations feed outputs, and cross-sheet references move in one consistent direction.
+Signs of backward dependencies: a calculation sheet referencing a summary or output sheet, or formulas that skip over intermediate calculation steps.
+If the sheet data suggests a clean left-to-right, top-to-bottom structure with inputs on dedicated sheets and outputs on summary sheets, pass. Flag as uncertain if cross-references appear to flow backward.
+
+### test: model_map_exists
+Look for a cover sheet, README, or dedicated navigation tab that lists all sheets and their purposes.
+Check if the sheet list includes a tab named Cover, README, Index, Navigator, or similar. If the familiariser identified such a sheet, assess whether it contains a sheet inventory.
+If a model map exists and lists sheets with their roles, pass. If no such sheet is visible and the model has more than 10 tabs, flag as uncertain.
+
+### test: opening_forecast_equals_closing_actual
+Look for evidence that the opening forecast balance sheet reconciles to the latest actual closing balance sheet.
+Check whether the AFS or balance sheet has a row near the actuals/forecast boundary where opening balances are explicitly sourced from prior period closing values. Verify the forecast opening period references actual values rather than repeating the same formula as forecast periods.
+Flag as uncertain if you cannot confirm the link, especially in models where actuals and forecast use different row structures.
+
+### test: period_flags_complete
+Look for a timing or flag row that classifies every column as either actual or forecast.
+Check the Timing or Inputs sheet for a row that switches between 0 and 1, or between labels like "Actual" and "Forecast". Verify this flag row is used consistently across calculation sheets.
+If a flag row exists and appears to drive other calculations, pass. If no flag mechanism is visible or it covers only some columns, flag as uncertain.
+
+### test: inputs_have_dependents
+Look for inputs on the Inputs sheet that appear to have no effect on any calculation.
+Signs of orphaned inputs: values that do not appear anywhere in the data extract from calculation sheets, or assumption rows labelled with descriptions that do not match any visible calculation driver.
+This test is inherently uncertain from row data alone — flag only if you identify specific inputs that appear completely disconnected from model outputs. Do not fail this test broadly.
+
+### test: annual_to_period_conversion
+Look for annual rate assumptions that are applied directly to monthly or quarterly calculations without conversion.
+Check the Inputs sheet for annual percentage rates (interest, inflation, escalation, growth). Verify that downstream calculations divide by 12 for monthly models or 4 for quarterly models, or use correct compounding: (1 + annual_rate)^(1/n) - 1 for compounding rates.
+Simple division is acceptable for additive rates. Using annual rates directly in sub-annual formulas without conversion is a fail.
+
+### test: nominal_real_consistency
+Look for whether revenue assumptions and cost assumptions are consistently expressed in nominal or real terms.
+Signs of mixing: revenue escalated by CPI but costs stated as flat real values, or a discount rate described as real but cash flows that include inflation escalation.
+If all assumptions appear consistently nominal or consistently real, pass. If some assumptions are clearly real and others nominal without a documented conversion, flag as uncertain with the specific inconsistency.
+
+### test: gst_consistency
+Look for whether the model treats all amounts consistently as GST-inclusive or GST-exclusive.
+Check Inputs and revenue/cost sheets for GST rate assumptions. Verify that revenue and cost lines use the same basis. Signs of mixing: revenue described as ex-GST but cost assumptions including GST, or a GST recovery line inconsistent with the revenue base.
+If a dedicated GST schedule exists and reconciles cleanly, pass. If the treatment appears inconsistent or undocumented, flag as uncertain.
+
+### test: scenario_inputs_linked
+Look for whether scenario selection drives assumptions through a central mechanism.
+Check for a scenario selector cell on the Inputs or Dashboard sheet. Verify that key revenue, cost, and timing assumptions reference the scenario table through INDEX, CHOOSE, or IF logic rather than being independently set.
+If a scenario table exists and key inputs visibly reference it, pass. If assumptions appear hardcoded per scenario rather than table-driven, flag as uncertain.
+
+### test: iferror_not_masking
+This test cannot be performed from cell values alone. Formula text inspection is required.
+Always return uncertain with the following message: "IFERROR usage cannot be verified from cell values alone. A formula-text inspection is required to confirm no real errors are being suppressed. Check all IFERROR, IFNA, and ISERROR instances manually."
+Confidence: always 0. Always return uncertain.
+
+### test: sum_range_integrity
+Look for whether total rows appear consistent with the individual rows they sum.
+Check if summary rows (labelled Total, Sum, or similar) match the sum of visible detail rows in the data extract. If a total row value is visible alongside detail rows and the arithmetic does not reconcile, flag as fail.
+Return uncertain if you cannot verify the range boundaries from cell values alone.
+
+### test: irr_npv_formula_integrity
+Look for IRR, NPV, equity multiple, and return metric outputs and assess whether they appear consistent with the underlying cash flows.
+Check: does the IRR appear plausible given the cash flow profile? Does the NPV appear consistent with the discount rate on the Inputs sheet? Are return metrics linked to cash flow rows?
+If return metrics appear on the dashboard but no cash flow rows are visible in the data extract, flag as uncertain. If the IRR appears implausibly high or low given the visible cash flow profile, flag with specific evidence.
+
+### test: min_max_constraints
+Look for whether any output rows appear to be floored at zero or capped in a way that could mask a real problem.
+Signs of masking: a debt balance that never goes below zero even in periods where repayments appear to exceed the balance, or a distribution row that is always exactly zero in downside scenarios.
+Flag as uncertain if you identify specific rows that appear artificially constrained. Do not fail this test broadly without specific evidence.
+
+### test: no_plugs
+Look for balance sheet or cash flow lines that appear to exist only to force a reconciliation rather than being calculated from first principles.
+Signs of plugs: a line labelled "Adjustment", "Balancing item", "Plug", "Rounding", or "Other" with values that vary widely across periods, or a retained earnings opening balance that does not link to the prior period closing balance.
+If you identify a specific line that appears to be a plug, return fail with the sheet, row label, and reason. If no such lines are visible, pass.
+
+### test: annual_to_monthly_reconciliation
+Look for whether annual summary totals reconcile to the sum of monthly or quarterly detail.
+Check if the model has both a detailed periodic sheet and an annual summary sheet. Verify that revenue, EBITDA, and cash totals on the annual summary appear consistent with summing the periodic columns.
+Balance sheet items (debt, cash, equity) must use period-end values not sums — flag if annual summaries appear to sum balance sheet items across periods.
+
+### test: fixed_asset_rollforward
+Look for a PP&E or fixed asset roll-forward: opening NBV + additions - disposals at NBV - depreciation = closing NBV.
+Check the AFS sheet for asset rows with opening, additions, depreciation, and closing columns. Verify the arithmetic closes for visible periods.
+If the roll-forward closes correctly, pass. If closing NBV does not equal opening plus movements, flag as fail with the specific period.
+
+### test: ownership_sums_to_100
+Look for equity ownership percentage rows and verify they sum to 100%.
+Check the Equity sheet for ownership percentage rows. If multiple investor classes are visible, sum the percentages for each period.
+If percentages sum to exactly 100% in all visible periods, pass. If they sum to more or less than 100%, fail with the specific period and the sum found.
+
+### test: preferred_return_accrual
+Look for preferred return or coupon accrual rows in the Equity or Debt sheet.
+Check whether preferred return accrues on the correct opening balance at a rate referenced from the Inputs sheet, with correct compounding. Signs of errors: preferred return that does not grow when unpaid, or a flat rate applied to a changing base without recalculation.
+Return uncertain if preferred equity is not present in this model type.
+
+### test: distributions_after_obligations
+Look for whether distributions occur after all senior obligations are satisfied.
+Check the Equity or Cons sheet for a distribution or dividend row. Verify it appears after debt service, tax, and reserve funding rows in the waterfall.
+If distributions are visible and appear after all senior cash obligations, pass. If distributions appear before debt service or in periods where covenant tests appear to be failing, flag as fail.
+
+### test: interest_not_double_counted
+Look for whether interest appears in both the operating cost section and the interest expense section.
+Check the IFS sheet for interest expense. Verify it does not also appear in operating costs or EBITDA. Check whether capitalised interest during construction is correctly excluded from the P&L interest line and added to the debt or asset balance instead.
+If interest appears only once in the correct location, pass. If it appears in both P&L and operating costs, fail.
+
+### test: revenue_recognition_timing
+Look for whether revenue recognition is separated from cash receipt timing.
+Check for deferred revenue or unearned income rows on the AFS balance sheet. Verify that revenue on the IFS does not simply equal cash receipts on the Cons in periods where timing differences would be expected.
+Return uncertain if the model type does not typically require revenue deferral (e.g. spot commodity sales).
+
+### test: revenue_deductions_included
+Look for whether commercially relevant deductions are applied to gross revenue.
+Check whether the revenue build includes bad debt provisions, rebates, volume discounts, vacancy rates, churn, or downtime where commercially relevant for this model type.
+Use the domain skill context to determine which deductions are expected. If revenue goes directly from price times volume to net revenue without any deductions, flag as uncertain and identify which deductions appear to be missing.
+
+### test: payroll_build
+Look for whether payroll costs are built from headcount and salary assumptions rather than being a single flat cost line.
+Check whether the model has a Headcount sheet or a payroll build section. Verify that total payroll costs link to headcount numbers multiplied by salary rates, with superannuation and payroll tax applied.
+If payroll appears as a single hardcoded annual number with no supporting build, flag as uncertain. If a headcount schedule exists and drives payroll, pass.
+
+### test: capex_opex_separation
+Look for whether capital expenditure and operating expenditure are clearly separated.
+Check whether the model has a dedicated Capex sheet, and whether capex items flow to the investing section of the Cons cash flow rather than the operating section.
+Signs of mixing: maintenance items appearing in investing cash flows, or construction costs appearing in operating costs. If capex and opex appear clearly separated with capex flowing to PP&E and investing cash flows, pass.
+
+### test: downside_not_suppressed
+Look for whether downside scenario outputs surface problems rather than suppressing them.
+Check the Sensitivity Analysis sheet or downside scenario outputs. Verify that in downside cases cash balances can go negative, covenant metrics can breach, and distributions can be zero.
+If downside outputs appear identical to base case in too many metrics, or if negative cash appears impossible under any scenario, flag as uncertain. This is a critical test — a model that cannot show its downside risk is not fit for reliance.
+
+### test: sensitivity_base_reconciliation
+Look for whether sensitivity tables reconcile to base case when the sensitivity variable equals the base assumption.
+Check the Sensitivity Analysis sheet for a sensitivity table. Look for the midpoint where the sensitivity variable equals the base assumption and verify the output matches the base case KPI.
+If the midpoint of the sensitivity table visibly matches the base case output, pass. If the midpoint appears inconsistent with the base case, flag as fail.
+
+### test: no_debt_stress_test
+Look for evidence that a zero debt or no-debt-available scenario has been considered.
+Check the Sensitivity Analysis or Scenarios sheet for a case where debt is unavailable or zero. If such a case exists, verify the model shows a visible equity or funding gap rather than a balanced position.
+If no such scenario exists, return uncertain with a recommendation to add it. Do not fail — this is a best-practice test.
+
+### test: delayed_start_test
+Look for evidence that a delayed start date or delayed revenue scenario has been considered.
+Check whether the model's timing switches can be moved by 6 to 12 months. If a delay scenario is visible, verify that revenue, operating costs, capex, and capitalised interest all shift in the same direction.
+If no delay scenario is visible, return uncertain. If a delay scenario exists and outputs respond correctly, pass.
+
+### test: returns_from_live_cashflows
+Look for whether IRR, NPV, and equity multiple metrics are calculated from live cash flow rows rather than summary page values.
+Check the Returns or Equity sheet for the IRR formula source. Verify the formula references actual cash flow rows (contributions and distributions) rather than a single summary cell.
+If return metrics visibly reference cash flow arrays, pass. If they appear to reference a pasted or manually entered value, fail.
+
+### test: inputs_labelled
+Look for whether all inputs on the Inputs sheet have clear labels, units, sign conventions, and source references.
+Check each row on the Inputs sheet for: a descriptive label in column A, a unit indicator (%, $, $000, months, tonnes etc.) either in the label or a dedicated units column, a sign convention note where relevant, and a source or evidence reference.
+If the majority of material inputs have labels and units, pass. If large sections of the Inputs sheet contain unlabelled or unitless values, flag as uncertain with specific examples.
+
+### test: interest_from_inputs
+Look for whether interest rate assumptions in the Debt sheet are referenced from the Inputs sheet rather than hardcoded directly in the debt schedule formulas.
+Check the Debt sheet for interest calculation rows. Verify that the rate applied references an Inputs sheet cell for base rate, margin, and any other fee components rather than containing a hardcoded percentage.
+Signs of hardcoding: an interest rate that appears identical across all periods with no Inputs sheet reference visible, or a rate that does not change when you would expect it to under a floating rate scenario.
+If interest rates are clearly referenced from Inputs, pass. If they appear hardcoded, flag as fail with the specific row and sheet.
