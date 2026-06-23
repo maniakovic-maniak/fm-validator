@@ -187,6 +187,55 @@ function runTier1(parsed) {
       }
     }
 
+
+    // ── Workbook opens without repair warnings ────────────────────────────────
+    // exceljs will throw during parse if the file is corrupt.
+    // If we reach this point the workbook opened cleanly.
+    // Return pass with a note that this is a best-effort check.
+    if (rule.type === 'workbook_opens_clean') {
+      results.push({
+        id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+        status: 'pass', fixable: false,
+        fix_instruction: rule.fix_instruction,
+        reason: 'Workbook opened without errors — no corruption detected by parser. Note: Excel repair warnings can only be fully verified by opening the file in Excel directly.'
+      });
+    }
+
+    // ── No circular references ────────────────────────────────────────────────
+    // exceljs does not expose circular reference detection directly.
+    // Return uncertain with guidance for manual verification.
+    if (rule.type === 'no_circular_references') {
+      results.push({
+        id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+        status: 'uncertain', fixable: false,
+        fix_instruction: rule.fix_instruction,
+        reason: 'Circular reference detection requires Excel formula evaluation. Manual verification required: open the file in Excel and check Formulas → Error Checking → Circular References. Intentional circular references must be documented on the Inputs sheet.'
+      });
+    }
+
+    // ── Actuals forecast flags exclusive (T1-012) ─────────────────────────────
+    // Same logic as actuals_forecast_separated but checks for mutual exclusivity
+    if (rule.type === 'actuals_forecast_flags_exclusive') {
+      const sheetNamesClean = parsed.sheetNames.map(n => n.trim().toLowerCase());
+      const flagSheets = ['timing', 'flags', 'timeline', 'inputs', 'assumptions'];
+      const found = flagSheets.some(s => sheetNamesClean.includes(s));
+      if (!found) {
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+          status: 'uncertain', fixable: false,
+          fix_instruction: rule.fix_instruction,
+          reason: 'No Timing or flag sheet found. Mutual exclusivity of actual/forecast flags cannot be verified automatically — manual inspection required.'
+        });
+      } else {
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+          status: 'uncertain', fixable: false,
+          fix_instruction: rule.fix_instruction,
+          reason: 'Flag sheet exists but mutual exclusivity of actual/forecast flags requires formula inspection. Verify in Excel that no column is flagged as both actual and forecast.'
+        });
+      }
+    }
+
     // ── Actuals and forecast separated by flags ──────────────────────────────
     // Check for a Timing or flag sheet with an actual/forecast switch row.
     // This is a presence check — full verification requires formula inspection.

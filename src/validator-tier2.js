@@ -11,16 +11,12 @@ const skillPath = path.join(__dirname, '../config/skill.md');
 const SOUL  = fs.existsSync(soulPath)  ? fs.readFileSync(soulPath, 'utf8')  : '';
 const SKILL = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, 'utf8') : '';
 
-// No module-level mutable state — domain and modelContext are passed per request
+// No module-level mutable state — domain and modelContext passed per request
 function buildSystemPrompt(domain, modelContext) {
   const parts = [SOUL, SKILL, domain, modelContext].filter(Boolean);
   return parts.join('\n\n---\n\n');
 }
 
-// Extracts meaningful rows from a sheet.
-// Strategy: send first 6 + last 6 columns per row.
-// This captures: label column + early periods + late periods
-// without sending all 50+ quarterly columns.
 function extractMeaningfulRows(rows, maxRows = 20) {
   if (!rows || rows.length === 0) return [];
 
@@ -51,10 +47,87 @@ function extractMeaningfulRows(rows, maxRows = 20) {
   });
 }
 
-// domain and modelContext passed per request — no shared mutable state
-async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null } = {}) {
+// Parse Claude response — handles object {results:[...]} or raw array
+function parseResponse(raw) {
+  const cleaned = raw.replace(/```json|```/g, '').trim();
 
-  // Use key_sheets from familiariser if available, otherwise fall back to defaults
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return { results: parsed, meta: {} };
+    if (parsed && Array.isArray(parsed.results)) {
+      const { results, ...meta } = parsed;
+      return { results, meta };
+    }
+  } catch (e1) {
+    // Try extracting results array directly
+    const arrStart = cleaned.indexOf('"results"');
+    if (arrStart !== -1) {
+      const bracketStart = cleaned.indexOf('[', arrStart);
+      const bracketEnd   = cleaned.lastIndexOf(']');
+      if (bracketStart !== -1 && bracketEnd !== -1) {
+        try {
+          return { results: JSON.parse(cleaned.substring(bracketStart, bracketEnd + 1)), meta: {} };
+        } catch (e2) {}
+      }
+    }
+    // Try raw array
+    const arrS = cleaned.indexOf('[');
+    const arrE = cleaned.lastIndexOf(']');
+    if (arrS !== -1 && arrE !== -1) {
+      try {
+        return { results: JSON.parse(cleaned.substring(arrS, arrE + 1)), meta: {} };
+      } catch (e3) {}
+    }
+  }
+  throw new Error(`Could not parse Tier 2 response (length: ${cleaned.length}, tail: ${cleaned.slice(-80)})`);
+}
+
+// Run a single batch of rules via streaming
+async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchLabel) {
+  const payload = {
+    sheetNames,
+    rules: batchRules,
+    data: dataSubset
+  };
+
+  const estimatedTokens = Math.round(JSON.stringify(payload).length / 3);
+  console.log(`   ${batchLabel}: ~${estimatedTokens} tokens input, ${batchRules.length} rules`);
+
+  let rawText = '';
+  const stream = await client.messages.stream({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 64000,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: JSON.stringify(payload) }]
+  });
+
+  for await (const chunk of stream) {
+    if (chunk.type === 'content_block_delta' && chunk.delta && chunk.delta.type === 'text_delta') {
+      rawText += chunk.delta.text;
+    }
+  }
+
+  console.log(`   ${batchLabel}: ${rawText.length} chars received`);
+  return parseResponse(rawText);
+}
+
+// Split tier2 rules into batches by section
+function splitIntoBatches(rules) {
+  const batch1Sections = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
+  const batch2Sections = ['S8', 'S9', 'S10', 'S11', 'S12', 'S13'];
+
+  const batch1 = rules.filter(r => batch1Sections.some(s => r.id.includes(`-${s}-`)));
+  const batch2 = rules.filter(r => batch2Sections.some(s => r.id.includes(`-${s}-`)));
+
+  // Any rules not matched go to batch1
+  const matched = new Set([...batch1.map(r => r.id), ...batch2.map(r => r.id)]);
+  const unmatched = rules.filter(r => !matched.has(r.id));
+  batch1.push(...unmatched);
+
+  return { batch1, batch2 };
+}
+
+async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null } = {}) {
   const sheetsToCheck = keySheets && keySheets.length > 0
     ? keySheets
     : ['Cons', 'IFS', 'AFS', 'Inputs', 'Debt', 'Ops', 'Equity'];
@@ -66,70 +139,115 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     }
   }
 
-  const payload = {
-    sheetNames: parsed.sheetNames,
-    rules: checklist.tier2,
-    data: dataSubset
-  };
-
-  const estimatedTokens = Math.round(JSON.stringify(payload).length / 3);
-  console.log(`   Tier 2 data: ~${estimatedTokens} tokens`);
-
-  if (estimatedTokens > 80000) {
-    console.log('   Trimming to 10 rows per sheet...');
-    for (const name of sheetsToCheck) {
-      if (dataSubset[name]) {
-        dataSubset[name] = dataSubset[name].slice(0, 10);
-      }
+  // Trim if too large
+  const totalTokens = Math.round(JSON.stringify(dataSubset).length / 3);
+  if (totalTokens > 40000) {
+    console.log('   Trimming sheet data to 10 rows per sheet...');
+    for (const name of Object.keys(dataSubset)) {
+      dataSubset[name] = dataSubset[name].slice(0, 10);
     }
   }
 
+  const systemPrompt = buildSystemPrompt(domain, modelContext);
+  const { batch1, batch2 } = splitIntoBatches(checklist.tier2);
+  const allResults = [];
+  let topLevelMeta = {};
+
   try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 16000,
-      system: buildSystemPrompt(domain, modelContext),
-      messages: [{ role: 'user', content: JSON.stringify(payload) }]
-    });
-
-    const raw = response.content[0].text.replace(/```json|```/g, '').trim();
-
-    let results = [];
-    const objStart = raw.indexOf('{');
-    const objEnd   = raw.lastIndexOf('}');
-    if (objStart !== -1 && objEnd !== -1) {
+    // ── Batch 1: Sections S1-S7 ──────────────────────────────────────────────
+    if (batch1.length > 0) {
       try {
-        results = JSON.parse(raw.substring(objStart, objEnd + 1)).results || [];
-      } catch (parseErr) {
-        const arrStart = raw.indexOf('[');
-        const arrEnd   = raw.lastIndexOf(']');
-        if (arrStart !== -1 && arrEnd !== -1) {
-          try {
-            results = JSON.parse(raw.substring(arrStart, arrEnd + 1));
-          } catch (e2) {
-            throw new Error('Could not parse Tier 2 response as JSON object or array');
-          }
-        }
+        const { results, meta } = await runBatch(
+          batch1, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 1 (S1-S7)'
+        );
+        allResults.push(...results);
+        if (meta && meta.overall_assessment) topLevelMeta = meta;
+      } catch (e) {
+        console.error('   ❌ Batch 1 error:', e.message);
+        allResults.push({
+          id: 'T2-BATCH1-ERROR', status: 'uncertain', confidence: 0,
+          severity: 'high', urgency: 'before_signoff',
+          category: 'Governance', method: 'automated',
+          reason: `Batch 1 (Sections 1-7) could not complete: ${e.message}`,
+          sheet: 'N/A', cell: 'A1', fixable: false,
+          fix_instruction: 'Re-run the validation. If the error persists, reduce the model file size.',
+          escalation_flag: false, investment_grade_blocker: false,
+          condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
+          periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation error'
+        });
       }
     }
 
-    return results.map(r => ({
-      ...r,
-      cell: r.cell && r.cell !== 'Unknown' && r.cell !== 'N/A' ? r.cell : 'A1'
+    // ── Batch 2: Sections S8-S13 ─────────────────────────────────────────────
+    if (batch2.length > 0) {
+      try {
+        const { results, meta } = await runBatch(
+          batch2, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 2 (S8-S13)'
+        );
+        allResults.push(...results);
+        // Only override meta if batch 2 returns a more complete assessment
+        if (meta && meta.overall_assessment && !topLevelMeta.overall_assessment) {
+          topLevelMeta = meta;
+        }
+      } catch (e) {
+        console.error('   ❌ Batch 2 error:', e.message);
+        allResults.push({
+          id: 'T2-BATCH2-ERROR', status: 'uncertain', confidence: 0,
+          severity: 'high', urgency: 'before_signoff',
+          category: 'Governance', method: 'automated',
+          reason: `Batch 2 (Sections 8-13) could not complete: ${e.message}`,
+          sheet: 'N/A', cell: 'A1', fixable: false,
+          fix_instruction: 'Re-run the validation. If the error persists, reduce the model file size.',
+          escalation_flag: false, investment_grade_blocker: false,
+          condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
+          periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation error'
+        });
+      }
+    }
+
+    // Normalise all results — ensure required fields exist
+    const normalised = allResults.map(r => ({
+      id:                       r.id || 'UNKNOWN',
+      status:                   r.status || 'uncertain',
+      confidence:               r.confidence ?? 0,
+      severity:                 r.severity || 'medium',
+      urgency:                  r.urgency || 'next_revision',
+      category:                 r.category || 'Governance',
+      method:                   r.method || 'automated',
+      reason:                   r.reason || '',
+      sheet:                    r.sheet || '',
+      cell:                     r.cell && r.cell !== 'Unknown' ? r.cell : 'A1',
+      periods_affected:         r.periods_affected || [],
+      dollar_impact:            r.dollar_impact || 'unquantified',
+      root_cause:               r.root_cause || '',
+      condition:                r.condition || '',
+      criteria:                 r.criteria || '',
+      cause:                    r.cause || '',
+      consequence:              r.consequence || '',
+      corrective_action:        r.corrective_action || '',
+      fixable:                  r.fixable ?? false,
+      fix_instruction:          r.fix_instruction || r.corrective_action || '',
+      escalation_flag:          r.escalation_flag ?? false,
+      investment_grade_blocker: r.investment_grade_blocker ?? false,
+      // Top-level meta fields (from overall assessment)
+      _meta: topLevelMeta
     }));
 
+    return normalised;
+
   } catch (e) {
-    console.error('   ❌ Tier 2 error:', e.message);
+    console.error('   ❌ Tier 2 fatal error:', e.message);
     return [{
-      id: 'T2-ERROR',
-      status: 'uncertain',
-      confidence: 0,
+      id: 'T2-ERROR', status: 'uncertain', confidence: 0,
+      severity: 'high', urgency: 'immediate',
+      category: 'Governance', method: 'automated',
       reason: `Tier 2 validation could not complete: ${e.message}. Manual review required.`,
-      sheet: 'N/A',
-      cell: 'A1',
-      fixable: false,
-      severity: 'high',
-      fix_instruction: 'Tier 2 (Claude AI checks) did not complete. Re-run the validation or review the model manually.'
+      sheet: 'N/A', cell: 'A1', fixable: false,
+      fix_instruction: 'Tier 2 (Claude AI checks) did not complete. Re-run the validation or review the model manually.',
+      escalation_flag: true, investment_grade_blocker: false,
+      condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
+      periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation system error',
+      _meta: {}
     }];
   }
 }
