@@ -178,6 +178,17 @@ The overall_assessment field must be one of:
 
 Return ONLY valid JSON. No preamble, explanation, or markdown fences.
 
+**Conciseness requirement — strictly enforced:**
+- Each Five C's field (condition, criteria, cause, consequence, corrective_action): maximum 2 sentences
+- reason field: maximum 1 sentence
+- root_cause field: maximum 1 sentence
+- dollar_impact field: maximum 10 words
+- Total per finding: under 400 words across all fields
+- Do not pad findings with background explanation — be precise and direct
+
+Violating the conciseness requirement causes JSON truncation which breaks the entire validation.
+Prioritise completeness of the findings list over depth of any individual finding.
+
 Every result must include all of the following fields:
 
 ```json
