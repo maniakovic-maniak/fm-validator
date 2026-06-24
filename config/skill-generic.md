@@ -147,3 +147,136 @@ Regardless of model type, verify these financing principles:
 
 12. Actuals and forecast not separated by flags — forecast logic
     overwrites actual periods when the cut-off date changes
+
+## Model type weighting rules
+
+Different model types carry different risk profiles and require different
+emphasis. Apply these weightings when assessing overall_assessment and
+investment_grade_readiness_percent:
+
+**Project finance / infrastructure models**
+Higher weight on: debt roll-forward, DSCR, cash waterfall, covenant compliance,
+DSRA, period flags, actuals cut-over. A single gate failure here typically
+blocks investment-grade status outright.
+
+**Corporate / operating company models**
+Higher weight on: three-statement integration, working capital, tax
+reconciliation, margin plausibility, scenario engine. Gate failures are
+critical but may allow fit_for_purpose_with_conditions if remediation path clear.
+
+**Valuation / DCF models**
+Higher weight on: discount rate documentation, terminal value assumptions,
+IRR/NPV formula integrity, sensitivity analysis, shadow IRR check.
+Terminal value dominance (>70% of value) always warrants a flag.
+
+**Lending / credit models**
+Higher weight on: covenant definitions, DSCR floor breach testing,
+downside not suppressed, debt roll-forward, no plugs.
+Any covenant breach in the base case is an immediate escalation.
+
+**Fund / equity waterfall models**
+Higher weight on: ownership percentages, preferred return accrual,
+distributions after obligations, IRR from live cash flows, no plugs.
+
+**Real estate / development models**
+Higher weight on: GDV reconciliation, development margin calculation,
+GST treatment, settlement timing, contingency adequacy, lifecycle phases.
+
+**SaaS / technology models**
+Higher weight on: ARR waterfall integrity, revenue recognition timing,
+churn deductions, payroll build from headcount, CAC/LTV plausibility.
+
+When the model type is unknown (skill-generic loaded):
+Apply equal weight across all sections. Flag any section where no
+evidence is available as uncertain rather than pass.
+
+---
+
+## Intake requirements by model tier
+
+**Tier 1 model — minimum evidence expected:**
+- Latest audited financial statements or management accounts
+- Term sheet or facility agreement (for debt models)
+- Board-approved business plan or investment memo
+- Source data for all material assumptions
+- Prior version of the model with change log
+
+When Tier 1 evidence is absent:
+- Cap all evidence-dependent test confidence at 45
+- Return uncertain for all tests requiring source document verification
+- Note in overall_assessment: "Evidence pack incomplete for Tier 1 reliance"
+
+**Tier 2 model — minimum evidence expected:**
+- Management accounts for the last 2 reporting periods
+- Key assumption documentation (email or memo acceptable)
+- Sensitivity analysis confirming downside case
+
+When Tier 2 evidence is absent:
+- Cap evidence-dependent test confidence at 60
+- Return uncertain for historical reconciliation tests
+
+**Tier 3 model — minimum evidence expected:**
+- Any documentation of key assumptions
+- Confirmation of model purpose and intended use
+
+When Tier 3 evidence is absent:
+- Note limitation in overall_assessment
+- Proceed with available data — do not block testing
+
+---
+
+## Audit gate escalation for unknown model types
+
+When skill-generic is loaded (model type unknown or unmatched),
+apply these escalation rules conservatively:
+
+**If balance sheet gate fails:**
+- overall_assessment: not_fit_for_purpose
+- Do not attempt to assess return metrics or covenant compliance
+- Focus findings on structural integrity first
+
+**If cash flow gate fails:**
+- overall_assessment: fit_for_purpose_with_conditions at minimum
+- Flag all operating performance metrics as provisional
+
+**If no Checks sheet exists:**
+- Add a medium finding regardless of other results
+- Note that without a checks sheet, integrity cannot be continuously monitored
+
+**If model type cannot be identified:**
+- State this explicitly in investment_grade_commentary
+- Apply universal benchmarks with wider tolerance bands
+- Increase uncertain count threshold — more findings will be uncertain
+  without domain-specific benchmarks
+- Do not penalise investment_grade_readiness_percent for tests that
+  genuinely cannot be applied without knowing the model type
+
+---
+
+## Evidence pack assessment
+
+Before testing, assess the evidence pack completeness:
+
+**What constitutes evidence in Mode A (cell values only):**
+- Visible check rows with zero residuals
+- Assumption labels with source notes visible in row data
+- Version or date information visible in cell data
+- Structure that is consistent with stated model purpose
+
+**What is NOT evidence in Mode A:**
+- The existence of a sheet with a relevant name
+- A number that "looks right" without a visible check
+- A formula structure you cannot see
+- Management assertions not corroborated by model data
+
+**Evidence sufficiency thresholds:**
+- 3+ corroborating data points for a pass conclusion: confidence 80-95
+- 2 corroborating data points: confidence 60-79
+- 1 data point: confidence 45-59 (return uncertain)
+- 0 data points: confidence 0-30 (return uncertain, state what is needed)
+
+**When evidence pack is thin across the board:**
+Set review_mode to llm_only and add to investment_grade_commentary:
+"This review was conducted from extracted cell values only. Formula
+inspection, source document review, and a Tier [X] evidence pack are
+required before reliance-grade conclusions can be reached."

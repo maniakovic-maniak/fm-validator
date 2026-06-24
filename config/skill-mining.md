@@ -104,3 +104,156 @@ Debt closing balance → Balance sheet (AFS)
 All flows → Cash balance reconciliation (AFS/Cons)
 Cash waterfall → DSRA → Distributions (Debt/Cons)
 ```
+
+## Mining-specific accounting logic
+
+Mining models have unique accounting treatments that require specific checks:
+
+**Royalties**
+Royalties are typically calculated as a percentage of revenue or
+production volume. Check:
+- Royalty rate sourced from Inputs sheet (not hardcoded)
+- Royalty base matches the correct revenue stream (e.g. net back price,
+  free-on-board price, or gross revenue depending on the royalty type)
+- State royalties and federal royalties calculated separately where applicable
+- Royalties flow to operating costs on the IFS and operating cash flows on Cons
+
+**Rehabilitation provision**
+Mine closure and rehabilitation is a material liability. Check:
+- Rehabilitation provision exists on the AFS balance sheet
+- Provision accrues over the mine life and is fully funded at mine closure
+- Cash rehabilitation contributions appear in investing or operating cash flows
+- Provision is not simply a lump sum in the final year with no build-up
+
+**Resource depletion / amortisation of mining rights**
+Check:
+- Mining rights or resource asset is amortised on a units-of-production basis
+- Amortisation rate = net book value of mining rights ÷ remaining reserves
+- Amortisation increases as reserves deplete (not flat-line)
+- Depletion flows through the D&A line on the IFS
+
+**Stripping costs**
+Waste stripping costs may be capitalised in some models:
+- If capitalised: stripping costs flow to a deferred stripping asset on AFS
+- If expensed: stripping costs flow to operating costs on IFS
+- The chosen treatment must be consistent throughout the model
+- Mixed treatment (partly capitalised, partly expensed) is a flag
+
+**Revenue streams — coal specific**
+PCI coal and thermal coal typically command different prices. Check:
+- Revenue is split by product type (PCI, thermal, middlings) where relevant
+- Each product has its own price assumption on the Inputs sheet
+- Wash recovery rates applied to run-of-mine tonnage to get saleable product
+- Moisture content adjustments applied to gross tonnage where relevant
+
+---
+
+## Mining contradiction patterns
+
+Apply these specific patterns in addition to the universal 12 patterns:
+
+**Mining Pattern 1 — Strip ratio-cost disconnect**
+Strip ratio increases year-on-year but mining costs per tonne are flat.
+Strip ratio drives waste movement volumes — higher strip ratio must increase
+total mining costs unless mining rate also increases.
+
+**Mining Pattern 2 — Reserve-life disconnect**
+Model extends beyond the stated reserve life without a resource conversion
+or reserve extension assumption on the Inputs sheet.
+
+**Mining Pattern 3 — Yield-quality disconnect**
+Saleable coal tonnage exceeds run-of-mine tonnage × wash recovery rate.
+Check: wash yield × ROM tonnage = clean coal tonnage.
+
+**Mining Pattern 4 — Price-cost squeeze not modelled**
+Coal price declines in downside case but mining costs remain at base case
+levels. Variable costs should partially follow volume changes.
+
+**Mining Pattern 5 — Royalty-revenue disconnect**
+Revenue increases significantly between periods but royalty expense is flat.
+If royalties are revenue-linked, they must move proportionally.
+
+**Mining Pattern 6 — Rehabilitation not funded**
+Model runs for 10+ years but rehabilitation provision remains immaterial
+or zero. A mine with material assets must accrue rehabilitation costs.
+
+---
+
+## Shadow modelling reference values — coal mining
+
+Use these reference values for shadow checks on coal mining models.
+These are indicative ranges only — always compare against the model's
+own stated assumptions first.
+
+| Metric | Typical range | Shadow check method |
+|---|---|---|
+| Mining cost per BCM | AUD 3–8 per BCM | Total mining cost ÷ total BCMs moved |
+| Processing cost per tonne | AUD 8–20 per ROM tonne | Processing cost ÷ ROM throughput |
+| G&A cost per saleable tonne | AUD 5–15 per tonne | G&A ÷ saleable coal tonnes |
+| Wash plant recovery | 55–75% for thermal, 65–80% for PCI | Clean coal ÷ ROM feed |
+| EBITDA margin | 30–60% for low-cost operations | EBITDA ÷ revenue |
+| Royalty rate | 7–12.5% (QLD state royalty on value) | Royalty ÷ revenue |
+| Rehabilitation cost per tonne | AUD 5–20 per tonne mined over life | Total provision ÷ life-of-mine tonnes |
+
+When shadow checking revenue:
+Revenue = saleable tonnes × realised price per tonne (net of freight and moisture)
+
+When shadow checking EBITDA:
+EBITDA = revenue - mining costs - processing costs - royalties - G&A
+
+When shadow checking IRR:
+Apply XIRR to visible equity contribution and distribution cash flows.
+Compare to stated project or equity IRR. Flag if difference > 2%.
+
+---
+
+## Accounting checks specific to mining — v6 checklist alignment
+
+For Section 10 (Accounting logic) rules applied to mining models:
+
+**T2-S10-004 — Balance sheet roll-forwards**
+Priority roll-forwards to check in mining models:
+- PP&E (mining equipment, plant, infrastructure)
+- Rehabilitation provision (must accrue over mine life)
+- Deferred stripping asset (if applicable)
+- Mining rights / resource asset (depletion basis)
+- Inventory (ROM stockpile, clean coal stockpile)
+
+**T2-S10-013 — D&A reconciliation**
+In mining models, D&A has two components:
+- Straight-line depreciation of plant and equipment
+- Units-of-production amortisation of mining rights
+Both must appear on the IFS and reconcile to the AFS roll-forward.
+
+**T2-S10-014 — Tax reconciliation**
+Mining models often have:
+- Accelerated depreciation for tax (section 40 deductions in Australia)
+- Resource rent tax (MRRT or state equivalent) in addition to income tax
+- Tax losses carried forward from construction / ramp-up phase
+Each must be separately modelled and reconciled.
+
+---
+
+## Governance checks specific to mining — v6 checklist alignment
+
+For Section 13 (Governance) rules applied to mining models:
+
+**T2-S13-004 — Macros documented**
+Mining models often use VBA macros for:
+- Reserve depletion calculations
+- Wash plant circuit simulations
+- Price escalation tables
+All macros must be listed on the cover sheet with their purpose.
+
+**T2-S13-007 — Instructions complete**
+Mining model instructions must specifically cover:
+- How to update reserve estimates
+- How to change the strip ratio assumption
+- How to roll the model forward after each quarter of actuals
+- How to run the downside / stress case
+
+**T2-S13-010 — Handover ready**
+Mining models are typically large and complex. Specific checks:
+- No personal file paths to geological data or resource estimates
+- Wash plant circuit assumptions documented (not locked in a black-box macro)
+- Reserve schedule tab present and linked to production plan
