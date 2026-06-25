@@ -145,7 +145,7 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     const allFailures  = [...t1Failures, ...t2Failures];
     const existingKeys = new Set();
     for (const f of allFailures) {
-      const key = `${f.id}-${f.sheet}-${f.cell}`;
+      const key = `${f.id}-${f.sheet || ""}`;
       if (!existingKeys.has(key)) {
         existingKeys.add(key);
         allFlagged.push(f);
@@ -190,7 +190,8 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     }
 
     const duration     = ((Date.now() - startTime) / 1000).toFixed(1);
-    const totalChecked = t1Results.length + t2Results.length;
+    const c = require('./config/checklist.json');
+    const totalChecked = c.tier1.length + c.tier2.length;
     const score        = totalChecked === 0
       ? 100
       : Math.round(((totalChecked - allFlagged.length) / totalChecked) * 100);
@@ -207,7 +208,7 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
       modelPurpose:  modelSummary.model_purpose,
       immediateObservations: modelSummary.immediate_observations || [],
       stats: {
-        total:          totalChecked,
+        total:          allFlagged.length,
         autoFixed:      0,
         needsAttention: allFlagged.length,
         score,

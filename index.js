@@ -83,7 +83,7 @@ async function run() {
   const allFlagged = [];
   const allFixes   = [];
   for (const f of [...t1Failures, ...t2Failures]) {
-    const key = `${f.id}-${f.sheet}-${f.cell}`;
+    const key = `${f.id}-${f.sheet || ""}`;
     if (!seenKeys.has(key)) { seenKeys.add(key); allFlagged.push(f); }
   }
   console.log(`   ℹ️  ${allFlagged.length} items flagged`);
