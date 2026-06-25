@@ -83,11 +83,13 @@ function parseResponse(raw) {
 }
 
 // Run a single batch of rules via streaming
-async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchLabel) {
+async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchLabel, tier0Context = {}) {
   const payload = {
     sheetNames,
     rules: batchRules,
-    data: dataSubset
+    data: dataSubset,
+    workbookStats: tier0Context.stats || {},
+    riskSummary: tier0Context.risks || {}
   };
 
   const estimatedTokens = Math.round(JSON.stringify(payload).length / 3);
@@ -127,7 +129,7 @@ function splitIntoBatches(rules) {
   return { batch1, batch2 };
 }
 
-async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null } = {}) {
+async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null } = {}) {
   const sheetsToCheck = keySheets && keySheets.length > 0
     ? keySheets
     : ['Cons', 'IFS', 'AFS', 'Inputs', 'Debt', 'Ops', 'Equity'];
@@ -158,7 +160,7 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     if (batch1.length > 0) {
       try {
         const { results, meta } = await runBatch(
-          batch1, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 1 (S1-S7)'
+          batch1, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 1 (S1-S7)', { stats: tier0Stats, risks: tier0Risks }
         );
         allResults.push(...results);
         if (meta && meta.overall_assessment) topLevelMeta = meta;
@@ -182,7 +184,7 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     if (batch2.length > 0) {
       try {
         const { results, meta } = await runBatch(
-          batch2, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 2 (S8-S13)'
+          batch2, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 2 (S8-S13)', { stats: tier0Stats, risks: tier0Risks }
         );
         allResults.push(...results);
         // Only override meta if batch 2 returns a more complete assessment

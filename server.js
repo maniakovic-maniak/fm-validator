@@ -11,6 +11,7 @@ const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser
 const { loadDomainSkill }                        = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
 const { runTier1 }                               = require('./src/validator-tier1');
+const { runTier0 }                               = require('./src/validator-tier0');
 const { runTier2 } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
@@ -93,6 +94,10 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     const parsed = await parseExcel(filePath);
     console.log(`   Found ${parsed.sheetNames.length} sheets`);
 
+    // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────
+    console.log('[1.5/6] Scanning formula text...');
+    const tier0 = await runTier0(parsed);
+
     // ── Step 2: Familiarise ────────────────────────────────────────────
     console.log('[2/6] Familiarising with the model...');
     const modelSummary = await familiariseModel(parsed);
@@ -130,7 +135,7 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     const t1Results  = runTier1(parsed);
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
-    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets });
+    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators });
     const t2Failures = t2Results.filter(r => r.status !== 'pass');
 
     console.log(`   Tier 1: ${t1Results.length - t1Failures.length} pass, ${t1Failures.length} fail`);

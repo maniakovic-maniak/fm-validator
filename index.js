@@ -4,6 +4,7 @@ const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser
 const { loadDomainSkill }                          = require('./src/classifier');
 const { preValidate }                              = require('./src/pre-validator');
 const { runTier1 }                                 = require('./src/validator-tier1');
+const { runTier0 }                                 = require('./src/validator-tier0');
 const { runTier2 }                                 = require('./src/validator-tier2');
 const { buildReportFile }                          = require('./src/report-tab');
 const { uploadBothFiles }                          = require('./src/writer');
@@ -29,6 +30,10 @@ async function run() {
   console.log('\n─────────────────────────────────────');
   console.log(`FM VALIDATOR — ${originalName}`);
   console.log('─────────────────────────────────────\n');
+
+  // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────────
+  console.log('[1.5/6] Scanning formula text...');
+  const tier0 = await runTier0(parsed);
 
   // ── Step 2: Familiarise ────────────────────────────────────────────────────
   console.log('[1/6] Familiarising with the model...');
