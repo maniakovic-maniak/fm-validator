@@ -1,4 +1,5 @@
 const checklist = require('../config/checklist.json');
+const { resolveSheetName, resolveAny } = require('./utils/sheet-resolver');
 const { scanFormulaErrors } = require('./parser');
 
 function runTier1(parsed) {
@@ -29,7 +30,7 @@ function runTier1(parsed) {
     // ── Exact sheet existence check ──────────────────────────────────────────
     if (rule.type === 'sheet_exists') {
       const missing = (rule.sheets || []).filter(
-        s => !parsed.sheetNames.map(n => n.trim()).includes(s)
+        s => !resolveSheetName(s, parsed.sheetNames)
       );
       results.push({
         id: rule.id, label: rule.label, severity: rule.severity || 'high',
@@ -41,7 +42,8 @@ function runTier1(parsed) {
 
     // ── Sheet must be empty (e.g. Model Issues tab) ──────────────────────────
     if (rule.type === 'sheet_empty') {
-      const sheet = parsed.sheets[rule.sheet];
+      const resolvedSheet = resolveSheetName(rule.sheet, parsed.sheetNames);
+      const sheet = resolvedSheet ? parsed.sheets[resolvedSheet] : null;
       const isEmpty = !sheet || sheet.length === 0;
       results.push({
         id: rule.id, label: rule.label, sheet: rule.sheet,
@@ -88,10 +90,11 @@ function runTier1(parsed) {
 
     // ── No negative values (e.g. PP&E, Cash) ────────────────────────────────
     if (rule.type === 'no_negative_values') {
-      const sheetName = rule.sheet;
+      const resolvedNegSheet = resolveSheetName(rule.sheet, parsed.sheetNames);
+      const sheetName = resolvedNegSheet || rule.sheet;
       const keyword = (rule.keyword || '').toLowerCase();
-      const ws = parsed._raw && parsed._type === 'exceljs'
-        ? parsed._raw.getWorksheet(sheetName)
+      const ws = parsed._raw && parsed._type === 'exceljs' && resolvedNegSheet
+        ? parsed._raw.getWorksheet(resolvedNegSheet)
         : null;
 
       if (ws) {
@@ -216,9 +219,9 @@ function runTier1(parsed) {
     // ── Actuals forecast flags exclusive (T1-012) ─────────────────────────────
     // Same logic as actuals_forecast_separated but checks for mutual exclusivity
     if (rule.type === 'actuals_forecast_flags_exclusive') {
-      const sheetNamesClean = parsed.sheetNames.map(n => n.trim().toLowerCase());
       const flagSheets = ['timing', 'flags', 'timeline', 'inputs', 'assumptions'];
-      const found = flagSheets.some(s => sheetNamesClean.includes(s));
+      const foundFlagSheet = resolveAny(flagSheets, parsed.sheetNames);
+      const found = !!foundFlagSheet;
       if (!found) {
         results.push({
           id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
@@ -254,7 +257,7 @@ function runTier1(parsed) {
         // Check if any of the candidate sheets have a row mentioning actual/forecast
         let hasFlag = false;
         for (const name of parsed.sheetNames) {
-          if (!flagSheets.includes(name.trim().toLowerCase())) continue;
+          if (!resolveAny(flagSheets, [name])) continue;
           const rows = parsed.sheets[name] || [];
           for (const row of rows.slice(0, 30)) {
             const vals = Object.values(row).map(v => String(v || '').toLowerCase());
