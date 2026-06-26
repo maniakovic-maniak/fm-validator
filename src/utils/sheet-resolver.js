@@ -11,6 +11,8 @@
 //   4. Starts-with / contains match (normalized)
 
 function normalize(name) {
+  // Blank or whitespace-only sheet names must not match anything
+  if (typeof name === 'string' && name.trim() === '') return '__BLANK__';
   return String(name || '')
     .toLowerCase()
     .replace(/[\s\-_\.]+/g, '')
