@@ -12,9 +12,13 @@ const SOUL  = fs.existsSync(soulPath)  ? fs.readFileSync(soulPath, 'utf8')  : ''
 const SKILL = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, 'utf8') : '';
 
 // No module-level mutable state — domain and modelContext passed per request
+// Returns static (cacheable) and dynamic (per-model) prompt parts separately.
+// Static: soul + skill + domain — same across calls for the same model type.
+// Dynamic: model context — changes per uploaded file.
 function buildSystemPrompt(domain, modelContext) {
-  const parts = [SOUL, SKILL, domain, modelContext].filter(Boolean);
-  return parts.join('\n\n---\n\n');
+  const staticParts = [SOUL, SKILL, domain].filter(Boolean);
+  const staticPrompt = staticParts.join('\n\n---\n\n');
+  return { staticPrompt, dynamicPrompt: modelContext || '' };
 }
 
 function extractMeaningfulRows(rows, maxRows = 20) {
@@ -99,7 +103,17 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
   const stream = await client.messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: 64000,
-    system: systemPrompt,
+    system: [
+      {
+        type: 'text',
+        text: systemPrompt.staticPrompt,
+        cache_control: { type: 'ephemeral' }
+      },
+      ...(systemPrompt.dynamicPrompt ? [{
+        type: 'text',
+        text: systemPrompt.dynamicPrompt
+      }] : []),
+    ],
     messages: [{ role: 'user', content: JSON.stringify(payload) }]
   });
 
