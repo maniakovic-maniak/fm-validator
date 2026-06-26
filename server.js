@@ -195,6 +195,14 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     const score        = totalChecked === 0
       ? 100
       : Math.round(((totalChecked - allFlagged.length) / totalChecked) * 100);
+    // KPMG risk rating
+    const p1Count = allFlagged.filter(f => f.severity === 'fatal' || f.severity === 'critical').length;
+    const p2Count = allFlagged.filter(f => f.severity === 'high').length;
+    const riskRating = p1Count >= 3 ? 'Critical'
+      : p1Count >= 1 ? 'High'
+      : p2Count >= 5 ? 'Moderate'
+      : p2Count >= 1 ? 'Moderate'
+      : 'Low';
 
     console.log(`\n✅ Complete in ${duration}s — flagged: ${allFlagged.length}`);
 
@@ -212,6 +220,11 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
         autoFixed:      0,
         needsAttention: allFlagged.length,
         score,
+        riskRating,
+        p1Count,
+        p2Count,
+        domainSkill: domain.file,
+        tier0Stats: tier0.stats,
         duration
       },
       driveLink:  driveResult ? driveResult.webViewLink : null,

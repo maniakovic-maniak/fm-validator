@@ -428,8 +428,8 @@
             <div class="stat-lbl">Needs attention</div>
           </div>
           <div class="stat-card">
-            <div class="stat-val" id="report-score">—</div>
-            <div class="stat-lbl">Score</div>
+            <div class="stat-val" id="report-score" style="font-size:18px">—</div>
+            <div class="stat-lbl">Risk rating</div>
           </div>
         </div>
 
@@ -688,12 +688,31 @@
     }
 
     document.getElementById('report-title').textContent = 'Validation report ready';
+    // Model type info bar
+    if (result.modelType) {
+      const modelLabel = result.modelType + (result.modelIndustry ? ' — ' + result.modelIndustry : '');
+      document.getElementById('report-model-type').textContent = modelLabel;
+      document.getElementById('report-domain-skill').textContent = result.domainSkill || 'skill-generic.md';
+      const t0 = result.tier0Stats;
+      document.getElementById('report-formula-stats').textContent = t0
+        ? t0.totalFormulaCells.toLocaleString() + ' formulas · ' + t0.totalIferrorCount.toLocaleString() + ' IFERROR · ' + (t0.totalExternalLinks || 0) + ' external links'
+        : '';
+      document.getElementById('report-model-info').style.display = 'block';
+    }
     document.getElementById('report-sub').textContent =
       `${selectedFile.name} · ${total} items checked · ${new Date().toLocaleString('en-AU')}`;
 
     document.getElementById('report-passed').textContent = stats.total ?? total;
     document.getElementById('report-failed').textContent = stats.needsAttention ?? 0;
-    document.getElementById('report-score').textContent  = (stats.score ?? 0) + '%';
+    const riskRating = stats.riskRating || (
+      (stats.score ?? 100) < 20 ? 'Critical' :
+      (stats.score ?? 100) < 50 ? 'High' :
+      (stats.score ?? 100) < 80 ? 'Moderate' : 'Low'
+    );
+    const riskColors = { Critical: '#C00000', High: '#C55A11', Moderate: '#7F6000', Low: '#375623' };
+    const riskEl = document.getElementById('report-score');
+    riskEl.textContent = riskRating;
+    riskEl.style.color = riskColors[riskRating] || '#000';
 
     // Download card
     if (result.driveLink || result.outputName) {
