@@ -29,14 +29,13 @@ function runTier1(parsed) {
 
     // ── Exact sheet existence check ──────────────────────────────────────────
     if (rule.type === 'sheet_exists') {
-      const missing = (rule.sheets || []).filter(
-        s => !resolveSheetName(s, parsed.sheetNames)
-      );
+      // Pass if ANY of the listed sheets exists (OR logic — at least one must be present)
+      const found = (rule.sheets || []).find(s => resolveSheetName(s, parsed.sheetNames));
       results.push({
         id: rule.id, label: rule.label, severity: rule.severity || 'high',
-        status: missing.length === 0 ? 'pass' : 'fail',
+        status: found ? 'pass' : 'fail',
         fixable: rule.fixable, fix_instruction: rule.fix_instruction,
-        reason: missing.length === 0 ? null : `Missing: ${missing.join(', ')}`
+        reason: found ? null : `None of the expected sheets found: ${(rule.sheets||[]).join(', ')}`
       });
     }
 
