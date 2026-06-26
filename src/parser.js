@@ -97,20 +97,44 @@ function scanFormulaErrors(workbook) {
 
 // Builds an array of row objects keyed by header text (first row). Handles blank
 // and duplicate headers, and preserves zero values.
+// Find the best header row in the first 10 rows.
+// Financial models often have title rows, blank rows, or date rows before
+// the actual label row. We pick the row with the most non-empty text cells.
+function findHeaderRow(ws) {
+  let bestRow = 1;
+  let bestScore = 0;
+  const limit = Math.min(10, ws.rowCount);
+  for (let r = 1; r <= limit; r++) {
+    const row = ws.getRow(r);
+    let textCells = 0;
+    let numericCells = 0;
+    row.eachCell({ includeEmpty: false }, cell => {
+      const v = cell.text ? String(cell.text).trim() : '';
+      if (v.length > 0 && isNaN(Number(v))) textCells++;
+      else if (!isNaN(Number(v)) && v.length > 0) numericCells++;
+    });
+    // Prefer rows with many text cells and few numeric cells — those are labels
+    const score = textCells * 2 - numericCells;
+    if (score > bestScore) { bestScore = score; bestRow = r; }
+  }
+  return bestRow;
+}
+
 function worksheetToRows(ws) {
-  const headerRow = ws.getRow(1);
+  const headerRowNum = findHeaderRow(ws);
+  const headerRow = ws.getRow(headerRowNum);
   const headers = [];
   const seen = {};
   headerRow.eachCell({ includeEmpty: true }, (cell, col) => {
     let base = cell.text != null ? String(cell.text).trim() : '';
     if (base === '') base = `col${col}`;
+    if (base.length > 40) base = base.substring(0, 40);
     if (seen[base] !== undefined) base = `${base}_${col}`;
     seen[base] = true;
     headers[col] = base;
   });
-
   const rows = [];
-  for (let r = 2; r <= ws.rowCount; r++) {
+  for (let r = headerRowNum + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     const obj = {};
     let hasData = false;
