@@ -98,6 +98,12 @@ app.post('/api/validate', upload.single('file'), async (req, res) => {
     console.log('[1.5/6] Scanning formula text...');
     const tier0 = await runTier0(parsed);
 
+    // Check for potential formula caching issue — if many formulas but few errors
+    // detected, warn that cached values may be missing
+    if (tier0.stats.totalFormulaCells > 10000 && tier0.stats.totalRefInFormula === 0) {
+      console.log('   ℹ️  Note: No #REF! detected in formula text. If the model has known errors,');
+      console.log('   ℹ️  ensure the file was saved in Excel with calculation enabled (F9 before save).');
+    }
     // ── Step 2: Familiarise ────────────────────────────────────────────
     console.log('[2/6] Familiarising with the model...');
     const modelSummary = await familiariseModel(parsed);

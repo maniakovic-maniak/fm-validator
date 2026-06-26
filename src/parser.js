@@ -32,6 +32,24 @@ async function downloadFile(fileId) {
 // ── Cell helpers (exceljs cell model) ─────────────────────────────────────────
 // Returns the Excel error code (e.g. "#REF!") if this cell holds or evaluates
 // to a formula error, otherwise null.
+// ── Formula caching limitation (L3) ──────────────────────────────────────
+// exceljs reads formula results from the cached values Excel stores in the
+// xlsx zip package. These cached values (cell.value.result) are only present
+// when the file was last saved by Excel with calculation enabled.
+//
+// Files that may have missing cached values:
+//   - Files saved by Google Sheets, LibreOffice, or Numbers
+//   - Files saved with manual calculation mode and not recalculated before save
+//   - Files opened and re-saved by openpyxl or other xlsx libraries
+//   - Corrupted or partially-written xlsx files
+//
+// Impact: formula errors in these files will not be detected by Tier 0 or Tier 1.
+// The formula text scanner (Tier 0) partially mitigates this by detecting
+// #REF! strings inside formula text — but only for cells whose formula text
+// is also cached.
+//
+// Workaround: instruct clients to open the file in Excel, press F9 to
+// recalculate, save, and re-upload before validation.
 function cellErrorValue(cell) {
   const v = cell.value;
   if (v && typeof v === 'object' && !(v instanceof Date)) {
