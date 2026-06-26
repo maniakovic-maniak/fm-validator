@@ -3,7 +3,8 @@ const express = require('express');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
-const cors    = require('cors');
+const cors        = require('cors');
+const rateLimit   = require('express-rate-limit');
 
 // Core pipeline modules
 const { parseExcel }                             = require('./src/parser');
@@ -35,6 +36,26 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   process.env.ALLOWED_ORIGIN
 ].filter(Boolean);
+
+// ── Rate limiting — 20 requests per 15 minutes per IP ────────────────────
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many requests — please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use('/api/validate', limiter);
+
+// ── API key auth middleware ────────────────────────────────────────────────
+function requireApiKey(req, res, next) {
+  const API_KEY = process.env.VALIDATOR_API_KEY;
+  // If no API key configured, allow all (dev mode)
+  if (!API_KEY) return next();
+  const provided = req.headers['x-api-key'] || req.query.apiKey;
+  if (provided === API_KEY) return next();
+  return res.status(401).json({ error: 'Unauthorised — valid API key required in x-api-key header' });
+}
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -89,7 +110,7 @@ app.get('/api/checklists', (req, res) => {
 });
 
 // ── Main validation endpoint ───────────────────────────────────────────────────
-app.post('/api/validate', upload.single('file'), async (req, res) => {
+app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ status: 'error', message: 'No file uploaded' });
   }
