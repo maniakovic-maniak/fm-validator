@@ -30,7 +30,21 @@ const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
   }
 });
 
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  process.env.ALLOWED_ORIGIN
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, Postman, direct server calls)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('CORS: origin not allowed: ' + origin));
+  },
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.static('public'));
 
