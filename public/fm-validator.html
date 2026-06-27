@@ -286,7 +286,7 @@
 
 <div class="page-header">
   <h1>Financial Model Validator</h1>
-  <p>Automated audit · Full checklist · 38 rules</p>
+  <p>Automated audit · Full checklist · 141 rules</p>
 </div>
 
 <input type="file" id="fileInput" accept=".xlsx,.xlsm">
@@ -386,12 +386,12 @@
           </div>
           <div class="check-row" id="step-fix">
             <i class="ti ti-clock check-icon"></i>
-            <span class="check-label muted">Applying fixes and highlighting cells…</span>
+            <span class="check-label muted">Building validation report…</span>
             <span class="badge badge-run">Waiting</span>
           </div>
           <div class="check-row" id="step-drive">
             <i class="ti ti-clock check-icon"></i>
-            <span class="check-label muted">Saving to Drive and sending notification…</span>
+            <span class="check-label muted">Uploading report and sending notification…</span>
             <span class="badge badge-run">Waiting</span>
           </div>
         </div>
@@ -553,11 +553,19 @@
   ];
 
   let progressTimer = null;
+  let progressTimer = null;
   let progressVal = 0;
   let currentStep = 0;
+  let startTime = 0;
+
+  // Estimated cumulative seconds when each step typically starts
+  // Parse+T0: 5s, Familiarise: 35s, Tier1: 40s, Tier2: 1040s, Report: 1060s
+  const stepTriggerTimes = [5, 35, 40, 1040, 1060];
+  const totalEstimated = 1080;
 
   function startProgress() {
     progressVal = 0; currentStep = 0;
+    startTime = Date.now();
     stepIds.forEach((id,i) => setStep(id, 'waiting', stepLabels[i]+'…'));
     document.getElementById('stat-passed').textContent = '—';
     document.getElementById('stat-failed').textContent = '—';
@@ -565,18 +573,23 @@
     setProgress(0, 'Uploading file…');
 
     progressTimer = setInterval(() => {
-      const targetPct = Math.min(((currentStep + 0.85) / stepIds.length) * 100, 95);
-      if (progressVal < targetPct) {
-        progressVal = Math.min(progressVal + 0.8, targetPct);
-        const stepTrigger = Math.floor((progressVal / 100) * stepIds.length);
-        if (stepTrigger > currentStep && currentStep < stepIds.length) {
-          if (currentStep > 0) setStep(stepIds[currentStep-1], 'pass', stepLabels[currentStep-1]);
-          setStep(stepIds[currentStep], 'running', stepLabels[currentStep]+'…');
-          setProgress(progressVal, stepLabels[currentStep]+'…');
-          currentStep++;
+      const elapsed = (Date.now() - startTime) / 1000;
+
+      // Activate steps based on elapsed time
+      for (let i = currentStep; i < stepTriggerTimes.length; i++) {
+        if (elapsed >= stepTriggerTimes[i]) {
+          if (i > 0) setStep(stepIds[i-1], 'pass', stepLabels[i-1]);
+          setStep(stepIds[i], 'running', stepLabels[i]+'…');
+          currentStep = i + 1;
         }
       }
-    }, 80);
+
+      // Smooth progress bar — caps at 95% until complete
+      const rawPct = Math.min((elapsed / totalEstimated) * 95, 95);
+      progressVal = Math.max(progressVal, rawPct);
+      const activeLabel = currentStep > 0 ? stepLabels[currentStep-1] : 'Processing…';
+      setProgress(progressVal, activeLabel + '…');
+    }, 500);
   }
 
   
