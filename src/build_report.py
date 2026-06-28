@@ -222,7 +222,7 @@ def build_report(data_path, output_path):
         if sheet and sheet not in ('—','N/A','Multiple'):
             label='View issue' if (cell_ref and cell_ref not in ('A1','—','N/A')) else sheet
             link_cell=ws1.cell(i,9); link_cell.value=label
-            link_cell.hyperlink=f'./{sourceFile}#{sheet}!{cell_ref}'
+            link_cell.hyperlink=f'[{sourceFile}]\'{sheet}\'!{cell_ref}'
             link_cell.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
             link_cell.fill=F(bg); link_cell.alignment=A(h='center')
         else:
@@ -258,7 +258,7 @@ def build_report(data_path, output_path):
         ('CLOSURE STATUS','Open: Finding is unresolved.\nClosed: Finding has been retested and confirmed resolved.\nWaived: Finding is accepted as a known risk with documented rationale and approver sign-off.\nDeferred: Resolution deferred to a future model version.\nSuperseded: Finding replaced by a more comprehensive finding.'),
         ('HOW TO RESPOND TO AN ISSUE','1. Review the finding in the Issue Log.\n2. Add your management response in the Management Response column.\n3. Update the Workflow Status to Awaiting Reviewer Response.\n4. The reviewer will confirm, accept or request further action.\n5. Once confirmed fixed, the reviewer updates status to Ready for Sign-off.'),
         ('HOW TO CLOSE AN ISSUE','Issues may only be closed when:\n• The fix has been implemented in the model;\n• The fix has been retested and confirmed by the reviewer;\n• Closure evidence is documented;\n• The reviewer has signed off.\nWaived issues require a documented commercial rationale and approver sign-off.'),
-        ('VIEW ISSUE LINKS','Each finding with a known cell location includes a View Issue hyperlink. Clicking the link opens the source model at the exact cell where the issue was found. Both files must be in the same folder for the link to work.'),
+        ('VIEW ISSUE LINKS','Each finding with a known cell location includes a View Issue hyperlink. These links work best on Windows Excel when both files are open in the same Excel instance and stored in the same folder. On Mac Excel, links may fail with a reference error — this is an Excel limitation, not a report error. If a link fails, use the Sheet and Cell columns to navigate to the issue manually. The Sheet and Cell values are always accurate regardless of hyperlink behaviour.'),
         ('WHAT THIS REPORT COVERS','The FM Validator covers the automatable subset of a full reliance-grade model audit. It does not replace source document review, cell-by-cell formula inspection, commercial omission testing or reviewer judgment. See the Scope and Reliance tab for full details.'),
     ]
     row=3
@@ -394,7 +394,7 @@ def build_report(data_path, output_path):
         vc=ws4.cell(row_i,24)
         if sheet and sheet not in ('—','N/A','Multiple'):
             label='View issue' if cell_ref not in ('A1','—','N/A') else sheet
-            vc.value=label; vc.hyperlink=f'./{sourceFile}#{sheet}!{cell_ref}'
+            vc.value=label; vc.hyperlink=f'[{sourceFile}]\'{sheet}\'!{cell_ref}'
             vc.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
         else:
             vc.value='—'; vc.font=Fn(sz=9,col=GREY_MID)
