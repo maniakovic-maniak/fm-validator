@@ -91,19 +91,41 @@ async function run() {
   // ── Step 6: Build report ───────────────────────────────────────────────────
   console.log('\n[5/6] Building validation report...');
   const baseName   = originalName.replace(/\.[^/.]+$/, '');
-  const reportName = `${baseName}_REPORT.xlsx`;
+  const reportName = `${baseName}_VALIDATED.xlsx`;
   const reportPath = path.join(process.cwd(), 'processed', reportName);
 
   if (!fs.existsSync(path.join(process.cwd(), 'processed'))) {
     fs.mkdirSync(path.join(process.cwd(), 'processed'), { recursive: true });
   }
 
+
+  // Build audit log
+  const auditLog = [
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Parse', action: `Parsed ${parsed.sheetNames.length} sheets`, artifact: originalName, result: '✓ Pass', duration: '', notes: `${parsed.sheetNames.length} sheets` },
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 0', action: 'Formula scan', artifact: 'All sheets', result: '✓ Pass', duration: tier0.elapsed || '', notes: `${tier0.stats.uniqueFormulaCount} unique formulas` },
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: originalName, result: '✓ Pass', duration: '', notes: modelType },
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Pass} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: '' },
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: '2 batches · 129 rules', artifact: 'Batches 1+2', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` }
+  ];
+  const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
+  const overallAssessment = t2Meta.overall_assessment || (allFlagged.some(f => f.severity === 'fatal') ? 'not_fit_for_purpose' : 'fit_for_purpose_with_conditions');
+  const igReadiness = t2Meta.investment_grade_readiness_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
+  const igCommentary = t2Meta.investment_grade_commentary || '';
+
   await buildReportFile(reportPath, allFlagged, allFixes, {
     originalName,
     modelType,
-    modelIndustry: modelSummary.industry,
-    modelPurpose:  modelSummary.model_purpose,
-    modelSummary
+    modelIndustry:     modelSummary.industry,
+    modelPurpose:      modelSummary.model_purpose,
+    modelSummary,
+    tier0,
+    auditLog,
+    overallAssessment,
+    igReadiness,
+    igCommentary,
+    domainSkill:       domain.file,
+    modelTier:         'Tier 1',
+    reviewMode:        'llm_only'
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────

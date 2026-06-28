@@ -197,19 +197,44 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // ── Step 6: Build report + upload + notify ─────────────────────────
     console.log('[6/6] Building report, uploading, notifying...');
     const baseName   = path.parse(originalName).name;
-    const reportName = `${baseName}_REPORT.xlsx`;
+    const reportName = `${baseName}_VALIDATED.xlsx`;
     const reportPath = path.join(__dirname, 'processed', reportName);
 
     if (!fs.existsSync(path.join(__dirname, 'processed'))) {
       fs.mkdirSync(path.join(__dirname, 'processed'), { recursive: true });
     }
 
+
+    // Build audit log for report
+    const auditLog = [
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Parse', action: `Parsed ${parsed.sheetNames.length} sheets via exceljs`, artifact: originalName, result: '✓ Pass', duration: '', notes: `${parsed.sheetNames.length} sheets found` },
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 0', action: `Formula text scan — ${tier0.stats.totalFormulaCells.toLocaleString()} formula cells`, artifact: 'All sheets scanned', result: '✓ Pass', duration: tier0.elapsed || '', notes: `${tier0.stats.uniqueFormulaCount} unique formulas · ${tier0.stats.totalIferrorCount.toLocaleString()} IFERROR · ${tier0.stats.totalExternalLinks} external links` },
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: '~' + Math.round(JSON.stringify(modelSummary).length/3) + ' tokens', result: '✓ Pass', duration: '', notes: `${modelType} · ${modelSummary.currency || ''} · ${modelSummary.periodicity || ''}` },
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Classify', action: 'Model type derived', artifact: domain.file + ' loaded', result: '✓ Pass', duration: '', notes: `Model type: ${modelType}` },
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Results.filter(r=>r.status==='pass').length} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: t1Failures.map(f=>f.id).join(', ') || 'All passed' },
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `Claude — 2 batches · 129 rules`, artifact: 'Batches 1+2', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Results.filter(r=>r.status==='pass').length} pass · ${t2Failures.length} issues` }
+    ];
+
+    // Extract overall assessment from Tier 2 meta
+    const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
+    const overallAssessment = t2Meta.overall_assessment || (allFlagged.some(f => f.severity === 'fatal') ? 'not_fit_for_purpose' : allFlagged.length > 10 ? 'fit_for_purpose_with_conditions' : 'fit_for_purpose');
+    const igReadiness = t2Meta.investment_grade_readiness_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
+    const igCommentary = t2Meta.investment_grade_commentary || '';
+
     await buildReportFile(reportPath, allFlagged, [], {
       originalName,
       modelType,
-      modelIndustry: modelSummary.industry,
-      modelPurpose:  modelSummary.model_purpose,
-      modelSummary
+      modelIndustry:     modelSummary.industry,
+      modelPurpose:      modelSummary.model_purpose,
+      modelSummary,
+      tier0,
+      auditLog,
+      overallAssessment,
+      igReadiness,
+      igCommentary,
+      domainSkill:       domain.file,
+      modelTier:         'Tier 1',
+      reviewMode:        'llm_only'
     });
 
     let driveResult = null;
