@@ -430,7 +430,7 @@
           </div>
           <div class="stat-card">
             <div class="stat-val" id="report-score" style="font-size:18px">—</div>
-            <div class="stat-lbl">Risk rating</div>
+            <div class="stat-lbl">Open findings</div>
           </div>
         </div>
 
@@ -717,15 +717,10 @@
 
     document.getElementById('report-passed').textContent = stats.total ?? total;
     document.getElementById('report-failed').textContent = stats.needsAttention ?? 0;
-    const riskRating = stats.riskRating || (
-      (stats.score ?? 100) < 20 ? 'Critical' :
-      (stats.score ?? 100) < 50 ? 'High' :
-      (stats.score ?? 100) < 80 ? 'Moderate' : 'Low'
-    );
-    const riskColors = { Critical: '#C00000', High: '#C55A11', Moderate: '#7F6000', Low: '#375623' };
     const riskEl = document.getElementById('report-score');
-    riskEl.textContent = riskRating;
-    riskEl.style.color = riskColors[riskRating] || '#000';
+    riskEl.textContent = stats.riskRating || `P1: ${stats.p1Count||0} · P2: ${stats.p2Count||0}`;
+    riskEl.style.color = '#1F4E79';
+    riskEl.style.fontSize = '14px';
 
     // Download card
     if (result.driveLink || result.outputName) {

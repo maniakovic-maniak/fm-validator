@@ -266,11 +266,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // KPMG risk rating
     const p1Count = allFlagged.filter(f => f.priority === 'P1' || f.severity === 'fatal' || f.severity === 'critical').length;
     const p2Count = allFlagged.filter(f => f.priority === 'P2' || f.severity === 'high').length;
-    const riskRating = p1Count >= 3 ? 'Critical'
-      : p1Count >= 1 ? 'High'
-      : p2Count >= 5 ? 'Moderate'
-      : p2Count >= 1 ? 'Moderate'
-      : 'Low';
+    const p3Count = allFlagged.filter(f => f.priority === 'P3' || (!f.priority && f.severity === 'low')).length;
+    const riskRating = `P1: ${p1Count} · P2: ${p2Count} · P3: ${p3Count}`;
 
     console.log(`\n✅ Complete in ${duration}s — flagged: ${allFlagged.length}`);
 
