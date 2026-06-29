@@ -216,8 +216,9 @@ def build_report(data_path, output_path):
         ws1.cell(i,8).value=f.get('sheet',''); ws1.cell(i,8).fill=F(bg); ws1.cell(i,8).alignment=A(h='center')
         sheet=f.get('sheet',''); cell_ref=f.get('cell','A1')
         if sheet and sheet not in ('—','N/A','Multiple'):
-            link_cell.value=f'=HYPERLINK("[{sourceFile}]{sheet}!A1","{label}")'
-            link_cell.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
+            label='View issue' if (cell_ref and cell_ref not in ('A1','—','N/A')) else sheet
+            link_cell=ws1.cell(i,9)
+            link_cell.value='=HYPERLINK("[' + sourceFile + ']' + sheet + '!A1","' + label + '")'
             link_cell.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
             link_cell.fill=F(bg); link_cell.alignment=A(h='center')
         else:
