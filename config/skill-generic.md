@@ -152,17 +152,17 @@ Regardless of model type, verify these financing principles:
 
 Different model types carry different risk profiles and require different
 emphasis. Apply these weightings when assessing overall_assessment and
-investment_grade_readiness_percent:
+audit_completion_percent:
 
 **Project finance / infrastructure models**
 Higher weight on: debt roll-forward, DSCR, cash waterfall, covenant compliance,
 DSRA, period flags, actuals cut-over. A single gate failure here typically
-blocks investment-grade status outright.
+blocks a P1 finding that needs attention before the model is relied on.
 
 **Corporate / operating company models**
 Higher weight on: three-statement integration, working capital, tax
 reconciliation, margin plausibility, scenario engine. Gate failures are
-critical but may allow fit_for_purpose_with_conditions if remediation path clear.
+a P1 or P2 finding depending on the scope of impact.
 
 **Valuation / DCF models**
 Higher weight on: discount rate documentation, terminal value assumptions,
@@ -231,12 +231,12 @@ When skill-generic is loaded (model type unknown or unmatched),
 apply these escalation rules conservatively:
 
 **If balance sheet gate fails:**
-- overall_assessment: not_fit_for_purpose
+- raise all gate failures as P1 findings
 - Do not attempt to assess return metrics or covenant compliance
 - Focus findings on structural integrity first
 
 **If cash flow gate fails:**
-- overall_assessment: fit_for_purpose_with_conditions at minimum
+- raise as P1 and note affected metrics are provisional
 - Flag all operating performance metrics as provisional
 
 **If no Checks sheet exists:**
@@ -244,11 +244,11 @@ apply these escalation rules conservatively:
 - Note that without a checks sheet, integrity cannot be continuously monitored
 
 **If model type cannot be identified:**
-- State this explicitly in investment_grade_commentary
+- State this explicitly in audit_completion_commentary
 - Apply universal benchmarks with wider tolerance bands
 - Increase uncertain count threshold — more findings will be uncertain
   without domain-specific benchmarks
-- Do not penalise investment_grade_readiness_percent for tests that
+- Do not penalise audit_completion_percent for tests that
   genuinely cannot be applied without knowing the model type
 
 ---
@@ -276,7 +276,7 @@ Before testing, assess the evidence pack completeness:
 - 0 data points: confidence 0-30 (return uncertain, state what is needed)
 
 **When evidence pack is thin across the board:**
-Set review_mode to llm_only and add to investment_grade_commentary:
+Set review_mode to llm_only and add to audit_completion_commentary:
 "This review was conducted from extracted cell values only. Formula
 inspection, source document review, and a Tier [X] evidence pack are
-required before reliance-grade conclusions can be reached."
+required before further review procedures can be completed."

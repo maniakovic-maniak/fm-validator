@@ -103,20 +103,15 @@ def build_report(data_path, output_path):
     p3 = [f for f in findings if priority(f)=='P3']
 
     # KPMG verdict
-    if overallAssess == 'fit_for_purpose':
-        verdict_short = '✓  CLEARED'
-        verdict_bg    = GREEN
-        verdict_text  = 'No unresolved Priority 1 findings and no unresolved issues expected to materially affect key outputs. Usable for its intended purpose subject to noted limitations.'
-    elif overallAssess == 'fit_for_purpose_with_conditions':
-        verdict_short = '▲  CLEARED SUBJECT TO RESPONSES'
-        verdict_bg    = AMBER
-        verdict_text  = 'No unresolved Priority 1 issues remain. The model may be used subject to outstanding Priority 2 items, Queries and residual risks noted in the Issue Log.'
-    else:
-        verdict_short = '⛔  NOT CLEARED'
-        verdict_bg    = RED
-        verdict_text  = 'The model is not yet suitable for external reliance. Unresolved Priority 1 issues affect formula integrity, calculation flow or key outputs. Correct and retest before external release.'
+    # Neutral audit completion header — no verdict or reliance conclusion
+    p1_open = len(p1)
+    p2_open = len(p2)
+    p3_open = len(p3)
+    verdict_short = f'AUDIT REVIEW — {igReadiness}% OF PLANNED PROCEDURES COMPLETED'
+    verdict_bg    = MID_BLUE
+    verdict_text  = (igCommentary or f'The audit file has completed {igReadiness}% of the planned review procedures. This does not mean the model is approved or ready for external use. Open items are listed by priority below. Further review or retesting is required before these items can be closed.')
 
-    risk_rating = 'Critical' if len(p1)>=3 else 'High' if len(p1)>=1 else 'Moderate' if len(p2)>=5 else 'Low'
+    risk_rating = f'P1: {len(p1)}  P2: {len(p2)}  P3: {len(p3)}'
 
     wb = Workbook()
 
@@ -140,22 +135,22 @@ def build_report(data_path, output_path):
     set_row(ws1,4,24); set_row(ws1,5,8)
 
     # Verdict bar
-    merge(ws1,'B6:C7',verdict_short,bold=True,sz=14,col=WHITE,bg=verdict_bg,h='center',v='center')
+    merge(ws1,'B6:C7',verdict_short,bold=True,sz=11,col=WHITE,bg=verdict_bg,h='left',v='center')
     merge(ws1,'D6:I7',verdict_text,sz=10,col=WHITE,bg=verdict_bg,v='center',wrap=True)
     fill_range(ws1,6,2,7,9,verdict_bg)
     set_row(ws1,6,18); set_row(ws1,7,18); set_row(ws1,8,8)
 
     # Risk rating + readiness
-    merge(ws1,'B9:C9','RISK RATING',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT,h='center')
-    merge(ws1,'B10:C11',risk_rating,bold=True,sz=16,col=WHITE,bg=RED if risk_rating=='Critical' else AMBER if risk_rating=='High' else YELLOW if risk_rating=='Moderate' else GREEN,h='center',v='center')
+    merge(ws1,'B9:C9','OPEN FINDINGS',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT,h='center')
+    merge(ws1,'B10:C11',risk_rating,bold=True,sz=14,col=DARK_BLUE,bg=LIGHT_BLUE,h='center',v='center')
     for r in [10,11]:
-        ws1.cell(r,2).fill=F(RED if risk_rating=='Critical' else AMBER if risk_rating=='High' else YELLOW if risk_rating=='Moderate' else GREEN)
-        ws1.cell(r,3).fill=F(RED if risk_rating=='Critical' else AMBER if risk_rating=='High' else YELLOW if risk_rating=='Moderate' else GREEN)
+        ws1.cell(r,2).fill=F(LIGHT_BLUE)
+        ws1.cell(r,3).fill=F(LIGHT_BLUE)
 
-    merge(ws1,'D9:I9','INVESTMENT-GRADE READINESS',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT)
+    merge(ws1,'D9:I9','AUDIT PROCESS COMPLETION',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT)
     ws1['D10'].value=f'{igReadiness}%'; ws1['D10'].font=Fn(bold=True,sz=22,col=AMBER); ws1['D10'].alignment=A(h='center',v='center')
-    merge(ws1,'E10:I10',f'Current: {igReadiness}%                                                          Target: 99%',sz=8,col=GREY_DARK)
-    merge(ws1,'E11:I11',igCommentary or f'Gap: {99-igReadiness} percentage points · {len(p1)} fatal blocker(s) must be resolved first',sz=9,col=AMBER,wrap=True)
+    merge(ws1,'E10:I10',f'Procedures completed: {igReadiness}% of planned review steps',sz=9,col=GREY_DARK)
+    merge(ws1,'E11:I11',igCommentary or f'{len(p1)} P1 item(s) and {len(p2)} P2 item(s) require attention before this review can be closed.',sz=9,col=GREY_DARK,wrap=True)
     for r in [9,10,11]: set_row(ws1,r,18)
     set_row(ws1,12,8)
 
@@ -176,7 +171,7 @@ def build_report(data_path, output_path):
     # Status panel
     status_areas=[
         ('Formula integrity',t0.get('stats',{}).get('totalExternalLinks',0)>0 or t0.get('stats',{}).get('totalRefInFormula',0)>0,'formula errors or external links detected'),
-        ('Unique formula review',t0.get('stats',{}).get('fscoreDist',{}).get('High',0)>0,'High/Critical F-score formulas found'),
+        ('Unique formula review',t0.get('stats',{}).get('fscoreDist',{}).get('High',0)>0,'Complex formulas found — see Formula Analysis tab for detail'),
         ('Dependency flow',False,'Dependency flow assessed'),
         ('Scenario logic',False,'Scenario checks completed'),
         ('Debt / funding logic',any(f.get('category')=='Debt' and priority(f)=='P1' for f in findings),'Debt checks completed'),
@@ -207,13 +202,14 @@ def build_report(data_path, output_path):
 
     top10 = (p1+p2+p3)[:10]
     for i,f in enumerate(top10,28):
-        pri=priority(f); bg=LIGHT_RED if pri=='P1' else LIGHT_AMBER if pri=='P2' else LIGHT_YELL
+        pri=priority(f); bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT
         ws1.cell(i,2).value=i-27; ws1.cell(i,2).font=Fn(bold=True,sz=9); ws1.cell(i,2).fill=F(bg); ws1.cell(i,2).alignment=A(h='center')
         ws1.merge_cells(f'C{i}:D{i}')
         finding_text = f.get('label') or f.get('reason','')
         ws1[f'C{i}'].value=finding_text[:120]; ws1[f'C{i}'].font=Fn(sz=9); ws1[f'C{i}'].fill=F(bg); ws1[f'C{i}'].alignment=A(wrap=True)
         p_cell=ws1.cell(i,5); p_cell.value=pri; p_cell.font=Fn(bold=True,sz=9,col=WHITE)
-        p_cell.fill=F(RED if pri=='P1' else AMBER if pri=='P2' else YELLOW); p_cell.alignment=A(h='center')
+        p_cell.fill=F(AMBER if pri=='P1' else YELLOW if pri=='P2' else GREY_LIGHT)
+        p_cell.font=Fn(bold=True,sz=9,col=WHITE if pri in ('P1','P2') else GREY_DARK); p_cell.alignment=A(h='center')
         fs=f.get('fscore',0) or 0
         ws1.cell(i,6).value=fs if fs else '—'; ws1.cell(i,6).fill=F(bg); ws1.cell(i,6).alignment=A(h='center')
         ws1.cell(i,7).value=f.get('category',''); ws1.cell(i,7).fill=F(bg)
@@ -233,7 +229,7 @@ def build_report(data_path, output_path):
     ws1.merge_cells('B39:I39'); ws1['B39'].value='SCOPE AND LIMITATIONS'
     ws1['B39'].font=Fn(bold=True,sz=9,col=GREY_DARK); ws1['B39'].fill=F(GREY_LIGHT); ws1['B39'].alignment=A()
     ws1.merge_cells('B40:I41')
-    scope=f'Review conducted in {reviewMode} mode. Domain skill: {domainSkill}. Tier 0 formula scanner analysed {t0.get("stats",{}).get("totalFormulaCells",0):,} formula cells. Formula text inspection, named range audit, VBA review and source document verification were not performed. A Tier 1 evidence pack and formula-level review are required before reliance-grade conclusions can be reached.'
+    scope=f'Review conducted in {reviewMode} mode. Domain skill: {domainSkill}. Tier 0 formula scanner analysed {t0.get("stats",{}).get("totalFormulaCells",0):,} formula cells. The following items were not included in this review: formula text inspection, named range audit, VBA review, source document testing. See the Scope and Reliance tab for a full list of items not included in this review.'
     ws1['B40'].value=scope; ws1['B40'].font=Fn(sz=9,col=GREY_DARK,italic=True); ws1['B40'].fill=F(GREY_LIGHT); ws1['B40'].alignment=A(wrap=True,v='top')
     for r in [40,41]:
         set_row(ws1,r,18)
@@ -252,13 +248,12 @@ def build_report(data_path, output_path):
         ('PURPOSE','This report is the output of the FM Validator automated audit pipeline. It combines Tier 0 formula text analysis, Tier 1 code checks and Tier 2 Claude semantic analysis to produce a transaction-grade audit file.'),
         ('HOW TO READ THE ISSUE LOG','Each row in the Issue Log is one finding. Findings are sorted by Priority (P1 first), then Severity, then F-Score. Use the filters on the Excel table to focus on specific areas, priorities or statuses. The View Issue link in each row jumps directly to the affected cell in the source model.'),
         ('PRIORITY LEVELS','P1 — Must be resolved before any external reliance. Affects key outputs or blocks the audit conclusion.\nP2 — Should be resolved before final issue or submission. Can be accepted with a documented rationale.\nP3 — Best practice. Address in the next model revision where practical.\nQuery — Requires confirmation from the model owner before the finding can be closed.'),
-        ('SEVERITY LEVELS','Fatal — Structural failure that prevents model from being used. Example: balance sheet does not balance.\nCritical — Material error affecting a key output. Example: DSCR formula broken.\nHigh — Significant issue requiring attention before reliance.\nMedium — Moderate issue that should be addressed.\nLow — Minor issue or observation.'),
         ('WORKFLOW STATUS','New → Triage → Open → Awaiting Management Response → In Remediation → Ready for Retest → Retest Failed → Ready for Sign-off → Closed'),
         ('CLOSURE STATUS','Open: Finding is unresolved.\nClosed: Finding has been retested and confirmed resolved.\nWaived: Finding is accepted as a known risk with documented rationale and approver sign-off.\nDeferred: Resolution deferred to a future model version.\nSuperseded: Finding replaced by a more comprehensive finding.'),
         ('HOW TO RESPOND TO AN ISSUE','1. Review the finding in the Issue Log.\n2. Add your management response in the Management Response column.\n3. Update the Workflow Status to Awaiting Reviewer Response.\n4. The reviewer will confirm, accept or request further action.\n5. Once confirmed fixed, the reviewer updates status to Ready for Sign-off.'),
         ('HOW TO CLOSE AN ISSUE','Issues may only be closed when:\n• The fix has been implemented in the model;\n• The fix has been retested and confirmed by the reviewer;\n• Closure evidence is documented;\n• The reviewer has signed off.\nWaived issues require a documented commercial rationale and approver sign-off.'),
         ('VIEW ISSUE LINKS','Each finding with a known cell location includes a View Issue hyperlink. These links work best on Windows Excel when both files are open in the same Excel instance and stored in the same folder. On Mac Excel, links may fail with a reference error — this is an Excel limitation, not a report error. If a link fails, use the Sheet and Cell columns to navigate to the issue manually. The Sheet and Cell values are always accurate regardless of hyperlink behaviour.'),
-        ('WHAT THIS REPORT COVERS','The FM Validator covers the automatable subset of a full reliance-grade model audit. It does not replace source document review, cell-by-cell formula inspection, commercial omission testing or reviewer judgment. See the Scope and Reliance tab for full details.'),
+        ('WHAT THIS REPORT COVERS','This workbook records findings identified during the model review. It covers the automatable subset of a structured model review. It does not replace source document review, cell-by-cell formula inspection, or reviewer judgment. The following items were not included in this review — see the Scope and Reliance tab for details.'),
     ]
     row=3
     for heading,body in readme_sections:
@@ -307,13 +302,13 @@ def build_report(data_path, output_path):
         ('Named range audit','Not performed. Broken named range detection via Tier 0 only.'),
         ('',''),
         ('OVERALL ASSESSMENT',''),
-        ('Verdict',verdict_short),
-        ('Investment-grade readiness',f'{igReadiness}% (target: 99%)'),
-        ('Risk rating',risk_rating),
+        ('Review status',f'{igReadiness}% of planned procedures completed · {len(p1)} P1 · {len(p2)} P2 · {len(p3)} P3'),
+        ('Audit process completion',f'{igReadiness}% of planned review procedures completed'),
+        ('Open findings summary',risk_rating),
         ('P1 findings',str(len(p1))),
         ('P2 findings',str(len(p2))),
         ('P3 findings',str(len(p3))),
-        ('Final cleared version','Pending — model not yet cleared'),
+        ('Signed off version','Not yet signed off'),
     ]
 
     row=3
@@ -353,10 +348,10 @@ def build_report(data_path, output_path):
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
     set_row(ws4,2,36)
 
-    p_fill={'P1':LIGHT_RED,'P2':LIGHT_AMBER,'P3':LIGHT_YELL,'pass':LIGHT_GREEN}
+    p_fill={'P1':LIGHT_AMBER,'P2':LIGHT_YELL,'P3':GREY_LIGHT,'pass':LIGHT_GREEN}
     for row_i,f in enumerate(findings,3):
         pri=priority(f)
-        bg=LIGHT_RED if pri=='P1' else LIGHT_AMBER if pri=='P2' else LIGHT_YELL if pri=='P3' else LIGHT_GREEN if f.get('status')=='pass' else GREY_LIGHT
+        bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT if pri=='P3' else LIGHT_GREEN if f.get('status')=='pass' else GREY_LIGHT
         sev=(f.get('severity') or '').title()
         sheet=f.get('sheet',''); cell_ref=f.get('cell','A1') or 'A1'
         urgency=f.get('urgency',''); category=f.get('category','')
@@ -421,7 +416,7 @@ def build_report(data_path, output_path):
     # Only P1 and P2 in remediation
     rem_findings=[f for f in findings if priority(f) in ('P1','P2')]
     for row_i,f in enumerate(rem_findings,3):
-        pri=priority(f); bg=LIGHT_RED if pri=='P1' else LIGHT_AMBER
+        pri=priority(f); bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT
         vals=['',row_i-2,f.get('id',''),f.get('root_cause',''),pri,
               f.get('fscore','') or '—',(f.get('severity') or '').title(),(f.get('urgency') or ''),
               f.get('corrective_action') or f.get('fix_instruction',''),
@@ -450,7 +445,7 @@ def build_report(data_path, output_path):
     stats=t0.get('stats',{})
     merge(ws6,'B2:D2',f"Total formulas: {stats.get('totalFormulaCells',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
     merge(ws6,'E2:G2',f"Unique patterns: {stats.get('uniqueFormulaCount',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
-    merge(ws6,'H2:J2',f"IFERROR: {stats.get('totalIferrorCount',0):,}",sz=9,col=AMBER,bg=LIGHT_AMBER)
+    merge(ws6,'H2:J2',f"IFERROR usage: {stats.get('totalIferrorCount',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
     merge(ws6,'K2:M2',f"OFFSET: {stats.get('totalOffsetCount',0):,}",sz=9,col=AMBER,bg=LIGHT_AMBER)
     merge(ws6,'N2:P2',f"External links: {stats.get('totalExternalLinks',0)}",sz=9,col=RED,bg=LIGHT_RED)
     set_row(ws6,2,18)
@@ -559,7 +554,7 @@ def build_report(data_path, output_path):
     bands=[('0–3','Low',LIGHT_GREEN,'Ordinary complexity. Review through normal formula testing.'),
            ('4–7','Moderate',LIGHT_YELL,'Review for logic clarity, input linkage and copy-across consistency.'),
            ('8–12','High',LIGHT_AMBER,'Inspect carefully. Consider simplification or helper rows.'),
-           ('13+','Critical',LIGHT_RED,'Challenge whether it should be retained. Document or rebuild.')]
+           ('13+','Very High',LIGHT_AMBER,'Needs detailed review. Consider simplifying or splitting into helper rows.')]
     for row_i,(score_range,band,bg,treatment) in enumerate(bands,21):
         ws8.cell(row_i,2).value=score_range; ws8.cell(row_i,2).font=Fn(bold=True,sz=9); ws8.cell(row_i,2).fill=F(bg); ws8.cell(row_i,2).alignment=A(h='center'); ws8.cell(row_i,2).border=B()
         ws8.cell(row_i,3).value=band; ws8.cell(row_i,3).font=Fn(bold=True,sz=9); ws8.cell(row_i,3).fill=F(bg); ws8.cell(row_i,3).alignment=A(h='center'); ws8.cell(row_i,3).border=B()
@@ -582,7 +577,7 @@ def build_report(data_path, output_path):
     set_row(ws9,2,18)
 
     audit_log=d.get('auditLog',[])
-    result_colors={'✓ Pass':LIGHT_GREEN,'⚠ Issues':LIGHT_AMBER,'❌ Error':LIGHT_RED}
+    result_colors={'✓ Completed':LIGHT_GREEN,'✓ Pass':LIGHT_GREEN,'⚠ Issues found':LIGHT_AMBER,'⚠ Issues':LIGHT_AMBER,'Not performed':GREY_LIGHT,'❌ Error':LIGHT_AMBER}
     for row_i,entry in enumerate(audit_log,3):
         result=entry.get('result','✓ Pass'); bg=result_colors.get(result,GREY_LIGHT)
         vals=['',entry.get('timestamp',''),entry.get('step',''),entry.get('action',''),

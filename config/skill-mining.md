@@ -7,7 +7,7 @@ stated assumptions, not against fixed numbers.
 
 ## Model type
 
-A mining project finance model built to reliance-grade standards.
+A mining project finance model.
 Used for debt financing, equity raises, or strategic planning for a
 hard rock or bulk commodity mining operation.
 

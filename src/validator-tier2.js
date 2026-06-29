@@ -178,17 +178,17 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
           batch1, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 1 (S1-S7)', { stats: tier0Stats, risks: tier0Risks }
         );
         allResults.push(...results);
-        if (meta && meta.overall_assessment) topLevelMeta = meta;
+        if (meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined)) topLevelMeta = meta;
       } catch (e) {
         console.error('   ❌ Batch 1 error:', e.message);
         allResults.push({
           id: 'T2-BATCH1-ERROR', status: 'uncertain', confidence: 0,
-          severity: 'high', urgency: 'before_signoff',
+          priority: 'P2',
           category: 'Governance', method: 'automated',
           reason: `Batch 1 (Sections 1-7) could not complete: ${e.message}`,
           sheet: 'N/A', cell: 'A1', fixable: false,
           fix_instruction: 'Re-run the validation. If the error persists, reduce the model file size.',
-          escalation_flag: false, investment_grade_blocker: false,
+          escalation_flag: false, needs_retest: false,
           condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
           periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation error'
         });
@@ -203,19 +203,19 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
         );
         allResults.push(...results);
         // Only override meta if batch 2 returns a more complete assessment
-        if (meta && meta.overall_assessment && !topLevelMeta.overall_assessment) {
+        if (meta && meta.audit_completion_percent !== undefined && topLevelMeta.audit_completion_percent === undefined) {
           topLevelMeta = meta;
         }
       } catch (e) {
         console.error('   ❌ Batch 2 error:', e.message);
         allResults.push({
           id: 'T2-BATCH2-ERROR', status: 'uncertain', confidence: 0,
-          severity: 'high', urgency: 'before_signoff',
+          priority: 'P2',
           category: 'Governance', method: 'automated',
           reason: `Batch 2 (Sections 8-13) could not complete: ${e.message}`,
           sheet: 'N/A', cell: 'A1', fixable: false,
           fix_instruction: 'Re-run the validation. If the error persists, reduce the model file size.',
-          escalation_flag: false, investment_grade_blocker: false,
+          escalation_flag: false, needs_retest: false,
           condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
           periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation error'
         });
@@ -227,8 +227,7 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
       id:                       r.id || 'UNKNOWN',
       status:                   r.status || 'uncertain',
       confidence:               r.confidence ?? 0,
-      severity:                 r.severity || 'medium',
-      urgency:                  r.urgency || 'next_revision',
+      priority:                 r.priority || 'P3',
       category:                 r.category || 'Governance',
       method:                   r.method || 'automated',
       reason:                   r.reason || '',
@@ -245,7 +244,7 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
       fixable:                  r.fixable ?? false,
       fix_instruction:          r.fix_instruction || r.corrective_action || '',
       escalation_flag:          r.escalation_flag ?? false,
-      investment_grade_blocker: r.investment_grade_blocker ?? false,
+      needs_retest:             r.needs_retest ?? false,
       // Top-level meta fields (from overall assessment)
       _meta: topLevelMeta
     }));
@@ -256,12 +255,12 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     console.error('   ❌ Tier 2 fatal error:', e.message);
     return [{
       id: 'T2-ERROR', status: 'uncertain', confidence: 0,
-      severity: 'high', urgency: 'immediate',
+      priority: 'P2',
       category: 'Governance', method: 'automated',
       reason: `Tier 2 validation could not complete: ${e.message}. Manual review required.`,
       sheet: 'N/A', cell: 'A1', fixable: false,
       fix_instruction: 'Tier 2 (Claude AI checks) did not complete. Re-run the validation or review the model manually.',
-      escalation_flag: true, investment_grade_blocker: false,
+      escalation_flag: false, needs_retest: false,
       condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
       periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation system error',
       _meta: {}

@@ -108,9 +108,11 @@ async function run() {
     { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: '2 batches · 129 rules', artifact: 'Batches 1+2', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` }
   ];
   const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
-  const overallAssessment = t2Meta.overall_assessment || (allFlagged.some(f => f.severity === 'fatal') ? 'not_fit_for_purpose' : 'fit_for_purpose_with_conditions');
-  const igReadiness = t2Meta.investment_grade_readiness_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
-  const igCommentary = t2Meta.investment_grade_commentary || '';
+  const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
+  const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
+  const overallAssessment = 'audit_complete';
+  const igReadiness = auditCompletion;
+  const igCommentary = auditCommentary;
 
   await buildReportFile(reportPath, allFlagged, allFixes, {
     originalName,

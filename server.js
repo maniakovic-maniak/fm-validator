@@ -217,9 +217,11 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // Extract overall assessment from Tier 2 meta
     const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
-    const overallAssessment = t2Meta.overall_assessment || (allFlagged.some(f => f.severity === 'fatal') ? 'not_fit_for_purpose' : allFlagged.length > 10 ? 'fit_for_purpose_with_conditions' : 'fit_for_purpose');
-    const igReadiness = t2Meta.investment_grade_readiness_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
-    const igCommentary = t2Meta.investment_grade_commentary || '';
+    const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
+    const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
+    const overallAssessment = 'audit_complete';
+    const igReadiness = auditCompletion;
+    const igCommentary = auditCommentary;
 
     await buildReportFile(reportPath, allFlagged, [], {
       originalName,
@@ -262,8 +264,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       ? 100
       : Math.round(((totalChecked - allFlagged.length) / totalChecked) * 100);
     // KPMG risk rating
-    const p1Count = allFlagged.filter(f => f.severity === 'fatal' || f.severity === 'critical').length;
-    const p2Count = allFlagged.filter(f => f.severity === 'high').length;
+    const p1Count = allFlagged.filter(f => f.priority === 'P1' || f.severity === 'fatal' || f.severity === 'critical').length;
+    const p2Count = allFlagged.filter(f => f.priority === 'P2' || f.severity === 'high').length;
     const riskRating = p1Count >= 3 ? 'Critical'
       : p1Count >= 1 ? 'High'
       : p2Count >= 5 ? 'Moderate'

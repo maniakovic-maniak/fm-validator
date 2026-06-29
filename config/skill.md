@@ -106,17 +106,16 @@ Example of a correctly evidenced finding:
 
 ## Step 6: Materiality assessment
 
-Classify every finding by severity level.
+Classify every finding by priority level.
 
-| Level | Definition |
+| Priority | Definition |
 |---|---|
-| critical | Balance sheet does not balance · Cash flow does not reconcile · Formula error in key output · Debt roll-forward fails |
-| high | Assumption materially outside benchmark · Missing required schedule · Covenant breach · Hard-coded business assumption |
-| medium | Incomplete disclosure · Minor formula inconsistency · Missing documentation |
-| low | Formatting issue · Missing label · Non-material assumption gap |
+| P1 | Needs to be addressed before the model is relied on for key decisions. Examples: balance sheet does not balance, formula error in key output, debt roll-forward fails |
+| P2 | Should be addressed as part of the current review or before external circulation. Examples: assumption materially outside benchmark, missing required schedule, hard-coded business assumption |
+| P3 | Lower-priority clean-up, presentation, documentation or good-practice improvement. Examples: formatting issue, missing label, non-material assumption gap |
 
-Prioritise critical and high findings first.
-Do not bury critical issues in a long list of low-priority observations.
+Prioritise P1 findings first.
+Do not bury P1 items in a long list of P3 observations.
 
 ---
 
@@ -635,37 +634,37 @@ When you identify a contradiction:
 
 ---
 
-## Step 12: Audit gate escalation logic
+## Step 12: Review gate logic
 
-These are non-negotiable gates. If any gate fails, escalate as follows:
+These are key review checkpoints. When a gate test identifies an issue,
+apply the following logic:
 
 **Gate 1 — Balance sheet does not balance**
-- overall_assessment must be not_fit_for_purpose or fit_for_purpose_with_conditions
-- All downstream equity, leverage, and return metrics are provisional
-- Label all affected downstream findings as provisional in reason field
+- Raise as P1 with specific sheet, cell, period, and dollar amount
+- Label downstream equity, leverage, and return metrics as provisional
+- Add "Provisional — pending balance sheet correction" to affected findings
 
 **Gate 2 — Cash flow does not reconcile**
-- overall_assessment must be fit_for_purpose_with_conditions at minimum
-- Operating, investing, and financing classifications are unreliable
-- DSCR, LLCR, distributions, and return metrics are unreliable
+- Raise as P1 with specific reconciling difference and period
+- Note that operating, investing, and financing classifications need review
+- Label DSCR, distributions, and return metrics as provisional
 
 **Gate 3 — Debt roll-forward does not close**
-- overall_assessment must be fit_for_purpose_with_conditions at minimum
-- All debt metrics (DSCR, LLCR, gearing) are unreliable
-- Interest calculations and covenant tests are unreliable
+- Raise as P1 with specific facility, period, and closing balance difference
+- Note that debt metrics and covenant tests should be treated as provisional
 
 **Gate 4 — Formula errors present**
-- Each error cell is a separate finding
-- Downstream cells dependent on error cells are unreliable
-- Flag all cells referencing the error source as affected
+- Raise each error cell as a separate P1 finding
+- Note downstream cells affected by the error
+- State what the correct formula or reference should be
 
 **Gate 5 — Workbook does not open cleanly**
-- overall_assessment must be not_fit_for_purpose
-- No further testing is reliable — return this gate failure only
+- Raise as P1 — workbook integrity cannot be confirmed
+- Note that further testing may be unreliable until this is resolved
 
 **Cascading logic:**
-When a gate fails, add "PROVISIONAL — upstream gate failure in [gate]"
-to the reason field of all findings that depend on the failed gate's output.
+When a gate issue is found, add "Provisional — pending correction of [gate issue]"
+to the reason field of all findings that depend on the affected output.
 
 ---
 
@@ -739,16 +738,16 @@ If any qualitative test is met: severity is at minimum medium.
 **Covenant trigger test:**
 If the issue, when corrected, would cause a covenant metric to fall
 below its threshold in any period, set:
-- severity: fatal
-- urgency: immediate
-- escalation_flag: true
+- priority: P1
+- needs_retest: true
+- note in consequence: "Covenant metric may be affected — needs retest after correction"
 
 **Decision-use test:**
-If the issue, when corrected, would change the investment decision
-(proceed / do not proceed / proceed with conditions), set:
-- severity: critical
-- urgency: before_signoff
-- investment_grade_blocker: true
+If the issue, when corrected, would materially change a key output
+used in decision-making (IRR, NPV, DSCR, equity return), set:
+- priority: P1
+- needs_retest: true
+- note in consequence: "Key output affected — needs retest after correction" 
 
 ---
 
