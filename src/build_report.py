@@ -135,17 +135,17 @@ def build_report(data_path, output_path):
     set_row(ws1,4,24); set_row(ws1,5,8)
 
     # Verdict bar
-    merge(ws1,'B6:C7',verdict_short,bold=True,sz=11,col=WHITE,bg=verdict_bg,h='left',v='center')
-    merge(ws1,'D6:I7',verdict_text,sz=10,col=WHITE,bg=verdict_bg,v='center',wrap=True)
-    fill_range(ws1,6,2,7,9,verdict_bg)
+    merge(ws1,'B6:C7',verdict_short,bold=True,sz=11,col=WHITE,bg=MID_BLUE,h='left',v='center')
+    merge(ws1,'D6:I7',verdict_text,sz=10,col=WHITE,bg=MID_BLUE,v='center',wrap=True)
+    fill_range(ws1,6,2,7,9,MID_BLUE)
     set_row(ws1,6,18); set_row(ws1,7,18); set_row(ws1,8,8)
 
     # Risk rating + readiness
     merge(ws1,'B9:C9','OPEN FINDINGS',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT,h='center')
-    merge(ws1,'B10:C11',risk_rating,bold=True,sz=14,col=DARK_BLUE,bg=LIGHT_BLUE,h='center',v='center')
+    merge(ws1,'B10:C11',risk_rating,bold=True,sz=12,col=DARK_BLUE,bg=GREY_LIGHT,h='center',v='center')
     for r in [10,11]:
-        ws1.cell(r,2).fill=F(LIGHT_BLUE)
-        ws1.cell(r,3).fill=F(LIGHT_BLUE)
+        ws1.cell(r,2).fill=F(GREY_LIGHT)
+        ws1.cell(r,3).fill=F(GREY_LIGHT)
 
     merge(ws1,'D9:I9','AUDIT PROCESS COMPLETION',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT)
     ws1['D10'].value=f'{igReadiness}%'; ws1['D10'].font=Fn(bold=True,sz=22,col=AMBER); ws1['D10'].alignment=A(h='center',v='center')
@@ -155,7 +155,7 @@ def build_report(data_path, output_path):
     set_row(ws1,12,8)
 
     # Priority summary
-    items=[('P1 OPEN',len(p1),LIGHT_RED,RED),('P2 OPEN',len(p2),LIGHT_AMBER,AMBER),('P3 OPEN',len(p3),LIGHT_YELL,DARK_BLUE),
+    items=[('P1 OPEN',len(p1),GREY_LIGHT,DARK_BLUE),('P2 OPEN',len(p2),GREY_LIGHT,DARK_BLUE),('P3 OPEN',len(p3),GREY_LIGHT,DARK_BLUE),
            ('','',None,None),
            ('IFERROR',t0.get('stats',{}).get('totalIferrorCount',0),LIGHT_AMBER,AMBER),
            ('OFFSET',t0.get('stats',{}).get('totalOffsetCount',0),LIGHT_YELL,DARK_BLUE),
@@ -186,8 +186,8 @@ def build_report(data_path, output_path):
     set_row(ws1,16,18)
 
     for i,(area,has_issue,summary) in enumerate(status_areas,17):
-        bg=LIGHT_RED if has_issue else LIGHT_GREEN; status_txt='● REVIEW' if has_issue else '✓ PASS'
-        status_bg=AMBER if has_issue else GREEN
+        bg=PALE_BLUE if has_issue else GREY_LIGHT; status_txt='Review' if has_issue else 'Completed'
+        status_bg=MID_BLUE if has_issue else GREY_DARK
         ws1.cell(i,2).value=area; ws1.cell(i,2).font=Fn(bold=True,sz=9); ws1.cell(i,2).fill=F(bg)
         ws1.merge_cells(f'C{i}:D{i}'); ws1[f'C{i}'].value=status_txt; ws1[f'C{i}'].font=Fn(bold=True,sz=9,col=WHITE); ws1[f'C{i}'].fill=F(status_bg); ws1[f'C{i}'].alignment=A(h='center')
         ws1.merge_cells(f'E{i}:I{i}'); ws1[f'E{i}'].value=summary; ws1[f'E{i}'].font=Fn(sz=9); ws1[f'E{i}'].fill=F(bg)
@@ -208,8 +208,8 @@ def build_report(data_path, output_path):
         finding_text = f.get('label') or f.get('reason','')
         ws1[f'C{i}'].value=finding_text[:120]; ws1[f'C{i}'].font=Fn(sz=9); ws1[f'C{i}'].fill=F(bg); ws1[f'C{i}'].alignment=A(wrap=True)
         p_cell=ws1.cell(i,5); p_cell.value=pri; p_cell.font=Fn(bold=True,sz=9,col=WHITE)
-        p_cell.fill=F(AMBER if pri=='P1' else YELLOW if pri=='P2' else GREY_LIGHT)
-        p_cell.font=Fn(bold=True,sz=9,col=WHITE if pri in ('P1','P2') else GREY_DARK); p_cell.alignment=A(h='center')
+        p_cell.fill=F(MID_BLUE if pri=='P1' else GREY_DARK if pri=='P2' else GREY_MID)
+        p_cell.font=Fn(bold=True,sz=9,col=WHITE); p_cell.alignment=A(h='center')
         fs=f.get('fscore',0) or 0
         ws1.cell(i,6).value=fs if fs else '—'; ws1.cell(i,6).fill=F(bg); ws1.cell(i,6).alignment=A(h='center')
         ws1.cell(i,7).value=f.get('category',''); ws1.cell(i,7).fill=F(bg)
@@ -349,11 +349,13 @@ def build_report(data_path, output_path):
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
     set_row(ws4,2,36)
 
-    p_fill={'P1':LIGHT_AMBER,'P2':LIGHT_YELL,'P3':GREY_LIGHT,'pass':LIGHT_GREEN}
+    p_fill={'P1':PALE_BLUE,'P2':GREY_LIGHT,'P3':GREY_LIGHT,'pass':LIGHT_GREEN}
     for row_i,f in enumerate(findings,3):
         pri=priority(f)
-        bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT if pri=='P3' else LIGHT_GREEN if f.get('status')=='pass' else GREY_LIGHT
-        sev=(f.get('severity') or '').title()
+        bg=PALE_BLUE if pri=='P1' else GREY_LIGHT if pri=='P2' else GREY_LIGHT if pri=='P3' else LIGHT_GREEN if f.get('status')=='pass' else GREY_LIGHT
+        # Map old severity to High/Medium/Low
+        raw_sev = (f.get('severity') or f.get('priority') or 'Medium').lower()
+        sev = 'High' if raw_sev in ('fatal','critical','high','p1') else 'Low' if raw_sev in ('low','p3') else 'Medium'
         sheet=f.get('sheet',''); cell_ref=f.get('cell','A1') or 'A1'
         urgency=f.get('urgency',''); category=f.get('category','')
 
@@ -418,8 +420,10 @@ def build_report(data_path, output_path):
     rem_findings=[f for f in findings if priority(f) in ('P1','P2')]
     for row_i,f in enumerate(rem_findings,3):
         pri=priority(f); bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT
+        raw_sev2 = (f.get('severity') or f.get('priority') or 'Medium').lower()
+        sev2 = 'High' if raw_sev2 in ('fatal','critical','high','p1') else 'Low' if raw_sev2 in ('low','p3') else 'Medium'
         vals=['',row_i-2,f.get('id',''),f.get('root_cause',''),pri,
-              f.get('fscore','') or '—',(f.get('severity') or '').title(),(f.get('urgency') or ''),
+              f.get('fscore','') or '—',sev2,f.get('urgency','') or '',
               f.get('corrective_action') or f.get('fix_instruction',''),
               '','','',
               'Yes','','','Pending','',
@@ -463,6 +467,20 @@ def build_report(data_path, output_path):
     ufs=t0.get('uniqueFormulas',[])
     for row_i,uf in enumerate(ufs[:200],4):  # Max 200 unique formulas
         band=uf.get('band','Low'); bg=band_colors.get(band,GREY_LIGHT)
+        # Auto-generate reviewer comment for High/Moderate complexity
+        auto_comment = ''
+        if band in ('High','Very High','Critical','Moderate'):
+            flags = []
+            if uf.get('externalLinkFlag'): flags.append('references an external workbook — verify the link is current and the source file is accessible')
+            if uf.get('volatileFlag'): flags.append('uses a volatile function (OFFSET/INDIRECT) — check whether a static alternative would work')
+            if uf.get('iferrorFlag'): flags.append('contains error suppression — confirm this is not hiding a genuine calculation error')
+            if uf.get('hardcodeFlag'): flags.append('contains hardcoded values — check whether these should be on the Inputs sheet')
+            xrefs = uf.get('crossSheetRefs',0)
+            if xrefs > 2: flags.append(f'references {xrefs} sheets — trace the dependency chain to confirm all source data is correct')
+            if flags:
+                auto_comment = 'Review required: ' + '; '.join(flags) + '.'
+            else:
+                auto_comment = f'Complex formula ({band} F-score). Review the logic and confirm it produces the intended result.'
         vals=['',uf.get('ufi',''),uf.get('sheet',''),uf.get('cell',''),
               uf.get('formulaText',''),uf.get('fscore',0),band,
               uf.get('explanation',''),uf.get('formulaClass',''),
@@ -483,13 +501,13 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 7 — FORMULA MAP
     # ════════════════════════════════════════════════════════════════════════
-    ws7=wb.create_sheet('Formula Map'); ws7.sheet_view.showGridLines=False; ws7.freeze_panes='A4'
+    ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False; ws7.freeze_panes='A4'
     for col,w in [(1,3),(2,22),(3,22),(4,10),(5,16),(6,10),(7,10),(8,14),(9,18),(10,20),(11,3)]:
         set_col(ws7,col,w)
 
-    merge(ws7,'B1:J1','FORMULA MAP — SHEET DEPENDENCY ANALYSIS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    merge(ws7,'B1:J1','SHEET DEPENDENCY ANALYSIS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(ws7,1,2,1,10,DARK_BLUE); set_row(ws7,1,28)
-    merge(ws7,'B2:J2','Shows which sheets reference which other sheets. High-risk dependencies are flagged for review.',sz=9,col=GREY_DARK,bg=GREY_LIGHT)
+    merge(ws7,'B2:J2','Shows how sheets reference each other. High-risk dependencies are flagged for review.',sz=9,col=GREY_DARK,bg=GREY_LIGHT)
     set_row(ws7,2,16)
 
     fm_headers=['','Target Sheet\n(formula lives here)','Precedent Sheet\n(sheet referenced)','Link\nCount','Direction','Avg\nF-Score','Max\nF-Score','Priority\nCount','Dependency\nRisk','Reviewer Note','']

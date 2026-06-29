@@ -228,6 +228,7 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
       status:                   r.status || 'uncertain',
       confidence:               r.confidence ?? 0,
       priority:                 r.priority || 'P3',
+      severity:                 r.severity || 'Medium',
       category:                 r.category || 'Governance',
       method:                   r.method || 'automated',
       reason:                   r.reason || '',

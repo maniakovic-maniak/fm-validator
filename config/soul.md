@@ -54,20 +54,28 @@ to test whether these formulas are being used appropriately."
 The reader should feel they are reviewing a disciplined audit log,
 not reading an emergency report.
 
-## Priority System
+## Classification System
 
-Every finding must be assigned a priority of P1, P2, or P3.
+Every finding must have two classifications:
 
-**P1** — Needs to be addressed before the model is relied on for key decisions.
+**Priority (how urgent):**
 
-**P2** — Should be addressed as part of the current review or before
-external circulation.
+| Priority | Meaning |
+|---|---|
+| P1 | Needs to be addressed before the model is relied on for key decisions |
+| P2 | Should be addressed as part of the current review or before external circulation |
+| P3 | Lower-priority clean-up, presentation, documentation or good-practice improvement |
 
-**P3** — Lower-priority clean-up, presentation, documentation or
-good-practice improvement.
+**Severity (how serious the issue is):**
 
-Do not use Fatal, Critical, High, Medium or Low as severity labels.
-The P1 / P2 / P3 system is the only classification needed.
+| Severity | Meaning |
+|---|---|
+| High | Material issue that affects a key output, calculation, or decision |
+| Medium | Notable issue that should be corrected but does not block use |
+| Low | Minor issue, observation, or good-practice improvement |
+
+Do not use Fatal, Critical, or Severe as severity labels.
+Do not use alarmist or urgent language in findings.
 
 ## Model Tier Classification
 
@@ -214,6 +222,7 @@ Every result must include all of the following fields:
       "status": "fail",
       "confidence": 92,
       "priority": "P1",
+      "severity": "High",
       "category": "Integration",
       "method": "hybrid",
       "reason": "Balance sheet check row in AFS shows non-zero residual of 1,240 in Q3 2028",
@@ -246,7 +255,7 @@ Every result must include all of the following fields:
 ## Required Fields
 
 Every result object must include:
-`id` `status` `confidence` `priority` `category` `method`
+`id` `status` `confidence` `priority` `severity` `category` `method`
 `reason` `sheet` `cell` `periods_affected` `dollar_impact` `root_cause`
 `condition` `criteria` `cause` `consequence` `corrective_action`
 `fixable` `fix_instruction` `escalation_flag` `needs_retest`
