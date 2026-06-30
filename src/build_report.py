@@ -366,11 +366,23 @@ def build_report(data_path, output_path):
         fix_action  = f.get('corrective_action') or f.get('fix_instruction','')
         out_impact  = f.get('dollar_impact','')
 
+        # Compute urgency from priority — no Claude field needed, keeps tone calm
+        if pri == 'P1':
+            urgency = 'Before next reliance'
+        elif pri == 'P2':
+            urgency = 'Before external circulation'
+        else:
+            urgency = 'When convenient'
+
+        fscore_val = f.get('fscore', '') or '—'
+        confidence_val = f.get('confidence', '')
+        confidence_display = f'{confidence_val}%' if confidence_val != '' else '—'
+
         vals=['',f.get('id',''),pri,'Open','Open',sev,urgency,
               f.get('issue_type',''),f.get('workstream',''),category,
               issue_title,what_wrong,why_matters,out_impact,
               fix_action,
-              f.get('model_risk',''),f.get('key_output_impact',''),'','',f.get('method',''),
+              f.get('model_risk',''),f.get('key_output_impact','Unknown'),fscore_val,confidence_display,f.get('method',''),
               sheet,cell_ref,'',
               '',  # View issue — set separately
               f.get('root_cause',''),

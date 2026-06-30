@@ -448,17 +448,6 @@
           </div>
         </div>
 
-        <!-- Needs attention (pink) -->
-        <div class="attention-box" id="attention-box" style="display:none">
-          <div class="attention-box-title">Needs attention before resubmission</div>
-          <div id="attention-list"></div>
-        </div>
-
-        <!-- Auto-fixed (yellow) -->
-        <div class="failure-box" id="fixed-box" style="display:none">
-          <div class="failure-box-title" style="color:var(--warning-text)">Auto-fixed issues</div>
-          <div id="fixed-list"></div>
-        </div>
 
         <div class="actions-row">
           <a class="btn-primary" id="download-validated-btn" href="#" style="text-decoration:none;display:none">
@@ -739,33 +728,6 @@
         document.getElementById('open-drive-btn').href = result.driveLink;
         document.getElementById('open-drive-btn').style.display = 'inline-flex';
       }
-    }
-
-    // Needs attention (pink)
-    const flagged = result.flagged || result.failures || [];
-    if (flagged.length > 0) {
-      document.getElementById('attention-box').style.display = 'block';
-      document.getElementById('attention-list').innerHTML = flagged.map(f => `
-        <div class="attention-item">
-          <i class="ti ti-x"></i>
-          <div>
-            <div>${esc(f.issue || f.reason || f.check || '')}</div>
-            ${f.sheet ? `<div class="attention-loc">${esc(f.sheet)}${f.cell && f.cell !== 'A1' ? ' · '+esc(f.cell) : ''}</div>` : ''}
-          </div>
-        </div>`).join('');
-    }
-
-    // Auto-fixed (yellow) — first 5 only
-    const fixes = (result.fixes || []).slice(0, 5);
-    if (fixes.length > 0) {
-      document.getElementById('fixed-box').style.display = 'block';
-      const more = (result.fixes||[]).length - fixes.length;
-      document.getElementById('fixed-list').innerHTML = fixes.map(f => `
-        <div class="failure-item" style="color:var(--warning-text)">
-          <i class="ti ti-check" style="color:var(--warning-text)"></i>
-          <div>${esc(f.issue || '')} ${f.sheet ? '<span style="font-family:DM Mono,monospace;font-size:11px;opacity:.7">'+esc(f.sheet)+(f.cell?' · '+esc(f.cell):'')+'</span>' : ''}</div>
-        </div>`).join('')
-        + (more > 0 ? `<div style="font-size:12px;color:var(--warning-text);opacity:.7;margin-top:4px">+ ${more} more in the Validation Report tab</div>` : '');
     }
 
     showScreen('report');

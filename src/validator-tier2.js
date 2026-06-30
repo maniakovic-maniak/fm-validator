@@ -42,13 +42,40 @@ function extractMeaningfulRows(rows, maxRows = 20) {
 
   return selected.map(row => {
     const keys = Object.keys(row);
-    if (keys.length <= 12) return row;
-    const firstSix = keys.slice(0, 6);
-    const lastSix  = keys.slice(-6);
-    const combined = [...new Set([...firstSix, ...lastSix])];
-    const trimmed  = {};
-    combined.forEach(k => { trimmed[k] = row[k]; });
-    return trimmed;
+    // Capture cell address info before trimming — _cellRefs and _rowNum
+    // are non-enumerable so they survive Object.keys() exclusion naturally,
+    // but we read them explicitly here since the trimmed object below is
+    // a fresh literal and won't inherit them.
+    const cellRefs = row._cellRefs || {};
+    const rowNum   = row._rowNum;
+    // Use the cell ref of the first column with a value as a row anchor —
+    // gives Claude a concrete starting cell reference for this row even
+    // when only a subset of columns are shown.
+    const firstKeyWithRef = keys.find(k => cellRefs[k]);
+    const rowAnchorCell   = firstKeyWithRef ? cellRefs[firstKeyWithRef] : null;
+
+    let resultRow;
+    if (keys.length <= 12) {
+      resultRow = { ...row };
+    } else {
+      const firstSix = keys.slice(0, 6);
+      const lastSix  = keys.slice(-6);
+      const combined = [...new Set([...firstSix, ...lastSix])];
+      resultRow = {};
+      combined.forEach(k => { resultRow[k] = row[k]; });
+    }
+
+    // Attach cell reference metadata as a visible field so Claude can cite
+    // real cell addresses. Kept compact — only the row anchor cell and row
+    // number, not a full per-column map, to control token cost.
+    if (rowAnchorCell) {
+      resultRow._cellRef = rowAnchorCell;
+    }
+    if (rowNum) {
+      resultRow._excelRow = rowNum;
+    }
+
+    return resultRow;
   });
 }
 
@@ -249,6 +276,10 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
       confidence:               r.confidence ?? 0,
       priority:                 r.priority || 'P3',
       severity:                 r.severity || 'Medium',
+      issue_type:               r.issue_type || '',
+      workstream:               r.workstream || '',
+      model_risk:               r.model_risk || '',
+      key_output_impact:        r.key_output_impact || 'Unknown',
       category:                 r.category || 'Governance',
       method:                   r.method || 'automated',
       reason:                   r.reason || '',

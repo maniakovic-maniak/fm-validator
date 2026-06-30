@@ -164,6 +164,8 @@ async function runTier0(parsed) {
   const dependencyMap = {};
   // UFI map: normalized formula → UFI data
   const ufiMap = {};
+  // Cell-level index: 'Sheet!Cell' -> { ufi, fscore, band, formulaText }
+  const cellScoreIndex = {};
   // Risk accumulators
   let totalFormulaCells = 0;
   let totalValueCells   = 0;
@@ -285,6 +287,18 @@ async function runTier0(parsed) {
             ufiMap[normalized].instanceCount++;
           }
 
+          // Cell-level F-score index — maps every individual cell to its
+          // formula's F-score, band and UFI. This is what the report builder
+          // uses to look up F-score by exact sheet+cell for any finding,
+          // since a finding's cell is rarely the UFI's first-seen cell.
+          const cellKey = `${sheetName}!${cell.address}`;
+          cellScoreIndex[cellKey] = {
+            ufi:      ufiMap[normalized].ufi,
+            fscore:   ufiMap[normalized].fscore,
+            band:     ufiMap[normalized].band,
+            formulaText: formula.length > 300 ? formula.substring(0, 300) + '...' : formula
+          };
+
         } else {
           // Value cell
           const v = cell.value;
@@ -369,6 +383,8 @@ async function runTier0(parsed) {
   }
 
   return {
+    // Cell-level F-score lookup — Sheet!Cell -> { ufi, fscore, band, formulaText }
+    cellScoreIndex,
     // Summary statistics
     stats: {
       totalFormulaCells,
@@ -403,6 +419,7 @@ async function runTier0(parsed) {
 
 function buildEmptyResult() {
   return {
+    cellScoreIndex: {},
     stats: {
       totalFormulaCells: 0, totalValueCells: 0,
       totalIferrorCount: 0, totalOffsetCount: 0,

@@ -138,6 +138,25 @@ P1 items from a prior review.
     below 60. If available evidence reasonably indicates a defect,
     use fail with appropriately moderated confidence.
 
+## Citing Cell Locations
+
+Row data sent to you includes a `_cellRef` field showing the real Excel
+cell address for that row (e.g. `"J45"`), and an `_excelRow` field showing
+the row number. These fields are metadata, not data values — do not treat
+them as part of the financial data itself.
+
+When you identify an issue in a specific row, use the `_cellRef` value
+for that row as the `cell` field in your result. Do not write a
+descriptive location like "Balance c/f row, columns Jun 2086 onward" —
+use the actual cell address provided.
+
+If a row has no `_cellRef` (rare), or your finding spans multiple rows
+or columns without one specific anchor cell, set `cell` to `"A1"` and
+describe the location precisely in the `condition` field instead.
+
+Do not invent a cell address. Only use `_cellRef` values that are
+actually present in the data you were given.
+
 ## Five C's Evidence Standard
 
 Every failed finding must use the Five C's framework.
@@ -150,6 +169,29 @@ Do not report unsupported concerns as findings.
 | Cause | The root cause — not the symptom |
 | Consequence | The impact on outputs, decisions, or further review steps. Quantify where possible |
 | Corrective Action | A specific recommended action at the level of sheet, range, and formula |
+
+## Additional Classification Fields
+
+Every finding must also include these fields to support the Issue Log:
+
+**issue_type** — one of:
+`Formula error` `Formula inconsistency` `Hardcode` `Scenario logic`
+`Timing` `Debt` `Tax` `Accounting` `Valuation` `Waterfall`
+`Dependency` `Presentation` `Documentation` `Query`
+
+**workstream** — one of:
+`Revenue` `Opex` `Capex` `Debt` `Tax` `Accounting` `Equity`
+`Valuation` `Governance` `Presentation`
+
+**model_risk** — one sentence describing the practical risk this finding
+poses to someone using the model's outputs. Example: "Debt schedule errors
+mean DSCR and covenant tests cannot currently be relied on."
+
+**key_output_impact** — one of: `Yes` `No` `Unknown`
+Set to Yes if the finding affects a key output such as revenue, EBITDA,
+free cash flow, debt balance, DSCR, tax payable, NPV, IRR, or equity
+distributions. Set to Unknown if this cannot be determined from
+available evidence.
 
 ## Behaviour
 
@@ -206,6 +248,7 @@ Return ONLY valid JSON. No preamble, explanation, or markdown fences.
 - reason field: maximum 1 sentence
 - root_cause field: maximum 1 sentence
 - dollar_impact field: maximum 10 words
+- model_risk field: maximum 1 sentence
 - Total per finding: under 400 words across all fields
 - Do not pad findings with background explanation — be precise and direct
 
@@ -236,6 +279,10 @@ Every result must include all of the following fields:
       "cause": "Retained earnings opening balance in AFS column M does not reference IFS closing balance from column L",
       "consequence": "Balance sheet does not balance in Q3 2028. Downstream equity and return metrics for periods after Q3 2028 should be treated as provisional until this is corrected.",
       "corrective_action": "In AFS cell M45, replace the current formula with a reference to IFS retained earnings closing balance cell M[row]. Copy the corrected formula across all remaining periods.",
+      "issue_type": "Accounting",
+      "workstream": "Accounting",
+      "model_risk": "Balance sheet does not balance — any output dependent on equity or asset totals should be treated as provisional.",
+      "key_output_impact": "Yes",
       "fixable": false,
       "fix_instruction": "Review equity roll-forward and retained earnings link on AFS sheet for Q3 2028",
       "escalation_flag": false,
@@ -258,6 +305,7 @@ Every result object must include:
 `id` `status` `confidence` `priority` `severity` `category` `method`
 `reason` `sheet` `cell` `periods_affected` `dollar_impact` `root_cause`
 `condition` `criteria` `cause` `consequence` `corrective_action`
+`issue_type` `workstream` `model_risk` `key_output_impact`
 `fixable` `fix_instruction` `escalation_flag` `needs_retest`
 
 Use empty string for unavailable text fields.
@@ -265,6 +313,7 @@ Use `"unquantified"` for unknown dollar_impact.
 Use `[]` for empty periods_affected.
 Use `false` for escalation_flag when not applicable.
 Use `true` for needs_retest when the finding requires verification after fix.
+Use `"Unknown"` for key_output_impact when this cannot be determined.
 
 ## Confidence Scoring Guide
 

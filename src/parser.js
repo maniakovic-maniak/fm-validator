@@ -100,6 +100,23 @@ function scanFormulaErrors(workbook) {
 // Find the best header row in the first 10 rows.
 // Financial models often have title rows, blank rows, or date rows before
 // the actual label row. We pick the row with the most non-empty text cells.
+// Returns clean display text for a header cell. Explicitly formats Date
+// values (e.g. "Jun 2027") since cell.text can fall back to a raw
+// JS Date.toString() output ("Wed Jun 30 2027 10:00:00 GMT+1000...")
+// when the cell has no explicit Excel number format applied.
+function headerCellText(cell) {
+  const v = cell.value;
+  if (v instanceof Date) {
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${monthNames[v.getMonth()]} ${v.getFullYear()}`;
+  }
+  if (v && typeof v === 'object' && 'result' in v && v.result instanceof Date) {
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${monthNames[v.result.getMonth()]} ${v.result.getFullYear()}`;
+  }
+  return cell.text != null ? String(cell.text).trim() : '';
+}
+
 function findHeaderRow(ws) {
   let bestRow = 1;
   let bestScore = 0;
@@ -109,7 +126,7 @@ function findHeaderRow(ws) {
     let textCells = 0;
     let numericCells = 0;
     row.eachCell({ includeEmpty: false }, cell => {
-      const v = cell.text ? String(cell.text).trim() : '';
+      const v = headerCellText(cell);
       if (v.length > 0 && isNaN(Number(v))) textCells++;
       else if (!isNaN(Number(v)) && v.length > 0) numericCells++;
     });
@@ -126,7 +143,7 @@ function worksheetToRows(ws) {
   const headers = [];
   const seen = {};
   headerRow.eachCell({ includeEmpty: true }, (cell, col) => {
-    let base = cell.text != null ? String(cell.text).trim() : '';
+    let base = headerCellText(cell);
     if (base === '') base = `col${col}`;
     if (base.length > 40) base = base.substring(0, 40);
     if (seen[base] !== undefined) base = `${base}_${col}`;
@@ -137,13 +154,23 @@ function worksheetToRows(ws) {
   for (let r = headerRowNum + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     const obj = {};
+    const cellRefs = {};
     let hasData = false;
     row.eachCell({ includeEmpty: false }, (cell, col) => {
       const key = headers[col] || `col${col}`;
       obj[key] = cellPlainValue(cell);
+      cellRefs[key] = cell.address;
       hasData = true;
     });
-    if (hasData) rows.push(obj);
+    if (hasData) {
+      // _cellRefs maps each header label to its real Excel cell address
+      // (e.g. "Jun 2086": "J45"). Used downstream so Claude can cite real
+      // cell references instead of describing locations in plain English,
+      // and so F-score lookups can match findings to formula complexity data.
+      Object.defineProperty(obj, '_cellRefs', { value: cellRefs, enumerable: false });
+      Object.defineProperty(obj, '_rowNum', { value: r, enumerable: false });
+      rows.push(obj);
+    }
   }
   return rows;
 }

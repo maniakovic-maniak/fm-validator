@@ -15,22 +15,20 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     igReadiness, igCommentary, domainSkill
   } = meta;
 
-  // Enrich findings with priority and fscore from tier0
-  const ufiMap = {};
-  if (tier0 && tier0.uniqueFormulas) {
-    tier0.uniqueFormulas.forEach(uf => {
-      if (uf.sheet && uf.cell) ufiMap[`${uf.sheet}!${uf.cell}`] = uf;
-    });
-  }
+  // Enrich findings with F-score using the cell-level index built by Tier 0.
+  // This indexes EVERY formula cell (not just one representative cell per
+  // unique pattern), so lookups by a finding's exact sheet+cell succeed
+  // even when that cell isn't the first-seen instance of its formula pattern.
+  const cellScoreIndex = (tier0 && tier0.cellScoreIndex) ? tier0.cellScoreIndex : {};
 
   const enrichedFindings = allFlagged.map(f => {
     const key = `${f.sheet || ''}!${f.cell || ''}`;
-    const uf  = ufiMap[key];
+    const cs  = cellScoreIndex[key];
     return {
       ...f,
-      fscore:        uf ? uf.fscore : null,
-      formulaText:   uf ? uf.formulaText : null,
-      formulaClass:  uf ? uf.formulaClass : null,
+      fscore:        cs ? cs.fscore : null,
+      formulaText:   cs ? cs.formulaText : null,
+      formulaClass:  null,
     };
   });
 
