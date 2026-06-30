@@ -2,6 +2,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const fs = require('fs');
 const path = require('path');
 const checklist = require('../config/checklist.json');
+const { resolveSheetName } = require('./utils/sheet-resolver');
 
 const client = new Anthropic();
 
@@ -130,18 +131,24 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
 
 // Split tier2 rules into batches by section
 function splitIntoBatches(rules) {
-  const batch1Sections = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
-  const batch2Sections = ['S8', 'S9', 'S10', 'S11', 'S12', 'S13'];
+  // Batch 1 — Structure, inputs, formula mechanics
+  const batch1Sections = ['S1', 'S2', 'S3', 'S4'];
+  // Batch 2 — Accounting, debt, revenue, tax — the deep financial review batch
+  // Gets full untrimmed financial statement data (see runTier2)
+  const batch2Sections = ['S5', 'S6', 'S7', 'S10'];
+  // Batch 3 — Scenarios, audit/governance, actuals, commercial completeness, governance
+  const batch3Sections = ['S8', 'S9', 'S11', 'S12', 'S13'];
 
   const batch1 = rules.filter(r => batch1Sections.some(s => r.id.includes(`-${s}-`)));
   const batch2 = rules.filter(r => batch2Sections.some(s => r.id.includes(`-${s}-`)));
+  const batch3 = rules.filter(r => batch3Sections.some(s => r.id.includes(`-${s}-`)));
 
   // Any rules not matched go to batch1
-  const matched = new Set([...batch1.map(r => r.id), ...batch2.map(r => r.id)]);
+  const matched = new Set([...batch1.map(r => r.id), ...batch2.map(r => r.id), ...batch3.map(r => r.id)]);
   const unmatched = rules.filter(r => !matched.has(r.id));
   batch1.push(...unmatched);
 
-  return { batch1, batch2 };
+  return { batch1, batch2, batch3 };
 }
 
 async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null } = {}) {
@@ -165,62 +172,75 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     }
   }
 
+  // ── Deep accounting data subset for Batch 2 (B5) ──────────────────────────
+  // The accounting/debt/tax batch needs full, untrimmed financial statement
+  // data — not the generic key_sheets sample. This gives Claude enough
+  // evidence to actually test balance sheet roll-forwards, debt schedules,
+  // and tax reconciliation rather than returning uncertain due to thin data.
+  const deepAccountingSheets = ['AFS', 'IFS', 'Cons', 'Debt', 'Equity', 'D&T', 'Leases'];
+  const deepDataSubset = {};
+  for (const name of deepAccountingSheets) {
+    const resolved = resolveSheetName(name, parsed.sheetNames);
+    if (resolved && parsed.sheets[resolved]) {
+      // Use a higher row cap (40) and wider extraction for the deep batch
+      deepDataSubset[resolved] = extractMeaningfulRows(parsed.sheets[resolved], 40);
+    }
+  }
+  const deepTokens = Math.round(JSON.stringify(deepDataSubset).length / 3);
+  console.log(`   Deep accounting data subset: ~${deepTokens} tokens across ${Object.keys(deepDataSubset).length} sheets`);
+  if (deepTokens > 70000) {
+    console.log('   Trimming deep accounting data to 25 rows per sheet...');
+    for (const name of Object.keys(deepDataSubset)) {
+      deepDataSubset[name] = deepDataSubset[name].slice(0, 25);
+    }
+  }
+
   const systemPrompt = buildSystemPrompt(domain, modelContext);
-  const { batch1, batch2 } = splitIntoBatches(checklist.tier2);
+  const { batch1, batch2, batch3 } = splitIntoBatches(checklist.tier2);
   const allResults = [];
   let topLevelMeta = {};
 
-  try {
-    // ── Batch 1: Sections S1-S7 ──────────────────────────────────────────────
-    if (batch1.length > 0) {
-      try {
-        const { results, meta } = await runBatch(
-          batch1, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 1 (S1-S7)', { stats: tier0Stats, risks: tier0Risks }
-        );
-        allResults.push(...results);
-        if (meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined)) topLevelMeta = meta;
-      } catch (e) {
-        console.error('   ❌ Batch 1 error:', e.message);
-        allResults.push({
-          id: 'T2-BATCH1-ERROR', status: 'uncertain', confidence: 0,
-          priority: 'P2',
-          category: 'Governance', method: 'automated',
-          reason: `Batch 1 (Sections 1-7) could not complete: ${e.message}`,
-          sheet: 'N/A', cell: 'A1', fixable: false,
-          fix_instruction: 'Re-run the validation. If the error persists, reduce the model file size.',
-          escalation_flag: false, needs_retest: false,
-          condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
-          periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation error'
-        });
+  // Reusable batch runner with consistent error handling
+  async function runOneBatch(rules, data, label, errorIdPrefix) {
+    if (rules.length === 0) return;
+    try {
+      const { results, meta } = await runBatch(
+        rules, data, parsed.sheetNames, systemPrompt, label, { stats: tier0Stats, risks: tier0Risks }
+      );
+      allResults.push(...results);
+      if (meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined) &&
+          topLevelMeta.audit_completion_percent === undefined) {
+        topLevelMeta = meta;
       }
+    } catch (e) {
+      console.error(`   ❌ ${label} error:`, e.message);
+      allResults.push({
+        id: `${errorIdPrefix}-ERROR`, status: 'uncertain', confidence: 0,
+        priority: 'P2',
+        category: 'Governance', method: 'automated',
+        reason: `${label} could not complete: ${e.message}`,
+        sheet: 'N/A', cell: 'A1', fixable: false,
+        fix_instruction: 'Re-run the validation. If the error persists, reduce the model file size.',
+        escalation_flag: false, needs_retest: false,
+        condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
+        periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation error'
+      });
     }
+  }
 
-    // ── Batch 2: Sections S8-S13 ─────────────────────────────────────────────
-    if (batch2.length > 0) {
-      try {
-        const { results, meta } = await runBatch(
-          batch2, dataSubset, parsed.sheetNames, systemPrompt, 'Batch 2 (S8-S13)', { stats: tier0Stats, risks: tier0Risks }
-        );
-        allResults.push(...results);
-        // Only override meta if batch 2 returns a more complete assessment
-        if (meta && meta.audit_completion_percent !== undefined && topLevelMeta.audit_completion_percent === undefined) {
-          topLevelMeta = meta;
-        }
-      } catch (e) {
-        console.error('   ❌ Batch 2 error:', e.message);
-        allResults.push({
-          id: 'T2-BATCH2-ERROR', status: 'uncertain', confidence: 0,
-          priority: 'P2',
-          category: 'Governance', method: 'automated',
-          reason: `Batch 2 (Sections 8-13) could not complete: ${e.message}`,
-          sheet: 'N/A', cell: 'A1', fixable: false,
-          fix_instruction: 'Re-run the validation. If the error persists, reduce the model file size.',
-          escalation_flag: false, needs_retest: false,
-          condition: '', criteria: '', cause: '', consequence: '', corrective_action: '',
-          periods_affected: [], dollar_impact: 'unquantified', root_cause: 'Validation error'
-        });
-      }
-    }
+  try {
+    // ── Batch 1: Structure, Inputs, Formula mechanics (S1-S4) ────────────────
+    await runOneBatch(batch1, dataSubset, 'Batch 1 — Structure (S1-S4)', 'T2-BATCH1');
+
+    // ── Batch 2: Accounting, Debt, Revenue, Tax (S5-S7,S10) — DEEP DATA ──────
+    // This is the B5 deep financial review batch. It receives full,
+    // untrimmed AFS/IFS/Cons/Debt/Equity data so Claude has enough evidence
+    // to test balance sheet roll-forwards, debt schedules, retained earnings,
+    // and tax reconciliation with confidence rather than returning uncertain.
+    await runOneBatch(batch2, deepDataSubset, 'Batch 2 — Accounting & Debt (S5-S7,S10)', 'T2-BATCH2');
+
+    // ── Batch 3: Scenarios, Audit, Actuals, Commercial, Governance ───────────
+    await runOneBatch(batch3, dataSubset, 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', 'T2-BATCH3');
 
     // Normalise all results — ensure required fields exist
     const normalised = allResults.map(r => ({
