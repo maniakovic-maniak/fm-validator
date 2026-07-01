@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const checklist = require('../config/checklist.json');
 const { resolveSheetName } = require('./utils/sheet-resolver');
+const { extractJson } = require('./utils/json-extract');
 
 const client = new Anthropic();
 

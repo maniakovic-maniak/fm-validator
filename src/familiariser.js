@@ -123,12 +123,29 @@ async function familiariseModel(parsed) {
       }]
     });
 
-    const raw = response.content[0].text.replace(/```json|```/g, '').trim();
+    const textBlock = response.content.find(b => b.type === 'text');
+        if (!textBlock) throw new Error('No text block in familiarisation response');
+        const raw = textBlock.text.replace(/```json|```/g, '').trim();
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     if (start === -1 || end === -1) throw new Error('No JSON in familiarisation response');
 
-    const summary = JSON.parse(raw.substring(start, end + 1));
+    const jsonSlice = raw.substring(start, end + 1);
+    let summary;
+    try {
+      summary = JSON.parse(jsonSlice);
+    } catch (parseErr) {
+      // Extract the position from the error message and show context around it
+      const posMatch = parseErr.message.match(/position (\d+)/);
+      if (posMatch) {
+        const pos = parseInt(posMatch[1], 10);
+        const contextStart = Math.max(0, pos - 150);
+        const contextEnd = Math.min(jsonSlice.length, pos + 150);
+        console.error('   JSON parse failed near position', pos, '— context:');
+        console.error('   ...' + jsonSlice.substring(contextStart, contextEnd) + '...');
+      }
+      throw parseErr;
+    }
 
     console.log(`   Model identified: ${summary.model_type} — ${summary.industry}`);
     console.log(`   Currency: ${summary.currency} · Periodicity: ${summary.periodicity}`);
