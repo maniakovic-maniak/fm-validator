@@ -14,6 +14,13 @@ You will receive:
 
 Read every sheet carefully. Build a complete picture of the model before writing anything.
 
+CRITICAL JSON FORMATTING RULES — violating these breaks the entire pipeline:
+- NEVER use double quotes (") inside any string value. If you need to reference
+  a sheet name, term, or quoted concept, use single quotes ('like this') instead
+- Keep every string value on a single line — no literal line breaks inside strings
+- Do not use markdown formatting (no **, no backticks) inside string values
+- Keep each string value under 200 characters
+
 Return ONLY valid JSON — no other text:
 {
   "model_purpose": "one sentence describing what this model is for",
