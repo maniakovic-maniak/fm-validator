@@ -1,4 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const { extractJson } = require('./utils/json-extract');
 const fs = require('fs');
 const path = require('path');
 
@@ -70,13 +71,8 @@ async function classifyModel(parsed) {
     });
 
     const textBlock = response.content.find(b => b.type === 'text');
-        if (!textBlock) throw new Error('No text block in classifier response');
-        const raw = textBlock.text.replace(/```json|```/g, '').trim();
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    if (start === -1 || end === -1) throw new Error('No JSON in response');
-
-    const result = JSON.parse(raw.substring(start, end + 1));
+    if (!textBlock) throw new Error('No text block in classifier response');
+    const result = extractJson(textBlock.text);
     return {
       type: result.type || 'generic',
       confidence: result.confidence || 50,

@@ -1,4 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const { extractJson } = require('./utils/json-extract');
 
 const client = new Anthropic();
 
@@ -124,36 +125,13 @@ async function familiariseModel(parsed) {
     });
 
     const textBlock = response.content.find(b => b.type === 'text');
-        if (!textBlock) throw new Error('No text block in familiarisation response');
-        const raw = textBlock.text.replace(/```json|```/g, '').trim();
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    if (start === -1 || end === -1) throw new Error('No JSON in familiarisation response');
-
-    const jsonSlice = raw.substring(start, end + 1);
-    let summary;
-    try {
-      summary = JSON.parse(jsonSlice);
-    } catch (parseErr) {
-      // Extract the position from the error message and show context around it
-      const posMatch = parseErr.message.match(/position (\d+)/);
-      if (posMatch) {
-        const pos = parseInt(posMatch[1], 10);
-        const contextStart = Math.max(0, pos - 150);
-        const contextEnd = Math.min(jsonSlice.length, pos + 150);
-        console.error('   JSON parse failed near position', pos, '— context:');
-        console.error('   ...' + jsonSlice.substring(contextStart, contextEnd) + '...');
-      }
-      throw parseErr;
-    }
-
+    if (!textBlock) throw new Error('No text block in familiarisation response');
+    const summary = extractJson(textBlock.text);
     console.log(`   Model identified: ${summary.model_type} — ${summary.industry}`);
     console.log(`   Currency: ${summary.currency} · Periodicity: ${summary.periodicity}`);
-
     if (summary.immediate_observations && summary.immediate_observations.length > 0) {
       console.log(`   ⚠️  ${summary.immediate_observations.length} immediate observation(s) noted`);
     }
-
     return summary;
 
   } catch (e) {
