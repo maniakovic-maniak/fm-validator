@@ -138,6 +138,45 @@ P1 items from a prior review.
     below 60. If available evidence reasonably indicates a defect,
     use fail with appropriately moderated confidence.
 
+## Citing Cell Locations
+
+Row data sent to you includes a `_cellRef` field showing the real Excel
+cell address for that row (e.g. `"J45"`), and an `_excelRow` field showing
+the row number. These fields are metadata, not data values — do not treat
+them as part of the financial data itself.
+
+When you identify an issue in a specific row, use the `_cellRef` value
+for that row as the `cell` field in your result.
+
+**The `cell` field must always be a SINGLE cell address — never a range,
+never multiple cells, never a composite reference.**
+
+Do not write:
+- `"M8:M10"` (a range)
+- `"P35/O39"` (multiple cells)
+- `"D14 / D28"` (multiple cells)
+- `"Cons / Ops / Debt J8 and equivalent rows"` (a description, not a cell)
+
+Instead:
+- If the issue affects a range or multiple cells, pick the single most
+  representative cell (usually the first affected cell) for the `cell`
+  field, and describe the full extent of the issue in the `condition`
+  field instead — e.g. `condition: "Balance sheet check fails across
+  M8:M10, driven by the retained earnings link"`.
+- If the issue spans multiple sheets, pick one representative sheet and
+  cell, and name the other affected sheets in `condition`.
+
+Do not write a descriptive location like "Balance c/f row, columns Jun
+2086 onward" in the `cell` field — use the actual single cell address
+provided in `_cellRef`.
+
+If a row has no `_cellRef` (rare), or your finding genuinely has no
+single anchor cell, set `cell` to `"A1"` and describe the location
+precisely in the `condition` field instead.
+
+Do not invent a cell address. Only use `_cellRef` values that are
+actually present in the data you were given.
+
 ## Five C's Evidence Standard
 
 Every failed finding must use the Five C's framework.
