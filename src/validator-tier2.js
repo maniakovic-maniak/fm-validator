@@ -51,7 +51,14 @@ function extractMeaningfulRows(rows, maxRows = 20) {
     // Use the cell ref of the first column with a value as a row anchor —
     // gives Claude a concrete starting cell reference for this row even
     // when only a subset of columns are shown.
-    const firstKeyWithRef = keys.find(k => cellRefs[k]);
+    // Prefer a numeric-value column as the anchor — period calculation cells
+    // (columns J onwards) are more meaningful than row label cells (column C).
+    // Falling back to any cell with a ref if no numeric column exists.
+    const firstNumericKeyWithRef = keys.find(k => {
+      const v = row[k];
+      return cellRefs[k] && v !== null && v !== undefined && v !== '' && !isNaN(parseFloat(v));
+    });
+    const firstKeyWithRef = firstNumericKeyWithRef || keys.find(k => cellRefs[k]);
     const rowAnchorCell   = firstKeyWithRef ? cellRefs[firstKeyWithRef] : null;
 
     let resultRow;
@@ -129,7 +136,7 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
 
   let rawText = '';
   const stream = await client.messages.stream({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     max_tokens: 64000,
     temperature: 0,
     system: [
