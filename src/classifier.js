@@ -65,7 +65,6 @@ async function classifyModel(parsed) {
     const response = await client.messages.create({
       model: 'claude-sonnet-5',
       max_tokens: 200,
-      temperature: 0,
       system: CLASSIFIER_PROMPT,
       messages: [{ role: 'user', content: JSON.stringify(payload) }]
     });

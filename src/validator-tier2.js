@@ -138,7 +138,6 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
   const stream = await client.messages.stream({
     model: 'claude-sonnet-5',
     max_tokens: 64000,
-    temperature: 0,
     system: [
       {
         type: 'text',

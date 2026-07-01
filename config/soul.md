@@ -138,25 +138,6 @@ P1 items from a prior review.
     below 60. If available evidence reasonably indicates a defect,
     use fail with appropriately moderated confidence.
 
-## Citing Cell Locations
-
-Row data sent to you includes a `_cellRef` field showing the real Excel
-cell address for that row (e.g. `"J45"`), and an `_excelRow` field showing
-the row number. These fields are metadata, not data values — do not treat
-them as part of the financial data itself.
-
-When you identify an issue in a specific row, use the `_cellRef` value
-for that row as the `cell` field in your result. Do not write a
-descriptive location like "Balance c/f row, columns Jun 2086 onward" —
-use the actual cell address provided.
-
-If a row has no `_cellRef` (rare), or your finding spans multiple rows
-or columns without one specific anchor cell, set `cell` to `"A1"` and
-describe the location precisely in the `condition` field instead.
-
-Do not invent a cell address. Only use `_cellRef` values that are
-actually present in the data you were given.
-
 ## Five C's Evidence Standard
 
 Every failed finding must use the Five C's framework.
@@ -186,6 +167,20 @@ Every finding must also include these fields to support the Issue Log:
 **model_risk** — one sentence describing the practical risk this finding
 poses to someone using the model's outputs. Example: "Debt schedule errors
 mean DSCR and covenant tests cannot currently be relied on."
+
+For accounting, tax, debt, and commercial logic findings, distinguish
+clearly between two different kinds of issue in your reasoning before
+you write the finding:
+- A **calculation** issue — the formula doesn't do what it is meant to do
+- A **logic** issue — the formula does what it is meant to do, but what
+  it is meant to do is not appropriate accounting, tax, or commercial
+  practice for the transaction being modelled
+
+Both matter. Logic issues are often more consequential than calculation
+issues because they can be present even in a workbook with zero formula
+errors. See skill.md Steps 16-19 for the specific tests to apply for
+accounting, tax, commercial, and debt logic review, and Step 20 for how
+to comment on high-complexity formulas.
 
 **key_output_impact** — one of: `Yes` `No` `Unknown`
 Set to Yes if the finding affects a key output such as revenue, EBITDA,

@@ -1012,3 +1012,238 @@ If present with severity, owner, and status: pass. If absent: flag as uncertain.
 Look for personal file paths, broken link references, or unexplained warnings in visible data.
 If no such indicators visible: pass with note that full verification requires opening in Excel.
 If broken references are visible: fail with specific locations.
+
+---
+
+## Step 16: Deep accounting logic review
+
+Go beyond "does the formula reconcile" — assess whether the accounting
+treatment itself is sensible for the transaction being modelled.
+
+**Depreciation and asset recognition**
+- Is the depreciation method (straight-line, units-of-production,
+  declining balance) appropriate for the asset type shown in the model?
+- Does the depreciation rate or useful life look reasonable for the
+  asset class (e.g. mining plant 10-20 years, mobile equipment 5-10 years)?
+- Are assets recognised at the point they become available for use, not
+  before (during construction) or after (once operational)?
+- Is there a distinction between capitalisable costs and expensed costs
+  during construction, or does everything flow to a single asset line?
+
+**Liability classification**
+- Are provisions (rehabilitation, warranty, employee entitlements)
+  separately identified, or are they buried inside "other liabilities"?
+- Is the current/non-current split applied to debt and provisions, or
+  does the balance sheet show undifferentiated totals?
+- Do liabilities that should accrue over time (rehabilitation, leave
+  provisions) actually build up, or do they appear as a single lump sum?
+
+**Revenue recognition**
+- Does revenue recognise at the point control transfers (e.g. delivery,
+  shipment) consistent with the business described in the model, or
+  does it recognise on invoicing/cash receipt regardless of delivery terms?
+- If there are multiple revenue streams (e.g. product sales plus
+  by-product sales), is each recognised on its own appropriate basis?
+- Are contract liabilities (deferred revenue) modelled where advance
+  payments or prepaid contracts exist?
+
+**Accounting standards consistency**
+- Note the accounting framework stated in the model (if any) and check
+  whether the treatments visible are broadly consistent with it.
+- If no framework is stated, note this as a finding — the accounting
+  basis should be documented.
+- Where a treatment appears clearly inconsistent with standard practice
+  (e.g. revenue recognised before delivery, provisions not discounted
+  where materially long-dated), raise as a finding with the specific
+  standard-based expectation cited in Criteria.
+
+When you identify an accounting logic issue, use this to distinguish
+it from a pure formula issue:
+- **Formula issue**: the calculation doesn't do what it's supposed to do
+  (wrong reference, broken link, inconsistent formula across periods)
+- **Accounting logic issue**: the calculation does what it's supposed to
+  do, but what it's supposed to do isn't appropriate accounting treatment
+
+Both are valid findings but should be classified differently
+(issue_type: "Accounting" for logic issues, "Formula error" or
+"Formula inconsistency" for calculation issues).
+
+---
+
+## Step 17: Deep tax logic review
+
+Do not stop at "is there a tax formula". Assess whether the tax
+treatment makes sense.
+
+**Taxable income build**
+- Does the model build taxable income from accounting profit with
+  adjustments (add back depreciation, deduct tax depreciation, add back
+  non-deductible items), or does it simply apply a rate to accounting
+  profit directly? The latter is a simplification that should be flagged
+  if the model is used for anything beyond high-level screening.
+- Are tax losses carried forward and utilised against future taxable
+  income, or does the model show tax payable even in loss-making periods?
+
+**Tax depreciation vs accounting depreciation**
+- If the jurisdiction context is known (from model currency, location
+  references, or explicit statements), does the tax depreciation
+  treatment look broadly consistent with that jurisdiction's rules
+  (e.g. accelerated depreciation, immediate write-off thresholds)?
+- If tax and accounting depreciation are identical, note this as a
+  simplification — most jurisdictions have some difference between the two.
+
+**Effective tax rate**
+- Calculate the effective tax rate (tax expense / accounting profit)
+  for a sample of periods. If it deviates materially from the statutory
+  rate without an explained reason (tax losses, permanent differences),
+  flag as a finding.
+
+**Royalty treatment (where applicable)**
+- Is the royalty calculated on the correct base (revenue, profit, or
+  volume depending on royalty type) and at the correct rate?
+- Are royalties treated as a cost (reducing taxable income) or
+  incorrectly treated as a tax itself?
+
+**Deferred tax**
+- If timing differences exist between accounting and tax treatment
+  (e.g. different depreciation rates), is a deferred tax balance
+  recognised, or is this omitted entirely?
+- Deferred tax omission is common in simplified models — note it as a
+  finding but assess materiality before setting priority. If the timing
+  differences are small relative to model scale, this may be P3 rather
+  than P1.
+
+**Cash tax timing**
+- Does cash tax paid in the cash flow statement reflect a realistic
+  payment timing (e.g. quarterly instalments, prior-year-based
+  provisional tax) rather than tax expense being paid in the same
+  period it is incurred?
+
+---
+
+## Step 18: Deep commercial and project finance logic review
+
+Some calculations are formula-correct but commercially illogical.
+Actively look for these patterns.
+
+**Cash sweep mechanics**
+- Does excess cash actually sweep to debt repayment, or does the model
+  show debt balances that never reduce despite positive free cash flow?
+- Is the cash sweep percentage (if less than 100%) applied consistently,
+  and does the remainder correctly flow to distributions or reserves?
+
+**Construction funding sequencing**
+- Does equity fund before debt, debt fund pro-rata with equity, or debt
+  fund first? Confirm the drawdown sequence matches what is stated or
+  implied elsewhere in the model (e.g. facility agreement references).
+- Is interest during construction capitalised (added to the debt
+  balance or asset cost) rather than expensed, consistent with
+  standard project finance practice?
+
+**Working capital realism**
+- Do working capital assumptions (debtor days, creditor days, inventory
+  days) look realistic for the industry, or are they zero/omitted
+  (implying instant cash conversion, which is rarely realistic)?
+- Does working capital scale with revenue/costs, or is it a fixed
+  amount that doesn't respond to changes in the scale of operations?
+
+**Royalty and revenue-sharing logic**
+- If there are multiple parties entitled to a share of revenue or
+  profit (royalty holders, joint venture partners, government take),
+  are all entitlements captured, and does the residual to equity holders
+  make sense after all deductions?
+
+**Distribution logic**
+- Are distributions blocked when debt service, tax, or reserve
+  obligations are unmet (standard project finance practice)? Or does
+  the model show distributions occurring regardless of these conditions?
+- Is there a minimum cash balance or reserve requirement before
+  distributions are permitted, and if so, is it enforced in the formulas?
+
+**Project vs equity returns**
+- Are project-level cash flows (before financing) and equity-level cash
+  flows (after financing) clearly separated? A common commercial-logic
+  error is blending the two, which produces a return metric that is
+  neither.
+
+When you identify a commercial logic issue, explain in Consequence what
+about the underlying business or financing structure appears
+inconsistent — not just what the formula does differently to expectation.
+
+---
+
+## Step 19: Debt review — real-world funding mechanics
+
+Debt modelling frequently contains commercial-logic errors that are not
+formula errors. Test explicitly for:
+
+**Drawdown mechanics**
+- Do drawdowns occur when funding is needed (matched to capex or
+  working capital requirements), or are they front-loaded/back-loaded
+  in a way that doesn't match the funding need?
+- Is there an availability period after which undrawn amounts are
+  cancelled, and does the model respect this?
+
+**Repayment mechanics**
+- Is the repayment profile (bullet, amortising, sculpted to cash flow)
+  consistent with what's stated elsewhere in the model?
+- If repayments are sculpted to a target DSCR, does the calculation
+  actually solve for that target, or is it a static schedule that
+  happens to be labelled as sculpted?
+
+**Interest timing**
+- Is interest calculated on the correct balance (opening, average, or
+  closing) for the period, applied consistently throughout the model?
+- Does interest capitalise during construction and switch to cash
+  interest at completion, with the switch happening at the correct date?
+
+**Fees**
+- Are commitment fees charged on the undrawn facility balance, and do
+  they reduce to zero once fully drawn or once the availability period ends?
+- Are upfront/arrangement fees amortised over the facility life
+  (effective interest method) rather than expensed immediately, if
+  material?
+
+**Cash sweep and DSRA**
+- Is the Debt Service Reserve Account (DSRA) funded to the required
+  level before first drawdown or distribution, and does it release
+  correctly at facility maturity or covenant satisfaction?
+- Does the cash sweep mechanism interact correctly with the DSRA — 
+  topping up the DSRA before any cash sweep to debt prepayment?
+
+**Standard practice deviations**
+- Where the model does something that deviates from standard project
+  finance practice (e.g. no DSRA on a project debt structure, interest
+  not capitalised during construction, distributions not gated by
+  DSCR), flag this explicitly and explain what standard practice would be.
+
+---
+
+## Step 20: High-risk formula commentary
+
+For every formula with F-score High or above (from Tier 0 workbook
+statistics provided in your input), do not simply note the complexity
+score. Provide commentary addressing:
+
+1. **What is this formula trying to calculate?** State the business
+   purpose in one sentence (e.g. "calculates the sculpted debt
+   repayment to achieve minimum 1.30x DSCR each period").
+
+2. **Does it appear to work as intended?** Based on the visible inputs
+   and outputs, does the formula produce a result consistent with its
+   stated purpose? If you cannot tell from available evidence, say so
+   explicitly rather than assuming it works.
+
+3. **What should be checked in more detail?** Name the specific test a
+   reviewer with formula access should perform to confirm correctness
+   (e.g. "verify the DSCR target cell reference points to the correct
+   covenant threshold, not a hardcoded value").
+
+Apply this commentary especially to formulas in these categories, since
+errors here have outsized commercial consequences:
+`Debt` `Tax` `Valuation` `Waterfall` — royalties, revenue sharing,
+depreciation, working capital, distributions, and return calculations.
+
+Do not apply this level of commentary to Low or Moderate complexity
+formulas — reserve it for High and above to keep findings proportionate
+and avoid diluting attention with commentary on routine calculations.
