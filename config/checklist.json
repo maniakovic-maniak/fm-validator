@@ -46,7 +46,7 @@
     {
       "id": "T1-003",
       "section": "9.1",
-      "label": "Model Issues tab is empty",
+      "label": "Model Issues tab contains unresolved items",
       "source_id": "FMAC-0021",
       "source_section": "0. Fatal gate",
       "test": "sheet_empty",

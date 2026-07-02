@@ -3,12 +3,13 @@
 FM Validator — _VALIDATED.xlsx Report Builder
 9-tab transaction-grade audit report
 """
-import sys, json, os
+import sys, json, os, re
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.worksheet.datavalidation import DataValidation
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 DARK_BLUE   = '1F4E79'; MID_BLUE   = '2E75B6'; LIGHT_BLUE  = 'D6E4F0'; PALE_BLUE = 'EBF3FA'
@@ -186,8 +187,8 @@ def build_report(data_path, output_path):
     set_row(ws1,16,18)
 
     for i,(area,has_issue,summary) in enumerate(status_areas,17):
-        bg=PALE_BLUE if has_issue else GREY_LIGHT; status_txt='Review' if has_issue else 'Completed'
-        status_bg=MID_BLUE if has_issue else GREY_DARK
+        bg=GREY_LIGHT if has_issue else WHITE; status_txt='Review' if has_issue else 'Completed'
+        status_bg=GREY_DARK if has_issue else GREY_MID
         ws1.cell(i,2).value=area; ws1.cell(i,2).font=Fn(bold=True,sz=9); ws1.cell(i,2).fill=F(bg)
         ws1.merge_cells(f'C{i}:D{i}'); ws1[f'C{i}'].value=status_txt; ws1[f'C{i}'].font=Fn(bold=True,sz=9,col=WHITE); ws1[f'C{i}'].fill=F(status_bg); ws1[f'C{i}'].alignment=A(h='center')
         ws1.merge_cells(f'E{i}:I{i}'); ws1[f'E{i}'].value=summary; ws1[f'E{i}'].font=Fn(sz=9); ws1[f'E{i}'].fill=F(bg)
@@ -226,10 +227,29 @@ def build_report(data_path, output_path):
         set_row(ws1,i,22)
     set_row(ws1,38,8)
 
+    # Accounting review summary — fills previously blank dashboard space
+    merge(ws1,'B39:I39','ACCOUNTING REVIEW SUMMARY',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT,h='left')
+    set_row(ws1,39,16)
+    acct_items = [
+        ('Accounting basis reviewed', 'Extracted cell values — accrual basis assumed from financial statement structure'),
+        ('Areas checked', 'Depreciation & asset treatment, revenue recognition, liability classification, debt treatment, tax balances'),
+        ('Standards consistency', 'Assessed against general accrual accounting practice — no specific framework confirmed in model'),
+    ]
+    r = 40
+    for label, val in acct_items:
+        ws1.cell(r,2).value = label; ws1.cell(r,2).font = Fn(sz=9,bold=True,col=GREY_DARK); ws1.cell(r,2).fill = F(GREY_LIGHT)
+        ws1.merge_cells(f'C{r}:I{r}')
+        ws1.cell(r,3).value = val; ws1.cell(r,3).font = Fn(sz=9); ws1.cell(r,3).fill = F(GREY_LIGHT); ws1.cell(r,3).alignment = A(wrap=True)
+        set_row(ws1,r,16)
+        r += 1
+    set_row(ws1,r,8)
+    r += 1
+
     # Scope limitations
-    ws1.merge_cells('B39:I39'); ws1['B39'].value='SCOPE AND LIMITATIONS'
-    ws1['B39'].font=Fn(bold=True,sz=9,col=GREY_DARK); ws1['B39'].fill=F(GREY_LIGHT); ws1['B39'].alignment=A()
-    ws1.merge_cells('B40:I41')
+    ws1.merge_cells(f'B{r}:I{r}'); ws1[f'B{r}'].value='SCOPE AND LIMITATIONS'
+    ws1[f'B{r}'].font=Fn(bold=True,sz=9,col=GREY_DARK); ws1[f'B{r}'].fill=F(GREY_LIGHT); ws1[f'B{r}'].alignment=A()
+    set_row(ws1,r,16); r+=1
+    ws1.merge_cells(f'B{r}:I{r+1}')
     scope=f'Review conducted in {reviewMode} mode. Domain skill: {domainSkill}. Tier 0 formula scanner analysed {t0.get("stats",{}).get("totalFormulaCells",0):,} formula cells. The following items were not included in this review: formula text inspection, named range audit, VBA review, source document testing. See the Scope and Reliance tab for a full list of items not included in this review.'
     ws1['B40'].value=scope; ws1['B40'].font=Fn(sz=9,col=GREY_DARK,italic=True); ws1['B40'].fill=F(GREY_LIGHT); ws1['B40'].alignment=A(wrap=True,v='top')
     for r in [40,41]:
@@ -249,7 +269,6 @@ def build_report(data_path, output_path):
         ('PURPOSE','This report is the output of the FM Validator automated audit pipeline. It combines Tier 0 formula text analysis, Tier 1 code checks and Tier 2 Claude semantic analysis to produce a transaction-grade audit file.'),
         ('HOW TO READ THE ISSUE LOG','Each row in the Issue Log is one finding. Findings are sorted by Priority (P1 first), then Severity, then F-Score. Use the filters on the Excel table to focus on specific areas, priorities or statuses. The View Issue link in each row jumps directly to the affected cell in the source model.'),
         ('PRIORITY LEVELS','P1 — Must be resolved before any external reliance. Affects key outputs or blocks the audit conclusion.\nP2 — Should be resolved before final issue or submission. Can be accepted with a documented rationale.\nP3 — Best practice. Address in the next model revision where practical.\nQuery — Requires confirmation from the model owner before the finding can be closed.'),
-        ('WORKFLOW STATUS','New → Triage → Open → Awaiting Management Response → In Remediation → Ready for Retest → Retest Failed → Ready for Sign-off → Closed'),
         ('CLOSURE STATUS','Open: Finding is unresolved.\nClosed: Finding has been retested and confirmed resolved.\nWaived: Finding is accepted as a known risk with documented rationale and approver sign-off.\nDeferred: Resolution deferred to a future model version.\nSuperseded: Finding replaced by a more comprehensive finding.'),
         ('HOW TO RESPOND TO AN ISSUE','1. Review the finding in the Issue Log.\n2. Add your management response in the Management Response column.\n3. Update the Workflow Status to Awaiting Reviewer Response.\n4. The reviewer will confirm, accept or request further action.\n5. Once confirmed fixed, the reviewer updates status to Ready for Sign-off.'),
         ('HOW TO CLOSE AN ISSUE','Issues may only be closed when:\n• The fix has been implemented in the model;\n• The fix has been retested and confirmed by the reviewer;\n• Closure evidence is documented;\n• The reviewer has signed off.\nWaived issues require a documented commercial rationale and approver sign-off.'),
@@ -333,7 +352,7 @@ def build_report(data_path, output_path):
     merge(ws4,'B1:AH1','ISSUE LOG',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(ws4,1,2,1,34,DARK_BLUE); set_row(ws4,1,28)
 
-    il_headers=['','Finding ID','Priority','Workflow Status','Closure Status','Severity','Urgency',
+    il_headers=['','Finding ID','Priority','Status','Relevance','Urgency',
                 'Issue Type','Workstream','Category',
                 'Issue Title','What is wrong','Why it matters','Output affected',
                 'Corrective Action',
@@ -348,10 +367,21 @@ def build_report(data_path, output_path):
         c=ws4.cell(2,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
     set_row(ws4,2,36)
+    VIEW_COL=il_headers.index('View Issue')+1
 
     p_fill={'P1':PALE_BLUE,'P2':GREY_LIGHT,'P3':GREY_LIGHT,'pass':LIGHT_GREEN}
     for row_i,f in enumerate(findings,3):
         pri=priority(f)
+        # Title fallback: never show the raw Finding ID as the title
+        _t=(f.get('title') or f.get('label') or '').strip()
+        if not _t or _t==f.get('id'):
+            _w=str(f.get('condition') or f.get('what_wrong') or f.get('reason') or f.get('detail') or '').replace('\n',' ').strip()
+            if _w:
+                _t=re.split(r'(?<=[.;])\s',_w)[0]
+                if len(_t)>70: _t=_t[:67].rstrip(' ,;:')+'...'
+            else:
+                _t=f.get('id','')
+        f['title']=_t; f['label']=_t
         bg=PALE_BLUE if pri=='P1' else GREY_LIGHT if pri=='P2' else GREY_LIGHT if pri=='P3' else LIGHT_GREEN if f.get('status')=='pass' else GREY_LIGHT
         # Map old severity to High/Medium/Low
         raw_sev = (f.get('severity') or f.get('priority') or 'Medium').lower()
@@ -378,7 +408,7 @@ def build_report(data_path, output_path):
         confidence_val = f.get('confidence', '')
         confidence_display = f'{confidence_val}%' if confidence_val != '' else '—'
 
-        vals=['',f.get('id',''),pri,'Open','Open',sev,urgency,
+        vals=['',f.get('id',''),pri,'Open','Relevant',urgency,
               f.get('issue_type',''),f.get('workstream',''),category,
               issue_title,what_wrong,why_matters,out_impact,
               fix_action,
@@ -400,7 +430,7 @@ def build_report(data_path, output_path):
             c.border=B()
 
         # View issue hyperlink
-        vc=ws4.cell(row_i,24)
+        vc=ws4.cell(row_i,VIEW_COL)
         if sheet and sheet not in ('—','N/A','Multiple'):
             label='View issue' if cell_ref not in ('A1','—','N/A') else sheet
             vc.value=f'=HYPERLINK("[{sourceFile}]{sheet}!A1","{label}")'
@@ -413,29 +443,37 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5 — REMEDIATION & RETEST
     # ════════════════════════════════════════════════════════════════════════
-    ws5=wb.create_sheet('Remediation'); ws5.sheet_view.showGridLines=False; ws5.freeze_panes='A3'
+    # Relevance Status dropdown — Relevant / Not Relevant / Needs Review
+    if len(findings) > 0:
+        relevance_dv = DataValidation(type='list', formula1='"Relevant,Not Relevant,Needs Review"', allow_blank=False)
+        ws4.add_data_validation(relevance_dv)
+        relevance_dv.add(f'E3:E{2+len(findings)}')
+
+    ws5=wb.create_sheet('Remediation'); ws5.sheet_view.showGridLines=False; ws5.freeze_panes='A4'
     for col,w in [(1,3),(2,6),(3,14),(4,22),(5,10),(6,10),(7,10),(8,10),(9,45),(10,18),(11,14),(12,14),(13,14),(14,14),(15,14),(16,18),(17,18),(18,3)]:
         set_col(ws5,col,w)
 
     merge(ws5,'B1:Q1','REMEDIATION AND RETEST TRACKER',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(ws5,1,2,1,17,DARK_BLUE); set_row(ws5,1,28)
 
-    rem_headers=['','#','Finding ID','Root Cause Group','Priority','F-Score','Severity','Urgency',
-                 'Specific Action Required','Owner','Target Date','Promised Fix Version',
+    # AI-generated caveat
+    merge(ws5,'B2:Q2','Suggested actions are AI-generated and should be reviewed before implementation. Some recommendations may not be necessary or appropriate for the specific model.',sz=8,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
+    set_row(ws5,2,26)
+
+    rem_headers=['','#','Finding ID','Root Cause Group','Priority','F-Score','Urgency',
+                 'Suggested Action','Owner','Target Date','Promised Fix Version',
                  'Retest Required','Retested By','Retest Date','Retest Result','Eligible to Close','']
     for col,h in enumerate(rem_headers,1):
-        c=ws5.cell(2,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c=ws5.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-    set_row(ws5,2,32)
+    set_row(ws5,3,32)
 
     # Only P1 and P2 in remediation
     rem_findings=[f for f in findings if priority(f) in ('P1','P2')]
-    for row_i,f in enumerate(rem_findings,3):
+    for row_i,f in enumerate(rem_findings,4):
         pri=priority(f); bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT
-        raw_sev2 = (f.get('severity') or f.get('priority') or 'Medium').lower()
-        sev2 = 'High' if raw_sev2 in ('fatal','critical','high','p1') else 'Low' if raw_sev2 in ('low','p3') else 'Medium'
         vals=['',row_i-2,f.get('id',''),f.get('root_cause',''),pri,
-              f.get('fscore','') or '—',sev2,f.get('urgency','') or '',
+              f.get('fscore','') or '—',f.get('urgency','') or '',
               f.get('corrective_action') or f.get('fix_instruction',''),
               '','','',
               'Yes','','','Pending','',
@@ -455,7 +493,7 @@ def build_report(data_path, output_path):
     for col,w in [(1,3),(2,10),(3,12),(4,8),(5,50),(6,8),(7,12),(8,40),(9,16),(10,8),(11,8),(12,8),(13,8),(14,8),(15,25),(16,10),(17,10),(18,20),(19,3)]:
         set_col(ws6,col,w)
 
-    merge(ws6,'B1:R1','FORMULA ANALYSIS — UNIQUE FORMULA REVIEW (UFI)',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    merge(ws6,'B1:R1','FORMULA DUE DILIGENCE — KEY FORMULA REVIEW',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(ws6,1,2,1,18,DARK_BLUE); set_row(ws6,1,28)
 
     # Stats summary
