@@ -87,6 +87,12 @@ async function run() {
     if (!seenKeys.has(key)) { seenKeys.add(key); allFlagged.push(f); }
   }
   console.log(`   ℹ️  ${allFlagged.length} items flagged`);
+  // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
+  const ruleResults = [...t1Results, ...t2Results].map(r => ({
+    id: r.id, status: r.status || 'uncertain',
+    confidence: r.confidence ?? null, needs_retest: r.needs_retest ?? false
+  }));
+
 
   // ── Step 6: Build report ───────────────────────────────────────────────────
   console.log('\n[5/6] Building validation report...');
@@ -105,7 +111,7 @@ async function run() {
     { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 0', action: 'Formula scan', artifact: 'All sheets', result: '✓ Pass', duration: tier0.elapsed || '', notes: `${tier0.stats.uniqueFormulaCount} unique formulas` },
     { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: originalName, result: '✓ Pass', duration: '', notes: modelType },
     { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Pass} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: '' },
-    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: '2 batches · 129 rules', artifact: 'Batches 1+2', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` }
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: '3 batches · 129 rules', artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` }
   ];
   const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
   const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
@@ -127,7 +133,8 @@ async function run() {
     igCommentary,
     domainSkill:       domain.file,
     modelTier:         'Tier 1',
-    reviewMode:        'llm_only'
+    reviewMode:        'llm_only',
+    ruleResults
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────

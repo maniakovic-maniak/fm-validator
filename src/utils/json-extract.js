@@ -72,31 +72,62 @@ function extractJson(rawText) {
 function repairUnescapedQuotes(jsonStr) {
   let result = '';
   let inString = false;
+  const stack = [];               // tracks '{' / '[' nesting outside strings
   let i = 0;
+
+  // After a potential closing quote followed by a comma, valid JSON must
+  // continue with a key string (inside objects) or a value (inside arrays).
+  // Narrative text like: including "typos", DIV/0 errors — has an embedded
+  // quote followed by a comma, which the old heuristic misread as a real
+  // string terminator. Look past the comma to decide.
+  function validAfterComma(j) {
+    while (j < jsonStr.length && /\s/.test(jsonStr[j])) j++;
+    const c = jsonStr[j];
+    const inArray = stack[stack.length - 1] === '[';
+    if (c === '"') {
+      if (inArray) return true;              // next array element
+      // In an object the next token must be a key: "...":
+      let k = j + 1;
+      while (k < jsonStr.length) {
+        if (jsonStr[k] === '"' && jsonStr[k - 1] !== '\\') break;
+        k++;
+      }
+      k++;
+      while (k < jsonStr.length && /\s/.test(jsonStr[k])) k++;
+      return jsonStr[k] === ':';
+    }
+    // Non-string continuation is only valid inside arrays
+    return inArray && (c === '{' || c === '[' || /[-0-9tfn]/.test(c || ''));
+  }
+
   while (i < jsonStr.length) {
     const ch = jsonStr[i];
     const prev = jsonStr[i - 1];
 
+    if (!inString && (ch === '{' || ch === '[')) stack.push(ch);
+    else if (!inString && (ch === '}' || ch === ']')) stack.pop();
+
     if (ch === '"' && prev !== '\\') {
       if (!inString) {
-        // Opening quote
         inString = true;
         result += ch;
       } else {
-        // Potential closing quote — check if what follows looks like
-        // valid JSON continuation (: , } ] or whitespace then one of those)
         let j = i + 1;
         while (j < jsonStr.length && /\s/.test(jsonStr[j])) j++;
         const nextMeaningful = jsonStr[j];
-        if (nextMeaningful === ':' || nextMeaningful === ',' ||
-            nextMeaningful === '}' || nextMeaningful === ']' ||
-            j >= jsonStr.length) {
-          // Looks like a genuine closing quote
+        if (nextMeaningful === ':' || nextMeaningful === '}' ||
+            nextMeaningful === ']' || j >= jsonStr.length) {
           inString = false;
           result += ch;
+        } else if (nextMeaningful === ',') {
+          if (validAfterComma(j + 1)) {
+            inString = false;
+            result += ch;
+          } else {
+            result += '\\"';               // embedded quote before a comma
+          }
         } else {
-          // Looks like an embedded quote — escape it
-          result += '\\"';
+          result += '\\"';                 // embedded quote mid-sentence
         }
       }
     } else {

@@ -193,6 +193,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       }
     }
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);
+    // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
+    const ruleResults = [...t1Results, ...t2Results].map(r => ({
+      id: r.id, status: r.status || 'uncertain',
+      confidence: r.confidence ?? null, needs_retest: r.needs_retest ?? false
+    }));
+
 
     // ── Step 6: Build report + upload + notify ─────────────────────────
     console.log('[6/6] Building report, uploading, notifying...');
@@ -212,7 +218,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: '~' + Math.round(JSON.stringify(modelSummary).length/3) + ' tokens', result: '✓ Pass', duration: '', notes: `${modelType} · ${modelSummary.currency || ''} · ${modelSummary.periodicity || ''}` },
       { timestamp: new Date().toISOString().substr(11,8), step: 'Classify', action: 'Model type derived', artifact: domain.file + ' loaded', result: '✓ Pass', duration: '', notes: `Model type: ${modelType}` },
       { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Results.filter(r=>r.status==='pass').length} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: t1Failures.map(f=>f.id).join(', ') || 'All passed' },
-      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `Claude — 2 batches · 129 rules`, artifact: 'Batches 1+2', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Results.filter(r=>r.status==='pass').length} pass · ${t2Failures.length} issues` }
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `Claude — 3 batches · 129 rules`, artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Results.filter(r=>r.status==='pass').length} pass · ${t2Failures.length} issues` }
     ];
 
     // Extract overall assessment from Tier 2 meta
@@ -236,7 +242,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       igCommentary,
       domainSkill:       domain.file,
       modelTier:         'Tier 1',
-      reviewMode:        'llm_only'
+      reviewMode:        'llm_only',
+      ruleResults
     });
 
     let driveResult = null;

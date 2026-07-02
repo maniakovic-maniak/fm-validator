@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FM Validator — _VALIDATED.xlsx Report Builder
-9-tab transaction-grade audit report
+11-tab transaction-grade audit report
 """
 import sys, json, os, re
 from datetime import datetime
@@ -91,6 +91,16 @@ def build_report(data_path, output_path):
     igCommentary = d.get('igCommentary','')
     modelTier    = d.get('modelTier','Tier 1')
     reviewMode   = d.get('reviewMode','llm_only')
+    ruleResults  = d.get('ruleResults',[])
+
+    # Checklist rules for the Validation Matrix — loaded from config
+    checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
+    try:
+        with open(checklist_path) as cf: _cl=json.load(cf)
+        checklist_rules=([dict(r,_tier='Tier 1') for r in _cl.get('tier1',[])]
+                        +[dict(r,_tier='Tier 2') for r in _cl.get('tier2',[])])
+    except Exception:
+        checklist_rules=[]
 
     # Severity → priority mapping
     def priority(f):
@@ -267,12 +277,14 @@ def build_report(data_path, output_path):
 
     readme_sections=[
         ('PURPOSE','This report is the output of the FM Validator automated audit pipeline. It combines Tier 0 formula text analysis, Tier 1 code checks and Tier 2 Claude semantic analysis to produce a transaction-grade audit file.'),
-        ('HOW TO READ THE ISSUE LOG','Each row in the Issue Log is one finding. Findings are sorted by Priority (P1 first), then Severity, then F-Score. Use the filters on the Excel table to focus on specific areas, priorities or statuses. The View Issue link in each row jumps directly to the affected cell in the source model.'),
+        ('HOW TO READ THE ISSUE LOG','Each row in the Issue Log is one finding. Findings are sorted by Priority (P1 first), then F-Score. Use the filters on the Excel table to focus on specific areas, priorities or statuses. The View Issue link in each row jumps directly to the affected cell in the source model.'),
         ('PRIORITY LEVELS','P1 — Must be resolved before any external reliance. Affects key outputs or blocks the audit conclusion.\nP2 — Should be resolved before final issue or submission. Can be accepted with a documented rationale.\nP3 — Best practice. Address in the next model revision where practical.\nQuery — Requires confirmation from the model owner before the finding can be closed.'),
         ('CLOSURE STATUS','Open: Finding is unresolved.\nClosed: Finding has been retested and confirmed resolved.\nWaived: Finding is accepted as a known risk with documented rationale and approver sign-off.\nDeferred: Resolution deferred to a future model version.\nSuperseded: Finding replaced by a more comprehensive finding.'),
-        ('HOW TO RESPOND TO AN ISSUE','1. Review the finding in the Issue Log.\n2. Add your management response in the Management Response column.\n3. Update the Workflow Status to Awaiting Reviewer Response.\n4. The reviewer will confirm, accept or request further action.\n5. Once confirmed fixed, the reviewer updates status to Ready for Sign-off.'),
+        ('HOW TO RESPOND TO AN ISSUE','1. Review the finding in the Issue Log.\n2. Set the Relevance column — Relevant, Not Relevant, or Needs Review.\n3. Add your management response in the Management Response column.\n4. The reviewer will confirm, accept or request further action in the Reviewer Response column.\n5. Once confirmed fixed, the finding is retested and closed under the closure rules below.'),
         ('HOW TO CLOSE AN ISSUE','Issues may only be closed when:\n• The fix has been implemented in the model;\n• The fix has been retested and confirmed by the reviewer;\n• Closure evidence is documented;\n• The reviewer has signed off.\nWaived issues require a documented commercial rationale and approver sign-off.'),
         ('VIEW ISSUE LINKS','Each finding with a known cell location includes a View Issue hyperlink. These links work best on Windows Excel when both files are open in the same Excel instance and stored in the same folder. On Mac Excel, links may fail with a reference error — this is an Excel limitation, not a report error. If a link fails, use the Sheet and Cell columns to navigate to the issue manually. The Sheet and Cell values are always accurate regardless of hyperlink behaviour.'),
+        ('VALIDATION MATRIX','The Validation Matrix tab lists every rule in the review checklist and records whether it was performed, its outcome, the evidence reviewed, related findings, and whether a retest is required. Rules shown as Not Performed or Uncertain are the remaining procedures behind the audit completion percentage on the Audit Output tab.'),
+        ('ASSUMPTION REGISTER','The Assumption Register tab is a provenance template for the model\u2019s key assumptions. Related findings from this review are pre-populated; the Source, Source Date, Owner, Basis and Externally Supported columns are for the model owner to complete and the reviewer to verify.'),
         ('WHAT THIS REPORT COVERS','This workbook records findings identified during the model review. It covers the automatable subset of a structured model review. It does not replace source document review, cell-by-cell formula inspection, or reviewer judgment. The following items were not included in this review — see the Scope and Reliance tab for details.'),
     ]
     row=3
@@ -487,6 +499,130 @@ def build_report(data_path, output_path):
         set_row(ws5,row_i,50)
 
     # ════════════════════════════════════════════════════════════════════════
+    # TAB 5B — VALIDATION MATRIX (B6) — every checklist rule with its outcome
+    # ════════════════════════════════════════════════════════════════════════
+    wsm=wb.create_sheet('Validation Matrix'); wsm.sheet_view.showGridLines=False; wsm.freeze_panes='A4'
+    for col,w in [(1,3),(2,5),(3,12),(4,22),(5,46),(6,8),(7,11),(8,16),(9,11),(10,32),(11,24),(12,32),(13,10),(14,3)]:
+        set_col(wsm,col,w)
+
+    merge(wsm,'B1:M1','VALIDATION MATRIX — REVIEW PROCEDURES PERFORMED',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wsm,1,2,1,13,DARK_BLUE); set_row(wsm,1,28)
+
+    def _rmatch(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
+
+    m_rows=[]; n_pass=n_issue=n_unc=n_np=0
+    for rule in checklist_rules:
+        rid=rule.get('id',''); tier=rule.get('_tier','Tier 2')
+        rres=[r for r in ruleResults if _rmatch(rid,r.get('id',''))]
+        rfnd=[f for f in findings if _rmatch(rid,f.get('id',''))]
+        performed='Yes' if rres else 'No'
+        issues=[r for r in rres if r.get('status') not in ('pass','uncertain')]
+        unc=[r for r in rres if r.get('status')=='uncertain']
+        if not rres: status='Not performed'; n_np+=1
+        elif issues: status=f'Issues raised ({len(issues)})'; n_issue+=1
+        elif unc: status='Uncertain'; n_unc+=1
+        else: status='Pass'; n_pass+=1
+        confs=[r.get('confidence') for r in rres if isinstance(r.get('confidence'),(int,float)) and r.get('confidence')]
+        conf=f'{max(confs)}%' if (confs and tier=='Tier 2') else '\u2014'
+        sm=re.search(r'-S(\d+)-',rid)
+        if tier=='Tier 1': evidence='Full workbook \u2014 deterministic code check'
+        elif sm and int(sm.group(1)) in (5,6,7,10): evidence='Deep financial data subset \u2014 full AFS/IFS/Cons/Debt/Equity/D&T/Leases'
+        else: evidence='Standard data subset \u2014 all sheets, trimmed rows'
+        refs=[f.get('id','') for f in rfnd]
+        ref_txt=', '.join(refs[:4])+(f' +{len(refs)-4} more' if len(refs)>4 else '') if refs else '\u2014'
+        if status=='Not performed': missing='Rule not returned by the review \u2014 re-run validation or test manually'
+        elif status=='Uncertain': missing='Evidence insufficient for a conclusive test \u2014 see related finding'
+        else: missing='\u2014'
+        retest='Yes' if (issues or any(f.get('needs_retest') for f in rfnd)) else '\u2014'
+        m_rows.append((rid,rule.get('source_section','') or rule.get('section',''),rule.get('label',''),tier,performed,status,conf,evidence,ref_txt,missing,retest))
+
+    extras=len([f for f in findings if not any(_rmatch(r.get('id',''),f.get('id','')) for r in checklist_rules)])
+    summ=(f'{len(checklist_rules)} rules in checklist \u2014 Performed: {len(checklist_rules)-n_np} \u00b7 Pass: {n_pass} \u00b7 '
+          f'Issues raised: {n_issue} \u00b7 Uncertain: {n_unc} \u00b7 Not performed: {n_np}.'
+          +(f' {extras} additional finding(s) outside the checklist \u2014 see Issue Log.' if extras else ''))
+    merge(wsm,'B2:M2',summ,sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True); set_row(wsm,2,24)
+
+    vm_headers=['','#','Rule ID','Test Area','Rule','Tier','Performed','Status','Confidence','Evidence Reviewed','Issue Reference(s)','Missing Evidence','Retest\nRequired','']
+    for col,h in enumerate(vm_headers,1):
+        c=wsm.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+    set_row(wsm,3,30)
+
+    st_bg={'Pass':LIGHT_GREEN,'Uncertain':LIGHT_YELL,'Not performed':GREY_LIGHT}
+    for row_i,(rid,area,label,tier,perf,status,conf,evidence,refs,missing,retest) in enumerate(m_rows,4):
+        vals=['',row_i-3,rid,area,label,tier,perf,status,conf,evidence,refs,missing,retest,'']
+        sbg=st_bg.get(status,LIGHT_AMBER if status.startswith('Issues') else WHITE)
+        for col,val in enumerate(vals,1):
+            c=wsm.cell(row_i,col); c.value=val
+            c.font=Fn(sz=9,bold=(col in [3,8]))
+            c.fill=F(sbg if col==8 else WHITE)
+            c.alignment=A(h='center' if col in [2,6,7,9,13] else 'left',v='top',wrap=(col in [4,5,10,11,12]))
+            c.border=B()
+        set_row(wsm,row_i,26)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 5C — ASSUMPTION REGISTER (B7) — assumption provenance template
+    # ════════════════════════════════════════════════════════════════════════
+    wsa=wb.create_sheet('Assumption Register'); wsa.sheet_view.showGridLines=False; wsa.freeze_panes='A4'
+    for col,w in [(1,3),(2,5),(3,28),(4,30),(5,20),(6,12),(7,14),(8,26),(9,14),(10,32),(11,3)]:
+        set_col(wsa,col,w)
+
+    merge(wsa,'B1:J1','ASSUMPTION REGISTER \u2014 KEY ASSUMPTION PROVENANCE',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wsa,1,2,1,10,DARK_BLUE); set_row(wsa,1,28)
+    merge(wsa,'B2:J2','Related findings are pre-populated from this review. Source, Source Date, Owner, Basis and Externally Supported are for the model owner to complete and the reviewer to verify.',sz=8,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
+    set_row(wsa,2,24)
+
+    mining_areas=[('Commodity prices (PCI / thermal / benchmark)',['price','pricing','benchmark','hcc','pci','thermal']),
+        ('FX rates',['fx','exchange rate','aud/usd','currency']),
+        ('Production volumes & ramp-up',['production','volume','ramp','mtpa','tonn']),
+        ('Product mix & quality',['product mix','quality','specification','washability']),
+        ('Reserves & mine life',['reserve','resource','mine life','pit life','depletion']),
+        ('Yield / recovery',['yield','recovery','wash']),
+        ('Strip ratio & dilution',['strip ratio','dilution','waste']),
+        ('Capital expenditure',['capex','capital expenditure','sustaining']),
+        ('Operating costs',['opex','operating cost','unit cost','fob']),
+        ('Royalties',['royalt']),
+        ('Tax rates & treatment',['tax']),
+        ('Debt terms & facilities',['debt','interest','facility','dscr','repayment','drawdown']),
+        ('Discount rate / WACC',['discount rate','wacc','npv']),
+        ('Inflation & escalation',['inflation','escalation','cpi']),
+        ('Working capital',['working capital','receivable','payable','inventory']),
+        ('Rehabilitation & closure costs',['rehabilitation','closure','restoration'])]
+    generic_areas=[('Revenue drivers & pricing',['price','pricing','revenue','tariff']),
+        ('Volume & growth rates',['volume','growth','ramp']),
+        ('FX rates',['fx','exchange rate','currency']),
+        ('Capital expenditure',['capex','capital expenditure']),
+        ('Operating costs',['opex','operating cost','unit cost']),
+        ('Tax rates & treatment',['tax']),
+        ('Debt terms & facilities',['debt','interest','facility','dscr','repayment']),
+        ('Discount rate / WACC',['discount rate','wacc','npv']),
+        ('Inflation & escalation',['inflation','escalation','cpi']),
+        ('Working capital',['working capital','receivable','payable','inventory'])]
+    areas=mining_areas if ('mining' in (modelType or '').lower() or 'mining' in (domainSkill or '').lower()) else generic_areas
+
+    def _ftext(f):
+        return ' '.join(str(f.get(k,'') or '') for k in ('label','title','condition','reason','workstream','category')).lower()
+    ftexts=[(f.get('id',''),_ftext(f)) for f in findings]
+
+    ar_headers=['','#','Assumption Area','Related Findings','Source','Source Date','Owner','Basis (contract / market / management)','Externally\nSupported?','Notes','']
+    for col,h in enumerate(ar_headers,1):
+        c=wsa.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+    set_row(wsa,3,30)
+
+    for row_i,(area,kws) in enumerate(areas,4):
+        hits=[fid for fid,txt in ftexts if any(k in txt for k in kws)]
+        ref_txt=', '.join(hits[:4])+(f' +{len(hits)-4} more' if len(hits)>4 else '') if hits else '\u2014'
+        vals=['',row_i-3,area,ref_txt,'','','','','','','']
+        for col,val in enumerate(vals,1):
+            c=wsa.cell(row_i,col); c.value=val
+            c.font=Fn(sz=9,bold=(col==3))
+            c.fill=F(WHITE)
+            c.alignment=A(h='center' if col in [2,9] else 'left',v='top',wrap=(col in [3,4,8,10]))
+            c.border=B()
+        set_row(wsa,row_i,26)
+
+    # ════════════════════════════════════════════════════════════════════════
     # TAB 6 — FORMULA ANALYSIS
     # ════════════════════════════════════════════════════════════════════════
     ws6=wb.create_sheet('Formula Analysis'); ws6.sheet_view.showGridLines=False; ws6.freeze_panes='A3'
@@ -661,7 +797,7 @@ def build_report(data_path, output_path):
 
     # ── Save ─────────────────────────────────────────────────────────────────
     wb.save(output_path)
-    return {'status':'ok','tabs':9,'findings':len(findings)}
+    return {'status':'ok','tabs':11,'findings':len(findings)}
 
 if __name__=='__main__':
     if len(sys.argv)<3:

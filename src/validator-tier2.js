@@ -138,7 +138,11 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
   let rawText = '';
   const stream = await client.messages.stream({
     model: 'claude-sonnet-5',
-    max_tokens: 64000,
+    max_tokens: 128000,   // Sonnet 5 ceiling on the synchronous Messages API.
+                           // Was 64000, sized for the pre-Sonnet-5 tokenizer;
+                           // the new tokenizer produces ~30% more tokens for
+                           // the same output, which was silently truncating
+                           // dense/numeric batches like Accounting & Debt.
     system: [
       {
         type: 'text',
@@ -159,8 +163,25 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     }
   }
 
-  console.log(`   ${batchLabel}: ${rawText.length} chars received`);
-  return parseResponse(rawText);
+  const finalMessage = await stream.finalMessage();
+  const stopReason = finalMessage.stop_reason;
+  const outputTokens = finalMessage.usage ? finalMessage.usage.output_tokens : null;
+
+  console.log(`   ${batchLabel}: ${rawText.length} chars received` +
+    (outputTokens ? ` (${outputTokens} output tokens, stop: ${stopReason})` : ''));
+
+  if (stopReason === 'max_tokens') {
+    console.log(`   \u26a0\ufe0f  ${batchLabel} hit the max_tokens ceiling \u2014 response was truncated, not malformed. Split the batch or raise max_tokens further.`);
+  }
+
+  try {
+    return parseResponse(rawText);
+  } catch (err) {
+    if (stopReason === 'max_tokens') {
+      throw new Error(`${batchLabel} response truncated at ${outputTokens} output tokens (max_tokens ceiling reached) \u2014 not a parse error. Reduce batch size or raise max_tokens.`);
+    }
+    throw err;
+  }
 }
 
 // Split tier2 rules into batches by section
