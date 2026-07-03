@@ -5,6 +5,10 @@ const path    = require('path');
 const fs      = require('fs');
 const cors        = require('cors');
 const rateLimit   = require('express-rate-limit');
+const cron        = require('node-cron');
+const { sanitizeFilename }           = require('./src/utils/sanitize-filename');
+const { logAuditEvent, getClientIp } = require('./src/utils/audit-log');
+const { runRetentionSweep }          = require('./src/utils/cleanup');
 
 // Core pipeline modules
 const { parseExcel }                             = require('./src/parser');
@@ -78,9 +82,8 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
-    const ext  = path.extname(file.originalname);
-    const base = path.parse(file.originalname).name;
-    cb(null, `${base}-${timestamp}${ext}`);
+    const { name, ext } = sanitizeFilename(file.originalname);
+    cb(null, `${name}-${timestamp}${ext}`);
   }
 });
 
@@ -118,6 +121,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const filePath     = req.file.path;
   const originalName = req.file.originalname;
   const startTime    = Date.now();
+  const clientIp      = getClientIp(req);
+
+  logAuditEvent({
+    event: 'upload_received', originalName, storedAs: path.basename(filePath),
+    ip: clientIp, sizeBytes: req.file.size
+  });
 
   console.log(`\n─────────────────────────────────────`);
   console.log(`FM VALIDATOR — ${originalName}`);
@@ -260,8 +269,15 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         modelType,
         modelIndustry:  modelSummary.industry
       });
+      // Local disk is a working directory only — the Drive copy (with its
+      // own retention sweep) is the retained artefact. Remove the local
+      // copy now that delivery succeeded; keep it on failure so nothing
+      // is silently lost.
+      fs.unlink(reportPath, () => {});
+      logAuditEvent({ event: 'report_delivered', originalName, reportName, ip: clientIp, issueCount: allFlagged.length });
     } catch (driveErr) {
       console.error('   ❌ Drive/notify error:', driveErr.message);
+      logAuditEvent({ event: 'drive_upload_failed', originalName, reportName, ip: clientIp, error: driveErr.message });
     }
 
     const duration     = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -316,6 +332,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   } catch (error) {
     console.error('Fatal validation error:', error.message);
     console.error('Stack:', error.stack);
+    logAuditEvent({ event: 'validation_error', originalName, ip: clientIp, error: error.message });
     fs.unlink(filePath, () => {});
     res.status(500).json({ status: 'error', message: error.message || 'Validation failed' });
   }
@@ -330,6 +347,14 @@ app.use((error, req, res, next) => {
 });
 
 app.use((req, res) => res.status(404).json({ status: 'error', message: 'Not found' }));
+
+// ── Retention sweep — hourly, plus once on startup ─────────────────────────
+const uploadsDir   = path.join(__dirname, 'uploads');
+const processedDir = path.join(__dirname, 'processed');
+runRetentionSweep({ uploadsDir, processedDir, folderId: FOLDER_ID }).catch(e => console.error('Startup retention sweep failed:', e.message));
+cron.schedule('0 * * * *', () => {
+  runRetentionSweep({ uploadsDir, processedDir, folderId: FOLDER_ID }).catch(e => console.error('Retention sweep failed:', e.message));
+});
 
 app.listen(PORT, () => console.log(`FM Validator running on http://localhost:${PORT}`));
 module.exports = app;

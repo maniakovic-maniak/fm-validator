@@ -11,6 +11,8 @@ const { uploadBothFiles }                          = require('./src/writer');
 const { sendNotification }                         = require('./src/notifier');
 const path = require('path');
 const fs   = require('fs');
+const { logAuditEvent }    = require('./src/utils/audit-log');
+const { runRetentionSweep } = require('./src/utils/cleanup');
 
 const FILE_ID   = process.argv[2];
 const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
@@ -152,6 +154,19 @@ async function run() {
     modelIndustry:  modelSummary.industry
   });
 
+  // Local disk is a working directory only — Drive (with its own retention
+  // sweep) is the retained artefact.
+  fs.unlink(reportPath, () => {});
+  logAuditEvent({ event: 'report_delivered', originalName, reportName, source: 'cli', issueCount: allFlagged.length });
+
+  // One-off sweep for this run — covers CLI-only usage where server.js's
+  // hourly cron isn't running in this process.
+  await runRetentionSweep({
+    uploadsDir:   path.join(process.cwd(), 'uploads'),
+    processedDir: path.join(process.cwd(), 'processed'),
+    folderId:     FOLDER_ID
+  }).catch(e => console.error('Retention sweep failed:', e.message));
+
   console.log('\n─────────────────────────────────────');
   console.log('FM VALIDATOR — complete');
   console.log(`Model type:       ${modelType} — ${modelSummary.industry || 'unknown'}`);
@@ -164,5 +179,6 @@ async function run() {
 run().catch(err => {
   console.error('\n❌ Fatal error:', err.message);
   console.error('Stack:', err.stack);
+  logAuditEvent({ event: 'validation_error', source: 'cli', error: err.message });
   process.exit(1);
 });

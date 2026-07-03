@@ -1,14 +1,21 @@
-node_modules/
+# Secrets — never commit
 .env
-.DS_Store
-*.log
-dist/
-build/
-token.json
+.env.*
+!.env.example
 credentials.json
-processed/
-uploads/
-*.xlsm
-*.xlsx
-*.xlsb
-*.xls
+token.json
+*.pem
+*.key
+
+# Runtime data
+node_modules/
+uploads/*
+!uploads/.gitkeep
+processed/*
+!processed/.gitkeep
+logs/*.log
+*.log
+
+# OS / editor
+.DS_Store
+.vscode/

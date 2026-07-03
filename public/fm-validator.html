@@ -651,7 +651,7 @@
     formData.append('file', selectedFile);
 
     try {
-      const res = await fetch('/api/validate', { method: 'POST', body: formData });
+      const res = await fetch('api/validate', { method: 'POST', body: formData });
       const result = await res.json();
       stopProgress(result);
       await new Promise(r => setTimeout(r, 700));
