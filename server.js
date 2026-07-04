@@ -36,10 +36,30 @@ const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
   }
 });
 
+// ALLOWED_ORIGIN supports a comma-separated list. Each entry is also
+// expanded to cover its www./bare twin automatically — browsers treat
+// https://wonderlabkids.net and https://www.wonderlabkids.net as entirely
+// different origins, and users arrive via both.
+function expandOrigin(o) {
+  try {
+    const u = new URL(o);
+    const twin = u.hostname.startsWith('www.')
+      ? `${u.protocol}//${u.hostname.slice(4)}${u.port ? ':' + u.port : ''}`
+      : `${u.protocol}//www.${u.hostname}${u.port ? ':' + u.port : ''}`;
+    return [o, twin];
+  } catch (_) {
+    return [o]; // not a parseable URL — keep as-is
+  }
+}
+
 const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  process.env.ALLOWED_ORIGIN
+  ...(process.env.ALLOWED_ORIGIN || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean)
+    .flatMap(expandOrigin)
 ].filter(Boolean);
 
 // ── Rate limiting — 20 requests per 15 minutes per IP ────────────────────
@@ -72,6 +92,22 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// ── Passenger sub-URI normalisation ──────────────────────────────────────────
+// When mounted at wonderlabkids.net/fm-validator, Passenger passes Node apps
+// the FULL path including the '/fm-validator' prefix (unlike its behaviour
+// for some other app types). Strip it here once so every route below works
+// identically whether the app is accessed with or without the prefix
+// (localhost dev = no prefix, production = prefixed).
+const BASE_PATH = process.env.APP_BASE_PATH || '/fm-validator';
+app.use((req, res, next) => {
+  if (req.url === BASE_PATH || req.url.startsWith(BASE_PATH + '/') || req.url.startsWith(BASE_PATH + '?')) {
+    req.url = req.url.slice(BASE_PATH.length) || '/';
+    if (req.url.startsWith('?')) req.url = '/' + req.url;
+  }
+  next();
+});
+
 app.use(express.static('public'));
 
 // ── File upload config ────────────────────────────────────────────────────────
@@ -297,6 +333,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     console.log(`\n✅ Complete in ${duration}s — flagged: ${allFlagged.length}`);
 
+    fs.unlink(filePath, () => {});
+
     res.json({
       status:       allFlagged.length === 0 ? 'passed' : 'flagged',
       message:      allFlagged.length === 0
@@ -329,8 +367,6 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         action:   f.fix_instruction || 'Review and fix manually'
       }))
     });
-
-    fs.unlink(filePath, () => {});
 
   } catch (error) {
     console.error('Fatal validation error:', error.message);
