@@ -13,6 +13,7 @@ const path = require('path');
 const fs   = require('fs');
 const { logAuditEvent }    = require('./src/utils/audit-log');
 const { runRetentionSweep } = require('./src/utils/cleanup');
+const { startRunLog }      = require('./src/utils/run-logger');
 
 const FILE_ID   = process.argv[2];
 const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
@@ -22,12 +23,14 @@ if (!FILE_ID) {
   process.exit(1);
 }
 
+let runLog = { filename: null, stop: () => {} };
 async function run() {
   // ── Step 1: Parse ──────────────────────────────────────────────────────────
   const parsed = await fetchAndParse(FILE_ID);
 
   // Derive original filename from the downloaded file path
   const originalName = path.basename(parsed._filePath);
+  runLog = startRunLog(originalName);
 
   console.log('\n─────────────────────────────────────');
   console.log(`FM VALIDATOR — ${originalName}`);
@@ -157,7 +160,8 @@ async function run() {
   // Local disk is a working directory only — Drive (with its own retention
   // sweep) is the retained artefact.
   fs.unlink(reportPath, () => {});
-  logAuditEvent({ event: 'report_delivered', originalName, reportName, source: 'cli', issueCount: allFlagged.length });
+  logAuditEvent({ event: 'report_delivered', originalName, reportName, source: 'cli', issueCount: allFlagged.length, runLog: runLog.filename });
+  runLog.stop();
 
   // One-off sweep for this run — covers CLI-only usage where server.js's
   // hourly cron isn't running in this process.
@@ -180,5 +184,6 @@ run().catch(err => {
   console.error('\n❌ Fatal error:', err.message);
   console.error('Stack:', err.stack);
   logAuditEvent({ event: 'validation_error', source: 'cli', error: err.message });
+  try { runLog.stop(); } catch (_) {}
   process.exit(1);
 });

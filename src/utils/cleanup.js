@@ -3,11 +3,17 @@ const path = require('path');
 const { google } = require('googleapis');
 const { getAuth } = require('../auth');
 const { logAuditEvent } = require('./audit-log');
+const { RUNS_DIR } = require('./run-logger');
 
 // Local disk is a working directory only — files should be deleted the
 // moment each request finishes (server.js/index.js already do this on the
 // happy path). This sweep is the safety net for crashed/interrupted runs.
 const LOCAL_MAX_AGE_MS = 48 * 60 * 60 * 1000; // 48h
+
+// Run logs are debugging artefacts, not sensitive client data in the same
+// way uploads/reports are — worth keeping longer to review patterns across
+// runs (e.g. spotting a recurring Batch 2 truncation before it's reported).
+const RUN_LOG_MAX_AGE_MS = (parseInt(process.env.RUN_LOG_RETENTION_DAYS, 10) || 90) * 24 * 60 * 60 * 1000;
 
 // Google Drive is the actual permanent, client-facing store — this is
 // where a real retention window needs to be enforced. Longer than the
@@ -56,6 +62,7 @@ async function sweepDriveFolder(folderId) {
 async function runRetentionSweep({ uploadsDir, processedDir, folderId }) {
   const uploads   = sweepLocalDir(uploadsDir, LOCAL_MAX_AGE_MS);
   const processed = sweepLocalDir(processedDir, LOCAL_MAX_AGE_MS);
+  const runLogs   = sweepLocalDir(RUNS_DIR, RUN_LOG_MAX_AGE_MS);
   let drive = { checked: 0, deleted: 0 };
   try {
     drive = await sweepDriveFolder(folderId);
@@ -67,15 +74,17 @@ async function runRetentionSweep({ uploadsDir, processedDir, folderId }) {
     event: 'retention_sweep',
     uploadsDeleted:   uploads.deleted,
     processedDeleted: processed.deleted,
+    runLogsDeleted:   runLogs.deleted,
     driveDeleted:     drive.deleted,
     driveRetentionDays: DRIVE_MAX_AGE_MS / (24 * 60 * 60 * 1000)
   });
 
   console.log(`   Retention sweep: uploads ${uploads.deleted}/${uploads.checked} removed, ` +
     `processed ${processed.deleted}/${processed.checked} removed, ` +
+    `run logs ${runLogs.deleted}/${runLogs.checked} removed, ` +
     `Drive ${drive.deleted}/${drive.checked} removed (>${(DRIVE_MAX_AGE_MS/86400000).toFixed(0)}d old)`);
 
-  return { uploads, processed, drive };
+  return { uploads, processed, runLogs, drive };
 }
 
 module.exports = { runRetentionSweep, sweepLocalDir, sweepDriveFolder };
