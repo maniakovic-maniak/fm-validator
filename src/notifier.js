@@ -9,7 +9,7 @@ function escHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-require('dotenv').config();
+// dotenv is loaded once by the entry point (server.js / index.js)
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendNotification(outcome) {

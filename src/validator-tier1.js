@@ -278,6 +278,31 @@ function runTier1(parsed) {
 
   }
 
+  // ── Deterministic root-cause attribution ──────────────────────────────────
+  // Tier 1 checks are mechanical, so their root cause maps directly from the
+  // rule type — no LLM judgement needed. Keeps the Issue Log's Root Cause
+  // column complete for every finding, not just Tier 2's.
+  const ROOT_CAUSE_BY_TYPE = {
+    no_formula_errors:          'Broken reference / formula error',
+    sheet_exists:               'Missing model structure',
+    sheet_exists_flexible:      'Missing model structure',
+    sheet_empty:                'Unresolved prior review items',
+    no_negative_values:         'Sign or balance error',
+    no_external_links:          'External dependency',
+    workbook_opens_clean:       'File integrity issue',
+    no_circular_references:     'Circular reference',
+    actuals_forecast_separated: 'Period flag misconfiguration'
+  };
+  const typeById = Object.fromEntries(checklist.tier1.map(r => [r.id, r.type]));
+  for (const r of results) {
+    if (r.status !== 'pass' && !r.root_cause) {
+      // Failure ids may carry a per-sheet suffix (e.g. T1-001-Graphs) —
+      // match on the base rule id.
+      const baseId = (r.id || '').split('-').slice(0, 2).join('-');
+      r.root_cause = ROOT_CAUSE_BY_TYPE[typeById[baseId]] || 'Structural check failure';
+    }
+  }
+
   return results;
 }
 
