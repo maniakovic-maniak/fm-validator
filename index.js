@@ -39,6 +39,7 @@ async function run() {
   // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────────
   console.log('[1.5/6] Scanning formula text...');
   const tier0 = await runTier0(parsed);
+  const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (_) { return []; } })();
 
   // ── Step 2: Familiarise ────────────────────────────────────────────────────
   console.log('[1/6] Familiarising with the model...');
@@ -139,7 +140,8 @@ async function run() {
     domainSkill:       domain.file,
     modelTier:         'Tier 1',
     reviewMode:        'llm_only',
-    ruleResults
+    ruleResults,
+    errorScan
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FM Validator — _VALIDATED.xlsx Report Builder
-11-tab transaction-grade audit report
+12-tab transaction-grade audit report
 """
 import sys, json, os, re
 from datetime import datetime
@@ -92,6 +92,7 @@ def build_report(data_path, output_path):
     modelTier    = d.get('modelTier','Tier 1')
     reviewMode   = d.get('reviewMode','llm_only')
     ruleResults  = d.get('ruleResults',[])
+    errorScan    = d.get('errorScan',[])
 
     # Checklist rules for the Validation Matrix — loaded from config
     checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
@@ -113,14 +114,48 @@ def build_report(data_path, output_path):
     p2 = [f for f in findings if priority(f)=='P2']
     p3 = [f for f in findings if priority(f)=='P3']
 
+    # Audit coverage counts — feeds the dashboard completion breakdown (V11 1.3)
+    def _rmatch0(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
+    cov_perf=cov_pass=cov_issue=cov_unc=cov_np=0
+    for _rule in checklist_rules:
+        _rres=[r for r in ruleResults if _rmatch0(_rule.get('id',''),r.get('id',''))]
+        if not _rres: cov_np+=1; continue
+        cov_perf+=1
+        if any(r.get('status') not in ('pass','uncertain') for r in _rres): cov_issue+=1
+        elif any(r.get('status')=='uncertain' for r in _rres): cov_unc+=1
+        else: cov_pass+=1
+
     # KPMG verdict
     # Neutral audit completion header — no verdict or reliance conclusion
     p1_open = len(p1)
     p2_open = len(p2)
     p3_open = len(p3)
-    verdict_short = f'AUDIT REVIEW — {igReadiness}% OF PLANNED PROCEDURES COMPLETED'
-    verdict_bg    = MID_BLUE
-    verdict_text  = (igCommentary or f'The audit file has completed {igReadiness}% of the planned review procedures. This does not mean the model is approved or ready for external use. Open items are listed by priority below. Further review or retesting is required before these items can be closed.')
+    # Reliance classification (V11 1.1) — component of the audit conclusion,
+    # stated factually. Hard rule: a model cannot be classified reliance-ready
+    # for lender/investor use or transaction execution while any P1 item is open.
+    if p1_open > 0:
+        if igReadiness >= 60:
+            verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=AMBER
+            verdict_text=(f'{p1_open} P1 item(s) remain open — this model cannot be classified reliance-ready for management, lender or investor use until all P1 items are resolved and retested. '
+                          f'{igReadiness}% of planned procedures completed ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run).')
+        else:
+            verdict_short='NOT RELIANCE-READY'; verdict_bg=RED
+            verdict_text=(f'{p1_open} P1 item(s) open and {igReadiness}% of planned procedures completed. Both open P1 findings and audit coverage prevent reliance at any level. '
+                          f'Resolve P1 items and complete outstanding procedures before reassessment.')
+    elif igReadiness >= 95:
+        verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=GREEN
+        verdict_text=(f'No P1 items open and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
+                      f'{p2_open} P2 item(s) remain and should be resolved or formally waived as part of transaction close.')
+    elif igReadiness >= 80:
+        verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=GREEN
+        verdict_text=(f'No P1 items open; {igReadiness}% of planned procedures completed. Outstanding items: {cov_unc} uncertain and {cov_np} not-run procedures, {p2_open} open P2 item(s). '
+                      f'Suitable for external review with these limitations disclosed.')
+    elif igReadiness >= 60:
+        verdict_short='RELIANCE-READY FOR MANAGEMENT DISCUSSION'; verdict_bg=MID_BLUE
+        verdict_text=(f'No P1 items open; {igReadiness}% of planned procedures completed. Coverage gaps ({cov_np} procedures not run, {cov_unc} uncertain) limit use to internal management discussion until closed.')
+    else:
+        verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=AMBER
+        verdict_text=(igCommentary or f'{igReadiness}% of planned procedures completed. Coverage is not yet sufficient for management, lender or investor reliance. {cov_np} procedures not run, {cov_unc} uncertain.')
 
     risk_rating = f'P1: {len(p1)}  P2: {len(p2)}  P3: {len(p3)}'
 
@@ -146,9 +181,9 @@ def build_report(data_path, output_path):
     set_row(ws1,4,24); set_row(ws1,5,8)
 
     # Verdict bar
-    merge(ws1,'B6:C7',verdict_short,bold=True,sz=11,col=WHITE,bg=MID_BLUE,h='left',v='center')
-    merge(ws1,'D6:I7',verdict_text,sz=10,col=WHITE,bg=MID_BLUE,v='center',wrap=True)
-    fill_range(ws1,6,2,7,9,MID_BLUE)
+    merge(ws1,'B6:C7',verdict_short,bold=True,sz=11,col=WHITE,bg=verdict_bg,h='left',v='center')
+    merge(ws1,'D6:I7',verdict_text,sz=10,col=WHITE,bg=verdict_bg,v='center',wrap=True)
+    fill_range(ws1,6,2,7,9,verdict_bg)
     set_row(ws1,6,18); set_row(ws1,7,18); set_row(ws1,8,8)
 
     # Risk rating + readiness
@@ -160,21 +195,20 @@ def build_report(data_path, output_path):
 
     merge(ws1,'D9:I9','AUDIT PROCESS COMPLETION',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT)
     ws1['D10'].value=f'{igReadiness}%'; ws1['D10'].font=Fn(bold=True,sz=22,col=AMBER); ws1['D10'].alignment=A(h='center',v='center')
-    merge(ws1,'E10:I10',f'Procedures completed: {igReadiness}% of planned review steps',sz=9,col=GREY_DARK)
+    merge(ws1,'E10:I10',f'{len(checklist_rules)} planned procedures — {cov_perf} performed · {cov_pass} passed · {cov_issue} raised issues · {cov_unc} uncertain · {cov_np} not run',sz=9,col=GREY_DARK)
     merge(ws1,'E11:I11',igCommentary or f'{len(p1)} P1 item(s) and {len(p2)} P2 item(s) require attention before this review can be closed.',sz=9,col=GREY_DARK,wrap=True)
     for r in [9,10,11]: set_row(ws1,r,18)
     set_row(ws1,12,8)
 
     # Priority summary
     items=[('P1 OPEN',len(p1),GREY_LIGHT,DARK_BLUE),('P2 OPEN',len(p2),GREY_LIGHT,DARK_BLUE),('P3 OPEN',len(p3),GREY_LIGHT,DARK_BLUE),
-           ('','',None,None),
+           ('UNIQUE',t0.get('stats',{}).get('uniqueFormulaCount',0),PALE_BLUE,MID_BLUE),
            ('IFERROR',t0.get('stats',{}).get('totalIferrorCount',0),LIGHT_AMBER,AMBER),
            ('OFFSET',t0.get('stats',{}).get('totalOffsetCount',0),LIGHT_YELL,DARK_BLUE),
            ('EXT LINKS',t0.get('stats',{}).get('totalExternalLinks',0),LIGHT_RED,RED),
            ('FORMULAS',t0.get('stats',{}).get('totalFormulaCells',0),PALE_BLUE,MID_BLUE)]
     for i,(label,val,bg,tc) in enumerate(items):
         col=i+2
-        if not label: continue
         c13=ws1.cell(13,col); c13.value=label; c13.font=Fn(bold=True,sz=8,col=GREY_DARK); c13.fill=F(bg); c13.alignment=A(h='center',v='center')
         c14=ws1.cell(14,col); c14.value=val; c14.font=Fn(bold=True,sz=18,col=tc); c14.fill=F(bg); c14.alignment=A(h='center',v='center')
     set_row(ws1,13,20); set_row(ws1,14,26); set_row(ws1,15,8)
@@ -211,7 +245,13 @@ def build_report(data_path, output_path):
         ws1.cell(27,col).value=lbl; ws1.cell(27,col).font=Fn(bold=True,col=WHITE); ws1.cell(27,col).fill=F(DARK_BLUE); ws1.cell(27,col).alignment=A(h='center')
     set_row(ws1,27,18)
 
-    top10 = (p1+p2+p3)[:10]
+    # Ordered by decision impact (V11 1.4): P1 first, then key-output impact,
+    # then formula complexity — not by insertion order.
+    _pri_rank={'P1':0,'P2':1,'P3':2}
+    top10 = sorted(p1+p2+p3, key=lambda f:(
+        _pri_rank.get(priority(f),3),
+        0 if str(f.get('key_output_impact','')).lower() in ('yes','true','high') else 1,
+        -(f.get('fscore') or 0)))[:10]
     for i,f in enumerate(top10,28):
         pri=priority(f); bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT
         ws1.cell(i,2).value=i-27; ws1.cell(i,2).font=Fn(bold=True,sz=9); ws1.cell(i,2).fill=F(bg); ws1.cell(i,2).alignment=A(h='center')
@@ -284,6 +324,7 @@ def build_report(data_path, output_path):
         ('HOW TO CLOSE AN ISSUE','Issues may only be closed when:\n• The fix has been implemented in the model;\n• The fix has been retested and confirmed by the reviewer;\n• Closure evidence is documented;\n• The reviewer has signed off.\nWaived issues require a documented commercial rationale and approver sign-off.'),
         ('VIEW ISSUE LINKS','Each finding with a known cell location includes a View Issue hyperlink. These links work best on Windows Excel when both files are open in the same Excel instance and stored in the same folder. On Mac Excel, links may fail with a reference error — this is an Excel limitation, not a report error. If a link fails, use the Sheet and Cell columns to navigate to the issue manually. The Sheet and Cell values are always accurate regardless of hyperlink behaviour.'),
         ('VALIDATION MATRIX','The Validation Matrix tab lists every rule in the review checklist and records whether it was performed, its outcome, the evidence reviewed, related findings, and whether a retest is required. Rules shown as Not Performed or Uncertain are the remaining procedures behind the audit completion percentage on the Audit Output tab.'),
+        ('ERROR MATRIX','The Error Matrix tab groups every live error value in the workbook by error code, with sample locations, the typical root cause for that code, and the recommended corrective approach. Errors hidden inside IFERROR/IFNA wrappers do not appear as live values and are assessed under formula review.'),
         ('ASSUMPTION REGISTER','The Assumption Register tab is a provenance template for the model\u2019s key assumptions. Related findings from this review are pre-populated; the Source, Source Date, Owner, Basis and Externally Supported columns are for the model owner to complete and the reviewer to verify.'),
         ('WHAT THIS REPORT COVERS','This workbook records findings identified during the model review. It covers the automatable subset of a structured model review. It does not replace source document review, cell-by-cell formula inspection, or reviewer judgment. The following items were not included in this review — see the Scope and Reliance tab for details.'),
     ]
@@ -687,6 +728,69 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 7 — FORMULA MAP
     # ════════════════════════════════════════════════════════════════════════
+    # TAB — ERROR-CODE ROOT CAUSE MATRIX (V11 §4)
+    # ════════════════════════════════════════════════════════════════════════
+    wse=wb.create_sheet('Error Matrix'); wse.sheet_view.showGridLines=False; wse.freeze_panes='A4'
+    for col,w in [(1,3),(2,10),(3,8),(4,34),(5,34),(6,34),(7,3)]:
+        set_col(wse,col,w)
+    merge(wse,'B1:F1','ERROR-CODE ROOT CAUSE MATRIX',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wse,1,2,1,6,DARK_BLUE); set_row(wse,1,28)
+    _ifer=t0.get('stats',{}).get('totalIferrorCount',0)
+    merge(wse,'B2:F2',(f'Live error values found in the workbook, grouped by code. '
+        f'{_ifer:,} IFERROR/IFNA wrappers exist in this model — errors inside wrapped formulas do not appear here and may be silently masked; see Formula Due Diligence.'),
+        sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
+    set_row(wse,2,26)
+
+    _ERR_GUIDE={
+        '#REF!':   ('Referenced rows, columns or sheets were deleted or moved after the formula was written.',
+                    'Rebuild the reference against the current layout; add named ranges for structural anchors.'),
+        '#DIV/0!': ('Division where the denominator is zero or blank — typically an unguarded ratio in early or terminal periods.',
+                    'Guard the denominator explicitly (IF(den=0,...)) rather than wrapping the result in IFERROR.'),
+        '#N/A':    ('A lookup failed to find its key — missing key, mismatched type/format, or approximate match on unsorted data.',
+                    'Confirm key existence and exact-match settings; reconcile key lists between source and lookup tables.'),
+        '#VALUE!': ('Operation applied to the wrong data type — text in arithmetic, ranges of mismatched size, or stray characters in inputs.',
+                    'Trace the offending operand; clean input typing and separate text from numeric columns.'),
+        '#NAME?':  ('Formula references an undefined name — deleted named range, misspelled function, or missing add-in.',
+                    'Repair or redefine the name; remove dependencies on unavailable add-ins.'),
+        '#NUM!':   ('Invalid numeric operation — IRR failing to converge, negative value in a root/log, or overflow.',
+                    'Check the input domain; for IRR provide a guess or use XIRR with explicit dates.'),
+        '#NULL!':  ('Range intersection that does not intersect — usually a typo (space instead of comma/colon) in a range reference.',
+                    'Correct the range operator in the formula.'),
+        '#SPILL!': ('A dynamic array result is blocked by existing content in its spill range.',
+                    'Clear the blocking cells or convert the formula to a fixed range.'),
+    }
+    hdr_cells=['','CODE','COUNT','SAMPLE LOCATIONS','TYPICAL ROOT CAUSE','RECOMMENDED ACTION','']
+    for col,h in enumerate(hdr_cells,1):
+        if not h: continue
+        c=wse.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE); c.fill=F(DARK_BLUE)
+        c.alignment=A(h='center',v='center'); c.border=B(col=WHITE)
+    set_row(wse,3,20)
+
+    from collections import OrderedDict
+    _by_code=OrderedDict()
+    for e in errorScan:
+        code=str(e.get('error','')).strip()
+        if not code: continue
+        _by_code.setdefault(code,[]).append(f"{e.get('sheet','')}!{e.get('cell','')}")
+    row_i=4
+    if not _by_code:
+        merge(wse,f'B{row_i}:F{row_i}','No live error values detected in any cell. Note: errors masked by IFERROR/IFNA wrappers are not visible as live values — masking risk is assessed separately.',sz=9,col=GREY_DARK,wrap=True)
+        set_row(wse,row_i,24); row_i+=1
+    else:
+        for code, locs in sorted(_by_code.items(), key=lambda kv:-len(kv[1])):
+            cause,action=_ERR_GUIDE.get(code,('Unclassified error code.','Investigate the listed cells directly.'))
+            loc_txt=', '.join(locs[:5])+(f' +{len(locs)-5} more' if len(locs)>5 else '')
+            vals=['',code,len(locs),loc_txt,cause,action,'']
+            for col,val in enumerate(vals,1):
+                if col in (1,7): continue
+                c=wse.cell(row_i,col); c.value=val
+                c.font=Fn(sz=9,bold=(col==2),col=RED if col==2 else '000000')
+                c.fill=F(LIGHT_RED if col==2 else WHITE)
+                c.alignment=A(h='center' if col==3 else 'left',v='top',wrap=(col in (4,5,6)))
+                c.border=B()
+            set_row(wse,row_i,30); row_i+=1
+
+    # ════════════════════════════════════════════════════════════════════════
     ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False; ws7.freeze_panes='A4'
     for col,w in [(1,3),(2,22),(3,22),(4,10),(5,16),(6,10),(7,10),(8,14),(9,18),(10,20),(11,3)]:
         set_col(ws7,col,w)
@@ -797,7 +901,7 @@ def build_report(data_path, output_path):
 
     # ── Save ─────────────────────────────────────────────────────────────────
     wb.save(output_path)
-    return {'status':'ok','tabs':11,'findings':len(findings)}
+    return {'status':'ok','tabs':12,'findings':len(findings)}
 
 if __name__=='__main__':
     if len(sys.argv)<3:

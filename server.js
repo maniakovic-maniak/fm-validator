@@ -181,6 +181,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────
     console.log('[1.5/6] Scanning formula text...');
     const tier0 = await runTier0(parsed);
+  const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (_) { return []; } })();
 
     // Check for potential formula caching issue — if many formulas but few errors
     // detected, warn that cached values may be missing
@@ -293,7 +294,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       domainSkill:       domain.file,
       modelTier:         'Tier 1',
       reviewMode:        'llm_only',
-      ruleResults
+      ruleResults,
+      errorScan
     });
 
     let driveResult = null;

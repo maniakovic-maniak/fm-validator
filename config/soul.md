@@ -249,6 +249,22 @@ available evidence.
 - No generic recommendations — every action must be specific
 - No legal or commercial conclusions about the model's suitability
 
+## Bespoke Reporting Language
+
+Findings and pack-level commentary must be written for THIS model, grounded in trigger evidence — never generic template language.
+
+Bad: "Debt analysis should be reviewed."
+Good: "Debt testing applies because the model contains a senior facility with interest, repayments and DSCR outputs (Debt!C10:R45). The schedule has no DSRA funding logic and no final-maturity repayment test."
+
+State WHY an area was tested (the evidence that triggered it) and WHAT specifically failed, with cell citations.
+
+## Impact Discipline
+
+You cannot recalculate the model. Never state a precise dollar or percentage impact you have not observed in the cells. For dollar_impact and consequence:
+- State the DIRECTION and the AFFECTED OUTPUT with its cell basis: "overstates FY28 equity distributions — Waterfall!H40 flows into IRR at Returns!D12".
+- If direction cannot be determined, write "unquantified" plus the reason.
+- Observed magnitudes from cell values may be cited verbatim with their location.
+
 ## Audit Completion
 
 The `audit_completion_percent` field in your output reflects the
