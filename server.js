@@ -127,10 +127,12 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const ok = file.mimetype.includes('spreadsheet') ||
-               file.mimetype.includes('excel') ||
-               file.originalname.match(/\.(xlsx|xlsm)$/i);
-    ok ? cb(null, true) : cb(new Error('Only .xlsx and .xlsm files are allowed'), false);
+    // Extension is the single source of truth — browser MIME labels for
+    // Excel formats vary between browsers/OSes, and 'spreadsheet' also
+    // matches .ods, which the parser cannot read. The parser supports
+    // xlsx/xlsm natively and converts xlsb/xls via SheetJS.
+    const ok = /\.(xlsx|xlsm|xlsb|xls)$/i.test(file.originalname);
+    ok ? cb(null, true) : cb(new Error('Only .xlsx, .xlsm, .xlsb and .xls files are allowed'), false);
   },
   limits: { fileSize: 20 * 1024 * 1024 }
 });
@@ -201,7 +203,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // ── Step 4: Pre-validation gate ────────────────────────────────────
     console.log('[4/6] Pre-validation gate...');
-    const preResult = preValidate(parsed);
+    const preResult = preValidate(parsed, { tier0Stats: tier0.stats, modelSummary });
     if (!preResult.passed) {
       const failures = preResult.results.filter(r => r.status === 'fail');
       console.log(`   ❌ Pre-validation failed — ${failures.length} issues`);
@@ -215,6 +217,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       });
     }
     console.log('   ✅ Pre-validation passed');
+    (preResult.warnings || []).forEach(w => console.log('   ⚠️  ' + w));
 
     // ── Step 5: Validation ─────────────────────────────────────────────
     console.log('[5/6] Running validation...');
