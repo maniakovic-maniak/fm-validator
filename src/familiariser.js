@@ -1,6 +1,8 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { extractJson } = require('./utils/json-extract');
 
+const { dumpFailedResponse } = require('./utils/dump-failed-response');
+
 const client = new Anthropic();
 
 const FAMILIARISER_PROMPT = `You are a senior financial model reviewer.
@@ -120,29 +122,49 @@ async function familiariseModel(parsed) {
     finalPayload = { ...payload, sheets: trimmed };
   }
 
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-5',
-      max_tokens: 4000,
-      system: FAMILIARISER_PROMPT,
-      messages: [{
-        role: 'user',
-        content: JSON.stringify(finalPayload)
-      }]
-    });
+  // Familiarisation drives the domain-skill choice — a parse failure here
+  // silently degrades the ENTIRE run (mining model reviewed with the generic
+  // skill). So: one retry on failure (LLM output varies; retries usually
+  // succeed), and the raw response is dumped to logs/failed-responses/ so
+  // intermittent JSON breakage becomes diagnosable instead of a lost 80-char
+  // fragment in the console.
+  const MAX_ATTEMPTS = 2;
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      if (attempt > 1) console.log(`   Retrying familiarisation (attempt ${attempt}/${MAX_ATTEMPTS})...`);
+      const response = await client.messages.create({
+        model: 'claude-sonnet-5',
+        max_tokens: 4000,
+        system: FAMILIARISER_PROMPT,
+        messages: [{
+          role: 'user',
+          content: JSON.stringify(finalPayload)
+        }]
+      });
 
-    const textBlock = response.content.find(b => b.type === 'text');
-    if (!textBlock) throw new Error('No text block in familiarisation response');
-    const summary = extractJson(textBlock.text);
-    console.log(`   Model identified: ${summary.model_type} — ${summary.industry}`);
-    console.log(`   Currency: ${summary.currency} · Periodicity: ${summary.periodicity}`);
-    if (summary.immediate_observations && summary.immediate_observations.length > 0) {
-      console.log(`   ⚠️  ${summary.immediate_observations.length} immediate observation(s) noted`);
+      const textBlock = response.content.find(b => b.type === 'text');
+      if (!textBlock) throw new Error('No text block in familiarisation response');
+      let summary;
+      try {
+        summary = extractJson(textBlock.text);
+      } catch (parseErr) {
+        dumpFailedResponse('familiariser', textBlock.text, parseErr);
+        throw parseErr;
+      }
+      console.log(`   Model identified: ${summary.model_type} — ${summary.industry}`);
+      console.log(`   Currency: ${summary.currency} · Periodicity: ${summary.periodicity}`);
+      if (summary.immediate_observations && summary.immediate_observations.length > 0) {
+        console.log(`   ⚠️  ${summary.immediate_observations.length} immediate observation(s) noted`);
+      }
+      return summary;
+    } catch (e) {
+      lastError = e;
+      console.error(`   Familiarisation error (attempt ${attempt}/${MAX_ATTEMPTS}):`, e.message);
     }
-    return summary;
-
-  } catch (e) {
-    console.error('   Familiarisation error:', e.message);
+  }
+  {
+    const e = lastError;
     // Return a minimal fallback so the pipeline continues
     return {
       model_purpose: 'Unknown — familiarisation failed',

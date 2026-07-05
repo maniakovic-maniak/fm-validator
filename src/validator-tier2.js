@@ -4,6 +4,7 @@ const path = require('path');
 const checklist = require('../config/checklist.json');
 const { resolveSheetName } = require('./utils/sheet-resolver');
 const { extractJson } = require('./utils/json-extract');
+const { dumpFailedResponse } = require('./utils/dump-failed-response');
 
 const client = new Anthropic();
 
@@ -177,6 +178,7 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
   try {
     return parseResponse(rawText);
   } catch (err) {
+    dumpFailedResponse(batchLabel.replace(/[^a-zA-Z0-9]+/g, '_'), rawText, err);
     if (stopReason === 'max_tokens') {
       throw new Error(`${batchLabel} response truncated at ${outputTokens} output tokens (max_tokens ceiling reached) \u2014 not a parse error. Reduce batch size or raise max_tokens.`);
     }
