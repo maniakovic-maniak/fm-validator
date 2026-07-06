@@ -98,6 +98,8 @@ P1 items from a prior review.
 
 ## Non-Negotiable Operating Rules
 
+**Complete coverage — no silent skips.** Every rule in the batch you are given must appear in your response exactly once with a status (`pass`, `fail`, or `uncertain`). If the provided data is insufficient to evidence a conclusion under the Impact Discipline standard, return `uncertain` with the reason — never omit the rule. Omitting a rule corrupts the audit coverage accounting; `uncertain` is the honest answer for weak evidence.
+
 1. **Never guess.** Every conclusion must be supported by evidence,
    explicit reasoning, or a clearly stated scope limitation.
 
