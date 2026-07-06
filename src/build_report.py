@@ -135,26 +135,26 @@ def build_report(data_path, output_path):
     # for lender/investor use or transaction execution while any P1 item is open.
     if p1_open > 0:
         if igReadiness >= 60:
-            verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=AMBER
+            verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=DARK_BLUE
             verdict_text=(f'{p1_open} P1 item(s) remain open — this model cannot be classified reliance-ready for management, lender or investor use until all P1 items are resolved and retested. '
                           f'{igReadiness}% of planned procedures completed ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run).')
         else:
-            verdict_short='NOT RELIANCE-READY'; verdict_bg=RED
+            verdict_short='NOT RELIANCE-READY'; verdict_bg=DARK_BLUE
             verdict_text=(f'{p1_open} P1 item(s) open and {igReadiness}% of planned procedures completed. Both open P1 findings and audit coverage prevent reliance at any level. '
                           f'Resolve P1 items and complete outstanding procedures before reassessment.')
     elif igReadiness >= 95:
-        verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=GREEN
+        verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=MID_BLUE
         verdict_text=(f'No P1 items open and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
                       f'{p2_open} P2 item(s) remain and should be resolved or formally waived as part of transaction close.')
     elif igReadiness >= 80:
-        verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=GREEN
+        verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=MID_BLUE
         verdict_text=(f'No P1 items open; {igReadiness}% of planned procedures completed. Outstanding items: {cov_unc} uncertain and {cov_np} not-run procedures, {p2_open} open P2 item(s). '
                       f'Suitable for external review with these limitations disclosed.')
     elif igReadiness >= 60:
         verdict_short='RELIANCE-READY FOR MANAGEMENT DISCUSSION'; verdict_bg=MID_BLUE
         verdict_text=(f'No P1 items open; {igReadiness}% of planned procedures completed. Coverage gaps ({cov_np} procedures not run, {cov_unc} uncertain) limit use to internal management discussion until closed.')
     else:
-        verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=AMBER
+        verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=DARK_BLUE
         verdict_text=(igCommentary or f'{igReadiness}% of planned procedures completed. Coverage is not yet sufficient for management, lender or investor reliance. {cov_np} procedures not run, {cov_unc} uncertain.')
 
     risk_rating = f'P1: {len(p1)}  P2: {len(p2)}  P3: {len(p3)}'
@@ -194,7 +194,7 @@ def build_report(data_path, output_path):
         ws1.cell(r,3).fill=F(GREY_LIGHT)
 
     merge(ws1,'D9:I9','AUDIT PROCESS COMPLETION',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT)
-    ws1['D10'].value=f'{igReadiness}%'; ws1['D10'].font=Fn(bold=True,sz=22,col=AMBER); ws1['D10'].alignment=A(h='center',v='center')
+    ws1['D10'].value=f'{igReadiness}%'; ws1['D10'].font=Fn(bold=True,sz=22,col=MID_BLUE); ws1['D10'].alignment=A(h='center',v='center')
     merge(ws1,'E10:I10',f'{len(checklist_rules)} planned procedures — {cov_perf} performed · {cov_pass} passed · {cov_issue} raised issues · {cov_unc} uncertain · {cov_np} not run',sz=9,col=GREY_DARK)
     merge(ws1,'E11:I11',igCommentary or f'{len(p1)} P1 item(s) and {len(p2)} P2 item(s) require attention before this review can be closed.',sz=9,col=GREY_DARK,wrap=True)
     for r in [9,10,11]: set_row(ws1,r,18)
@@ -203,9 +203,9 @@ def build_report(data_path, output_path):
     # Priority summary
     items=[('P1 OPEN',len(p1),GREY_LIGHT,DARK_BLUE),('P2 OPEN',len(p2),GREY_LIGHT,DARK_BLUE),('P3 OPEN',len(p3),GREY_LIGHT,DARK_BLUE),
            ('UNIQUE',t0.get('stats',{}).get('uniqueFormulaCount',0),PALE_BLUE,MID_BLUE),
-           ('IFERROR',t0.get('stats',{}).get('totalIferrorCount',0),LIGHT_AMBER,AMBER),
-           ('OFFSET',t0.get('stats',{}).get('totalOffsetCount',0),LIGHT_YELL,DARK_BLUE),
-           ('EXT LINKS',t0.get('stats',{}).get('totalExternalLinks',0),LIGHT_RED,RED),
+           ('IFERROR',t0.get('stats',{}).get('totalIferrorCount',0),GREY_LIGHT,DARK_BLUE),
+           ('OFFSET',t0.get('stats',{}).get('totalOffsetCount',0),GREY_LIGHT,DARK_BLUE),
+           ('EXT LINKS',t0.get('stats',{}).get('totalExternalLinks',0),GREY_LIGHT,DARK_BLUE),
            ('FORMULAS',t0.get('stats',{}).get('totalFormulaCells',0),PALE_BLUE,MID_BLUE)]
     for i,(label,val,bg,tc) in enumerate(items):
         col=i+2
@@ -253,7 +253,7 @@ def build_report(data_path, output_path):
         0 if str(f.get('key_output_impact','')).lower() in ('yes','true','high') else 1,
         -(f.get('fscore') or 0)))[:10]
     for i,f in enumerate(top10,28):
-        pri=priority(f); bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT
+        pri=priority(f); bg=PALE_BLUE if pri=='P1' else GREY_LIGHT
         ws1.cell(i,2).value=i-27; ws1.cell(i,2).font=Fn(bold=True,sz=9); ws1.cell(i,2).fill=F(bg); ws1.cell(i,2).alignment=A(h='center')
         ws1.merge_cells(f'C{i}:D{i}')
         finding_text = f.get('label') or f.get('reason','')
@@ -679,7 +679,7 @@ def build_report(data_path, output_path):
     merge(ws6,'E2:G2',f"Unique patterns: {stats.get('uniqueFormulaCount',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
     merge(ws6,'H2:J2',f"IFERROR usage: {stats.get('totalIferrorCount',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
     merge(ws6,'K2:M2',f"OFFSET: {stats.get('totalOffsetCount',0):,}",sz=9,col=AMBER,bg=LIGHT_AMBER)
-    merge(ws6,'N2:P2',f"External links: {stats.get('totalExternalLinks',0)}",sz=9,col=RED,bg=LIGHT_RED)
+    merge(ws6,'N2:P2',f"External links: {stats.get('totalExternalLinks',0)}",sz=9,col=GREY_DARK,bg=GREY_LIGHT)
     set_row(ws6,2,18)
 
     uf_headers=['','UFI','Sheet','Cell','Formula Text (snapshot at detection)','F-Score','Complexity\nBand',
@@ -690,7 +690,7 @@ def build_report(data_path, output_path):
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
     set_row(ws6,3,32)
 
-    band_colors={'Critical':LIGHT_RED,'High':LIGHT_AMBER,'Moderate':LIGHT_YELL,'Low':LIGHT_GREEN}
+    band_colors={'Critical':GREY_LIGHT,'High':LIGHT_AMBER,'Moderate':LIGHT_YELL,'Low':LIGHT_GREEN}
     ufs=t0.get('uniqueFormulas',[])
     for row_i,uf in enumerate(ufs[:200],4):  # Max 200 unique formulas
         band=uf.get('band','Low'); bg=band_colors.get(band,GREY_LIGHT)
@@ -784,8 +784,8 @@ def build_report(data_path, output_path):
             for col,val in enumerate(vals,1):
                 if col in (1,7): continue
                 c=wse.cell(row_i,col); c.value=val
-                c.font=Fn(sz=9,bold=(col==2),col=RED if col==2 else '000000')
-                c.fill=F(LIGHT_RED if col==2 else WHITE)
+                c.font=Fn(sz=9,bold=(col==2),col=DARK_BLUE if col==2 else '000000')
+                c.fill=F(PALE_BLUE if col==2 else WHITE)
                 c.alignment=A(h='center' if col==3 else 'left',v='top',wrap=(col in (4,5,6)))
                 c.border=B()
             set_row(wse,row_i,30); row_i+=1
@@ -806,8 +806,8 @@ def build_report(data_path, output_path):
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
     set_row(ws7,3,32)
 
-    risk_fill={'High':LIGHT_RED,'Moderate':LIGHT_AMBER,'Low':LIGHT_GREEN,'Critical':LIGHT_RED}
-    dir_fill={'Normal':LIGHT_GREEN,'External':LIGHT_RED,'Backward':LIGHT_RED,'Circular':LIGHT_RED}
+    risk_fill={'High':LIGHT_AMBER,'Moderate':LIGHT_YELL,'Low':LIGHT_GREEN,'Critical':LIGHT_AMBER}
+    dir_fill={'Normal':LIGHT_GREEN,'External':LIGHT_AMBER,'Backward':LIGHT_AMBER,'Circular':LIGHT_AMBER}
     edges=t0.get('edgeList',[])
     for row_i,edge in enumerate(edges[:100],4):
         risk=edge.get('risk','Low'); direction=edge.get('direction','Normal')
