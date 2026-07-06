@@ -12,7 +12,8 @@ const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
 
 // Core pipeline modules
-const { parseExcel }                             = require('./src/parser');
+const { parseExcel, scanFormulaErrors }                             = require('./src/parser');
+const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill }                        = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
@@ -181,7 +182,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────
     console.log('[1.5/6] Scanning formula text...');
     const tier0 = await runTier0(parsed);
-  const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (_) { return []; } })();
+  const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Error scan failed:', e.message); return []; } })();
+  const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
 
     // Check for potential formula caching issue — if many formulas but few errors
     // detected, warn that cached values may be missing
@@ -243,6 +245,28 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         allFlagged.push(f);
       }
     }
+  // Redundant-input finding (V11 §2) — deterministic; flows through the register.
+  if (redundantInputs.applicable && redundantInputs.redundantCount > 0) {
+    const _locs = redundantInputs.redundant.slice(0, 15).map(x => `${x.sheet}!${x.cell}`).join(', ');
+    const _more = redundantInputs.redundantCount > 15 ? ` and ${redundantInputs.redundantCount - 15} more` : '';
+    const _ratio = redundantInputs.redundantCount / Math.max(redundantInputs.totalInputs, 1);
+    allFlagged.push({
+      id: 'T0-RI-001',
+      label: `${redundantInputs.redundantCount} input-sheet constant(s) not referenced by any formula`,
+      severity: _ratio > 0.2 ? 'high' : 'medium',
+      status: 'fail',
+      sheet: redundantInputs.inputSheets[0],
+      cell: (redundantInputs.redundant[0] || {}).cell || 'A1',
+      condition: `${redundantInputs.redundantCount} of ${redundantInputs.totalInputs} numeric constants on ${redundantInputs.inputSheets.join(', ')} are not referenced by any static formula reference (including ranges, whole columns/rows and defined names): ${_locs}${_more}. ${redundantInputs.note}`,
+      reason: `${redundantInputs.redundantCount} of ${redundantInputs.totalInputs} input constants unreferenced — examples: ${_locs}${_more}`,
+      corrective_action: 'For each listed input: link it into the calculation chain, remove it, or relabel it as a memo item. Every retained assumption must demonstrably drive the model.',
+      workstream: 'Inputs', category: 'Structure', issue_type: 'Redundant input',
+      model_risk: 'Users may believe these assumptions drive the forecast when they affect nothing — scenario analysis over these inputs is meaningless and conclusions drawn from it unsafe.',
+      key_output_impact: 'No', method: 'automated', needs_retest: true,
+      root_cause: 'Orphaned / unlinked input', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 95
+    });
+  }
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
     const ruleResults = [...t1Results, ...t2Results].map(r => ({
@@ -295,7 +319,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       modelTier:         'Tier 1',
       reviewMode:        'llm_only',
       ruleResults,
-      errorScan
+      errorScan,
+      redundantInputs
     });
 
     let driveResult = null;

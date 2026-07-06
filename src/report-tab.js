@@ -12,7 +12,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
   const {
     originalName, modelType, modelIndustry, modelPurpose,
     modelSummary, tier0, auditLog, overallAssessment,
-    igReadiness, igCommentary, domainSkill, ruleResults, errorScan
+    igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs
   } = meta;
 
   // Enrich findings with F-score using the cell-level index built by Tier 0.
@@ -65,6 +65,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     reviewMode:      meta.reviewMode || 'llm_only',
     ruleResults:     ruleResults || [],
     errorScan:       errorScan || [],
+    redundantInputs: redundantInputs || { applicable:false, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] },
     auditLog:        auditLog || []
   };
 

@@ -93,6 +93,7 @@ def build_report(data_path, output_path):
     reviewMode   = d.get('reviewMode','llm_only')
     ruleResults  = d.get('ruleResults',[])
     errorScan    = d.get('errorScan',[])
+    redundantIn  = d.get('redundantInputs',{'applicable':False,'totalInputs':0,'redundantCount':0,'redundant':[],'inputSheets':[]})
 
     # Checklist rules for the Validation Matrix — loaded from config
     checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
@@ -224,6 +225,13 @@ def build_report(data_path, output_path):
         ('Tax logic',any(f.get('category')=='Tax' for f in findings),'Tax checks completed'),
         ('Valuation / returns',False,'Valuation checks completed'),
         ('Presentation / usability',False,'Presentation checks completed'),
+        ('Input linkage',
+         redundantIn.get('applicable',False) and redundantIn.get('redundantCount',0)>0,
+         (f"{redundantIn.get('redundantCount',0)} of {redundantIn.get('totalInputs',0)} input-sheet constants are not referenced by any formula — see Issue Log finding T0-RI-001"
+          if redundantIn.get('applicable',False) and redundantIn.get('redundantCount',0)>0
+          else f"All {redundantIn.get('totalInputs',0)} input-sheet constants are referenced by model formulas"
+          if redundantIn.get('applicable',False)
+          else 'Not applicable — no input/assumption-named sheet detected')),
     ]
     hdr(ws1,'B16','AUDIT AREA',bg=DARK_BLUE)
     ws1.merge_cells('C16:D16'); ws1['C16'].value='STATUS'; ws1['C16'].font=Fn(bold=True,col=WHITE); ws1['C16'].fill=F(DARK_BLUE); ws1['C16'].alignment=A(h='center')
