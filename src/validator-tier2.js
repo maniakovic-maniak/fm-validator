@@ -11,15 +11,17 @@ const client = new Anthropic();
 // Load soul and universal skill — always loaded once at startup, never change
 const soulPath  = path.join(__dirname, '../config/soul.md');
 const skillPath = path.join(__dirname, '../config/skill.md');
-const SOUL  = fs.existsSync(soulPath)  ? fs.readFileSync(soulPath, 'utf8')  : '';
-const SKILL = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, 'utf8') : '';
+// Read per-call, not at module load — a long-running dev server otherwise
+// silently keeps stale prompts after config/soul.md or skill.md change on disk.
+function SOUL()  { return fs.existsSync(soulPath)  ? fs.readFileSync(soulPath, 'utf8')  : ''; }
+function SKILL() { return fs.existsSync(skillPath) ? fs.readFileSync(skillPath, 'utf8') : ''; }
 
 // No module-level mutable state — domain and modelContext passed per request
 // Returns static (cacheable) and dynamic (per-model) prompt parts separately.
 // Static: soul + skill + domain — same across calls for the same model type.
 // Dynamic: model context — changes per uploaded file.
 function buildSystemPrompt(domain, modelContext) {
-  const staticParts = [SOUL, SKILL, domain].filter(Boolean);
+  const staticParts = [SOUL(), SKILL(), domain].filter(Boolean);
   const staticPrompt = staticParts.join('\n\n---\n\n');
   return { staticPrompt, dynamicPrompt: modelContext || '' };
 }
