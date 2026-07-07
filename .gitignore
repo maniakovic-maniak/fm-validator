@@ -19,3 +19,6 @@ logs/*.log
 # OS / editor
 .DS_Store
 .vscode/
+
+# Diagnostic dumps contain raw model content — never commit
+logs/
