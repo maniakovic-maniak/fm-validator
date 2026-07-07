@@ -1,0 +1,54 @@
+ERROR: extractJson: could not parse JSON after repair attempts: Expected ',' or '}' after property value in JSON at position 3873 (line 37 column 4)
+Context near error: ...p copy area",
+    "Model Issues": "Log of prior forensic audit findings and fixes including typos, DIV/0 errors and SUM/AVERAGE error propagation"
+  }...
+
+════ RAW RESPONSE ════
+{
+  "model_purpose": "To evaluate the financial feasibility, returns (IRR/NPV) and financing structure of a coal mining project referred to as Project Hidden Gem",
+  "model_type": "mining",
+  "industry": "coal mining (thermal and PCI coal)",
+  "currency": "AUD",
+  "periodicity": "quarterly with annual (FY) summaries",
+  "timeline": "Model starts Jul 2026 with roughly 21 quarters (5.25 years) of construction followed by operations totalling around 16 years per Inputs sheet, though several supporting sheets show columns extending erroneously to 2072, 2085, 2123 and even 2210",
+  "key_sheets": ["Inputs","Cons","Ops","IFS","AFS","Reserves","Unit Economics","Debt","Equity","Dashboard","Sensitivity Analysis"],
+  "key_drivers": ["PCI and thermal coal prices","AUD:USD exchange rate","reserve yield, dilution and strip ratios across Pits 2-4","construction timing and capex cost assumptions","royalty and option valuation terms"],
+  "sheet_map": {
+    " ": "Title sheet identifying the workbook as Project Hidden Gem financial model",
+    "Dashboard": "Summary output sheet showing IRR, NPV, dividend payout, EBITDA, D&A and pit/reserve summary by financial year",
+    "Operational Dashboard": "Near-duplicate of Dashboard showing the same headline financial and operational metrics",
+    "Inputs": "Core input assumptions including model start date, project duration, area/cost inputs and construction/leasing capex",
+    "Sensitivity Analysis": "Scenario manager with toggles for construction start, operations timing, PCI/thermal price, AUD:USD rate and named scenarios",
+    "Cons": "Construction phase quarterly timeline with flags, days in period, calendar/financial year and construction cost buildup",
+    "Ops": "Operations phase quarterly timeline including flags, financial year mapping and Yancoal royalty tracking",
+    "IFS": "Integrated financial statements (quarterly) including revenue, interest income and cashflow waterfall",
+    "AFS": "Annual financial statements including revenue, royalty and cashflow waterfall on a fiscal year basis",
+    "Reserves": "Detailed reserve and pit modelling (Pit 2-4) covering dilution, loss, yield, strip ratios and marketable product quality",
+    "Foxleigh Comparison": "Benchmarking sheet comparing sustaining capex, dilution, loss and closure costs against the Foxleigh mine comparable",
+    "Unit Economics": "Per-pit unit economics including revenue, opex, NPAT, distributions and retained earnings by year",
+    "Debt": "Debt schedule with construction/operations timeline flags and senior debt facility details",
+    "Equity": "Equity schedule with construction/operations timeline flags and distributions",
+    "D&T": "Depreciation and tax schedule with asset summary and period timeline flags",
+    "Leases": "Lease schedule with period timeline flags, though financial year column shows corrupted 1905 dates",
+    "Option & Royalty": "Valuation of an option and royalty structure including cents per tonne pricing and call option pricing",
+    "Risk Register": "List of project risks (land acquisition, tenor acquisition, permitting, logistics) with potential/factored/residual risk values and mitigations",
+    "Capex Unit Costs": "Detailed mining equipment capex costs by unit including shovels, trucks, dozers and delivery cost adders",
+    "Comps": "Empty or placeholder sheet with no visible sample data",
+    "Timing": "Empty or placeholder sheet with no visible sample data",
+    "Names": "Empty or placeholder sheet, likely used for named ranges",
+    "Legend": "Empty or placeholder sheet, likely a formatting/color legend",
+    "Graphs": "Empty or placeholder sheet intended for charts",
+    "Copy": "Empty or placeholder sheet, possibly a backup copy area",
+    "Model Issues": "Log of prior forensic audit findings and fixes including typos, DIV/0 errors and SUM/AVERAGE error propagation"
+  },
+  "immediate_observations": [
+    "Several financing and operations sheets (Ops, Debt, Equity, D&T, Leases) show quarterly columns extending to 2085-2087, 2123-2124 and even 2210-2214, far beyond the stated ~16 year operating life in Inputs, suggesting untrimmed template columns or broken date formulas",
+    "The Leases sheet Financial Year row shows nonsensical dates in 1905, indicating a formula or formatting error (likely a numeric value being misformatted as a date)",
+    "Dashboard and Operational Dashboard sheets contain nearly identical headline metrics, raising the question of whether one is redundant or intended to serve a different purpose not evident from the sample",
+    "AFS sheet shows an unexplained negative royalty value (-50) in Jun 2029 that appears inconsistent with surrounding positive royalty figures",
+    "The Model Issues sheet documents a prior forensic audit that fixed multiple DIV/0 errors and error-propagation issues in Unit Economics, indicating the model has a history of fragility in ratio and unit cost calculations",
+    "The Foxleigh Comparison sheet includes an analyst comment flagging peer dilution assumptions as fishy, suggesting an area of judgment or uncertainty in reserve modelling",
+    "Comps, Timing, Names, Legend, Graphs and Copy sheets appear empty in the sample data, so their role and completeness cannot be confirmed"
+  ],
+  "data_quality": "medium",
+  "validation_focus": "Verify consistency of the model time horizon across all sheets (Cons, Ops, IFS, AFS, Debt, Equity, D&T, Leases) given the anomalous far-

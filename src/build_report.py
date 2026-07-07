@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FM Validator — _VALIDATED.xlsx Report Builder
-12-tab transaction-grade audit report
+13-tab transaction-grade audit report
 """
 import sys, json, os, re
 from datetime import datetime
@@ -227,7 +227,7 @@ def build_report(data_path, output_path):
         ('Presentation / usability',False,'Presentation checks completed'),
         ('Input linkage',
          redundantIn.get('applicable',False) and redundantIn.get('redundantCount',0)>0,
-         (f"{redundantIn.get('redundantCount',0)} of {redundantIn.get('totalInputs',0)} input-sheet constants are not referenced by any formula — see Issue Log finding T0-RI-001"
+         (f"{redundantIn.get('redundantCount',0)} of {redundantIn.get('totalInputs',0)} input-sheet constants are not referenced by any formula — see the Redundant Inputs tab and Issue Log finding T0-RI-001"
           if redundantIn.get('applicable',False) and redundantIn.get('redundantCount',0)>0
           else f"All {redundantIn.get('totalInputs',0)} input-sheet constants are referenced by model formulas"
           if redundantIn.get('applicable',False)
@@ -332,6 +332,7 @@ def build_report(data_path, output_path):
         ('HOW TO CLOSE AN ISSUE','Issues may only be closed when:\n• The fix has been implemented in the model;\n• The fix has been retested and confirmed by the reviewer;\n• Closure evidence is documented;\n• The reviewer has signed off.\nWaived issues require a documented commercial rationale and approver sign-off.'),
         ('VIEW ISSUE LINKS','Each finding with a known cell location includes a View Issue hyperlink. These links work best on Windows Excel when both files are open in the same Excel instance and stored in the same folder. On Mac Excel, links may fail with a reference error — this is an Excel limitation, not a report error. If a link fails, use the Sheet and Cell columns to navigate to the issue manually. The Sheet and Cell values are always accurate regardless of hyperlink behaviour.'),
         ('VALIDATION MATRIX','The Validation Matrix tab lists every rule in the review checklist and records whether it was performed, its outcome, the evidence reviewed, related findings, and whether a retest is required. Rules shown as Not Performed or Uncertain are the remaining procedures behind the audit completion percentage on the Audit Output tab.'),
+        ('REDUNDANT INPUTS','The Redundant Inputs tab lists every numeric constant on the model\u2019s input sheets that is not referenced by any formula, with a hyperlink to each cell and a resolution column for the model owner: link the input into the calculation chain, remove it, or relabel it as a memo item. Unreferenced assumptions give a false sense of what drives the model.'),
         ('ERROR MATRIX','The Error Matrix tab groups every live error value in the workbook by error code, with sample locations, the typical root cause for that code, and the recommended corrective approach. Errors hidden inside IFERROR/IFNA wrappers do not appear as live values and are assessed under formula review.'),
         ('ASSUMPTION REGISTER','The Assumption Register tab is a provenance template for the model\u2019s key assumptions. Related findings from this review are pre-populated; the Source, Source Date, Owner, Basis and Externally Supported columns are for the model owner to complete and the reviewer to verify.'),
         ('WHAT THIS REPORT COVERS','This workbook records findings identified during the model review. It covers the automatable subset of a structured model review. It does not replace source document review, cell-by-cell formula inspection, or reviewer judgment. The following items were not included in this review — see the Scope and Reliance tab for details.'),
@@ -799,6 +800,54 @@ def build_report(data_path, output_path):
             set_row(wse,row_i,30); row_i+=1
 
     # ════════════════════════════════════════════════════════════════════════
+    # TAB — TIDY-UP: REDUNDANT INPUTS (V11 §2) — full client-actionable list
+    # ════════════════════════════════════════════════════════════════════════
+    wst=wb.create_sheet('Redundant Inputs'); wst.sheet_view.showGridLines=False; wst.freeze_panes='A4'
+    for col,w in [(1,3),(2,6),(3,14),(4,10),(5,16),(6,26),(7,14),(8,30),(9,3)]:
+        set_col(wst,col,w)
+    merge(wst,'B1:H1','REDUNDANT INPUTS — UNREFERENCED ASSUMPTIONS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wst,1,2,1,8,DARK_BLUE); set_row(wst,1,28)
+
+    if not redundantIn.get('applicable',False):
+        merge(wst,'B2:H2','Not applicable — no sheet matching input/assumption/driver naming was detected in this model.',sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
+        set_row(wst,2,22)
+    else:
+        _rc=redundantIn.get('redundantCount',0); _ti=redundantIn.get('totalInputs',0)
+        _pct=(100.0*_rc/_ti) if _ti else 0.0
+        merge(wst,'B2:H2',(f"{_rc} of {_ti} numeric constants ({_pct:.1f}%) on {', '.join(redundantIn.get('inputSheets',[]))} are not referenced by any static formula reference. "
+            f"Each cell below should be linked into the calculation chain, removed, or relabelled as a memo item. {redundantIn.get('note','')}"),
+            sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
+        set_row(wst,2,34)
+
+        tu_headers=['','#','Sheet','Cell','Value (observed)','Nearby label (context)','Go to cell','Resolution (link / remove / relabel)','']
+        for col,h in enumerate(tu_headers,1):
+            if not h: continue
+            c=wst.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE); c.fill=F(DARK_BLUE)
+            c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+        set_row(wst,3,26)
+
+        _rows=redundantIn.get('redundant',[])
+        for i,item in enumerate(_rows,4):
+            sheet=item.get('sheet',''); cell=item.get('cell',''); val=item.get('value','')
+            label=item.get('label','') or ''
+            vals=['',i-3,sheet,cell,val,label,'','' ,'']
+            for col,v in enumerate(vals,1):
+                if col in (1,9): continue
+                c=wst.cell(i,col); c.value=v if v!='' or col in (6,8) else v
+                c.font=Fn(sz=9,bold=(col==4))
+                c.fill=F(WHITE)
+                c.alignment=A(h='center' if col in (2,4) else 'right' if col==5 else 'left',v='top',wrap=(col in (6,8)))
+                c.border=B()
+            link=wst.cell(i,7)
+            link.value='=HYPERLINK("[' + sourceFile + ']' + sheet + '!' + cell + '","Go to ' + cell + '")'
+            link.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
+            link.alignment=A(h='center'); link.border=B()
+            set_row(wst,i,16)
+        if _rc>len(_rows):
+            r=len(_rows)+4
+            merge(wst,f'B{r}:H{r}',f'List capped at {len(_rows)} cells — {_rc-len(_rows)} further unreferenced constants exist beyond the cap.',sz=9,col=GREY_DARK,italic=True)
+
+    # ════════════════════════════════════════════════════════════════════════
     ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False; ws7.freeze_panes='A4'
     for col,w in [(1,3),(2,22),(3,22),(4,10),(5,16),(6,10),(7,10),(8,14),(9,18),(10,20),(11,3)]:
         set_col(ws7,col,w)
@@ -909,7 +958,7 @@ def build_report(data_path, output_path):
 
     # ── Save ─────────────────────────────────────────────────────────────────
     wb.save(output_path)
-    return {'status':'ok','tabs':12,'findings':len(findings)}
+    return {'status':'ok','tabs':13,'findings':len(findings)}
 
 if __name__=='__main__':
     if len(sys.argv)<3:

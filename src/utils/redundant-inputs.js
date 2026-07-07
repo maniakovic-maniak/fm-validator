@@ -164,8 +164,17 @@ function detectRedundantInputs(workbook) {
         if (v instanceof Date) return;
         totalInputs++;
         if (!refs.has(sheetName, colNum, rowNum)) {
-          if (redundant.length < 200) redundant.push({ sheet: sheetName, cell: cell.address, value: v });
-          else redundant.push(null);
+          if (redundant.length < 200) {
+            // Nearest text cell to the left = the assumption's label/context —
+            // the client needs to know WHAT the orphaned number is, not just where.
+            let label = '';
+            for (let lc = colNum - 1; lc >= Math.max(1, colNum - 8); lc--) {
+              const lv = row.getCell(lc).value;
+              const txt = lv == null ? '' : (typeof lv === 'object' ? (lv.richText ? lv.richText.map(t => t.text).join('') : (lv.text || '')) : String(lv));
+              if (txt && isNaN(Number(txt))) { label = txt.slice(0, 60); break; }
+            }
+            redundant.push({ sheet: sheetName, cell: cell.address, value: v, label });
+          } else redundant.push(null);
         }
       });
     });
