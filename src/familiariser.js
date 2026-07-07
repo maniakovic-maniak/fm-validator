@@ -143,13 +143,19 @@ async function familiariseModel(parsed) {
         }]
       });
 
-      const textBlock = response.content.find(b => b.type === 'text');
-      if (!textBlock) throw new Error('No text block in familiarisation response');
+      // Sonnet 5 can split output across MULTIPLE text blocks — reading only
+      // the first silently truncates the JSON mid-string (root cause of the
+      // recurring familiariser parse failures; see logs/failed-responses).
+      const textBlocks = response.content.filter(b => b.type === 'text');
+      if (textBlocks.length === 0) throw new Error('No text block in familiarisation response');
+      if (textBlocks.length > 1) console.log(`   (response arrived in ${textBlocks.length} text blocks — concatenated)`);
+      const fullText = textBlocks.map(b => b.text).join('');
+      if (response.stop_reason === 'max_tokens') console.error('   \u26a0\ufe0f  Familiarisation response hit max_tokens — output truncated');
       let summary;
       try {
-        summary = extractJson(textBlock.text);
+        summary = extractJson(fullText);
       } catch (parseErr) {
-        dumpFailedResponse('familiariser', textBlock.text, parseErr);
+        dumpFailedResponse('familiariser', fullText, parseErr);
         throw parseErr;
       }
       console.log(`   Model identified: ${summary.model_type} — ${summary.industry}`);

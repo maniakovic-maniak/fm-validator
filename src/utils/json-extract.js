@@ -60,7 +60,9 @@ function extractJson(rawText) {
       const cEnd = Math.min(slice.length, pos + 150);
       context = `\nContext near error: ...${slice.substring(cStart, cEnd)}...`;
     }
-    throw new Error(`extractJson: could not parse JSON after repair attempts: ${e4.message}${context}`);
+    const _qc = (rawText.match(/"/g) || []).length;
+    const _trunc = _qc % 2 !== 0 ? ' [RESPONSE APPEARS TRUNCATED — odd quote count / unterminated string; check multi-block responses or max_tokens]' : '';
+    throw new Error(`extractJson: could not parse JSON after repair attempts:${_trunc} ${e4.message}${context}`);
   }
 }
 

@@ -70,8 +70,9 @@ async function classifyModel(parsed) {
       messages: [{ role: 'user', content: JSON.stringify(payload) }]
     });
 
-    const textBlock = response.content.find(b => b.type === 'text');
-    if (!textBlock) throw new Error('No text block in classifier response');
+    const _tb = response.content.filter(b => b.type === 'text');
+    const textBlock = { text: _tb.map(b => b.text).join('') };  // multi-block safe
+    if (_tb.length === 0) throw new Error('No text block in classifier response');
     const result = extractJson(textBlock.text);
     return {
       type: result.type || 'generic',
