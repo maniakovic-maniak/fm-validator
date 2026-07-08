@@ -20,6 +20,15 @@ GREEN       = '375623'; LIGHT_GREEN= 'E2EFDA'
 GREY_DARK   = '595959'; GREY_MID   = 'A6A6A6'; GREY_LIGHT = 'F2F2F2'; WHITE = 'FFFFFF'
 BORDER_COL  = 'BFBFBF'
 
+# Dashboard redesign palette (Audit Output only) — per client UI brief, July 2026
+CHARCOAL    = '1F2933'; GREY_TXT2   = '667085'
+PANEL_GREY  = 'F5F7FA'; PANEL_BORDER= 'D9E2EC'
+P1_FILL='FDECEC'; P1_TXT='9B1C1C'
+P2_FILL='FFF4E5'; P2_TXT='9A5B00'
+P3_FILL='EEF4FA'; P3_TXT='24435C'
+OK_FILL ='EAF7EA'; OK_TXT ='1F6B3A'
+PALE_ACCENT = 'EAF3F8'
+
 def F(hex_col): return PatternFill('solid', fgColor=hex_col)
 def Fn(bold=False,sz=10,col='000000',italic=False): return Font(bold=bold,size=sz,color=col,italic=italic,name='Arial')
 def A(h='left',v='center',wrap=False): return Alignment(horizontal=h,vertical=v,wrap_text=wrap)
@@ -115,6 +124,25 @@ def build_report(data_path, output_path):
     p2 = [f for f in findings if priority(f)=='P2']
     p3 = [f for f in findings if priority(f)=='P3']
 
+    # Pre-compute display titles ONCE (shared by dashboard + Issue Log — was
+    # previously computed only inside the Issue Log loop, so the dashboard
+    # top-issues table showed raw IDs). Also pre-compute the Issue Log row
+    # each finding will land on, so the dashboard's "View" link can point
+    # directly at it (internal same-workbook hyperlink — cross-workbook
+    # HYPERLINK references render as broken/unresolved text in non-Excel
+    # viewers such as Google Sheets or Excel Online).
+    for _f in findings:
+        _t=(_f.get('title') or _f.get('label') or '').strip()
+        if not _t or _t==_f.get('id'):
+            _w=str(_f.get('condition') or _f.get('what_wrong') or _f.get('reason') or _f.get('detail') or '').replace('\n',' ').strip()
+            if _w:
+                _t=re.split(r'(?<=[.;])\s',_w)[0]
+                if len(_t)>70: _t=_t[:67].rstrip(' ,;:')+'...'
+            else:
+                _t=_f.get('id','')
+        _f['title']=_t; _f['label']=_t
+    id_to_issue_row = {f.get('id'): i for i, f in enumerate(findings, 3)}
+
     # Audit coverage counts — feeds the dashboard completion breakdown (V11 1.3)
     def _rmatch0(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
     cov_perf=cov_pass=cov_issue=cov_unc=cov_np=0
@@ -166,55 +194,196 @@ def build_report(data_path, output_path):
     # TAB 1 — AUDIT OUTPUT
     # ════════════════════════════════════════════════════════════════════════
     ws1 = wb.active; ws1.title = 'Audit Output'; ws1.sheet_view.showGridLines=False
-    for col,w in [(1,3),(2,22),(3,18),(4,16),(5,14),(6,14),(7,14),(8,14),(9,14),(10,3)]:
+    ws1.freeze_panes = 'B5'
+    for col,w in [(1,3)] + [(c,15) for c in range(2,10)] + [(10,3)]:
         set_col(ws1,col,w)
 
-    # Header banner
-    merge(ws1,'B1:I3','FINANCIAL MODEL AUDIT REPORT',bold=True,sz=18,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(ws1,1,2,3,9,DARK_BLUE)
-    for r in [1,2,3]: set_row(ws1,r,16)
+    def badge(ws,r,c,text,fill,txt_col,bold=True,sz=9):
+        cc=ws.cell(r,c); cc.value=text; cc.font=Fn(bold=bold,sz=sz,col=txt_col)
+        cc.fill=F(fill); cc.alignment=A(h='center',v='center'); cc.border=B(col=PANEL_BORDER)
+        return cc
 
-    # Model info
-    merge(ws1,'B4:D4',modelName,bold=True,sz=11,col=DARK_BLUE,bg=PALE_BLUE,v='center')
-    merge(ws1,'E4:F4',f'{modelType} — {modelIndustry}',sz=9,col=GREY_DARK,bg=PALE_BLUE,v='center')
-    merge(ws1,'G4:H4',f'{currency} · {periodicity}',sz=9,col=GREY_DARK,bg=PALE_BLUE,v='center')
-    merge(ws1,'I4:I4',f'Review: {reviewDate}',sz=9,col=GREY_DARK,bg=PALE_BLUE,v='center',h='right')
-    set_row(ws1,4,24); set_row(ws1,5,8)
+    def kpi_card(ws,label_row,val_row,c1,c2,label,value,fmt=None,val_col=CHARCOAL):
+        col_letter1=get_column_letter(c1); col_letter2=get_column_letter(c2)
+        if c2>c1: merge(ws,f'{col_letter1}{label_row}:{col_letter2}{label_row}',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        else: cell(ws,f'{col_letter1}{label_row}',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        if c2>c1: merge(ws,f'{col_letter1}{val_row}:{col_letter2}{val_row}',value,bold=True,sz=18,col=val_col,bg=PANEL_GREY,h='center')
+        else: cell(ws,f'{col_letter1}{val_row}',value,bold=True,sz=18,col=val_col,bg=PANEL_GREY,h='center')
+        if fmt: ws[f'{col_letter1}{val_row}'].number_format=fmt
+        for rr in (label_row,val_row):
+            for cc in range(c1,c2+1):
+                ws.cell(rr,cc).border=B(col=PANEL_BORDER)
 
-    # Verdict bar
-    merge(ws1,'B6:C7',verdict_short,bold=True,sz=11,col=WHITE,bg=verdict_bg,h='left',v='center')
-    merge(ws1,'D6:I7',verdict_text,sz=10,col=WHITE,bg=verdict_bg,v='center',wrap=True)
-    fill_range(ws1,6,2,7,9,verdict_bg)
-    set_row(ws1,6,18); set_row(ws1,7,18); set_row(ws1,8,8)
+    r = 1  # running row pointer — every section advances this, nothing below is hardcoded
 
-    # Risk rating + readiness
-    merge(ws1,'B9:C9','OPEN FINDINGS',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT,h='center')
-    merge(ws1,'B10:C11',risk_rating,bold=True,sz=12,col=DARK_BLUE,bg=GREY_LIGHT,h='center',v='center')
-    for r in [10,11]:
-        ws1.cell(r,2).fill=F(GREY_LIGHT)
-        ws1.cell(r,3).fill=F(GREY_LIGHT)
+    # ── Header band ──────────────────────────────────────────────────────────
+    merge(ws1,f'B{r}:I{r+1}','FINANCIAL MODEL AUDIT REPORT',bold=True,sz=20,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws1,r,2,r+1,9,DARK_BLUE); set_row(ws1,r,22); set_row(ws1,r+1,10); r+=2
+    merge(ws1,f'B{r}:I{r}',modelName,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws1,r,2,r,9,DARK_BLUE); set_row(ws1,r,20); r+=1
 
-    merge(ws1,'D9:I9','AUDIT PROCESS COMPLETION',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT)
-    ws1['D10'].value=f'{igReadiness}%'; ws1['D10'].font=Fn(bold=True,sz=22,col=MID_BLUE); ws1['D10'].alignment=A(h='center',v='center')
-    merge(ws1,'E10:I10',f'{len(checklist_rules)} planned procedures — {cov_perf} performed · {cov_pass} passed · {cov_issue} raised issues · {cov_unc} uncertain · {cov_np} not run',sz=9,col=GREY_DARK)
-    merge(ws1,'E11:I11',igCommentary or f'{len(p1)} P1 item(s) and {len(p2)} P2 item(s) require attention before this review can be closed.',sz=9,col=GREY_DARK,wrap=True)
-    for r in [9,10,11]: set_row(ws1,r,18)
-    set_row(ws1,12,8)
+    merge(ws1,f'B{r}:C{r}',f'{modelType} — {modelIndustry}',sz=9,col=GREY_TXT2,bg=PANEL_GREY,v='center')
+    merge(ws1,f'D{r}:E{r}',f'{currency} · {periodicity}',sz=9,col=GREY_TXT2,bg=PANEL_GREY,v='center')
+    merge(ws1,f'F{r}:G{r}',f'Audit mode: {"AI-assisted (Mode A)" if reviewMode=="llm_only" else reviewMode}',sz=9,col=GREY_TXT2,bg=PANEL_GREY,v='center')
+    merge(ws1,f'H{r}:I{r}',f'Review date: {reviewDate}',sz=9,col=GREY_TXT2,bg=PANEL_GREY,v='center',h='right')
+    set_row(ws1,r,22); r+=1
+    set_row(ws1,r,8); r+=1
 
-    # Priority summary
-    items=[('P1 OPEN',len(p1),GREY_LIGHT,DARK_BLUE),('P2 OPEN',len(p2),GREY_LIGHT,DARK_BLUE),('P3 OPEN',len(p3),GREY_LIGHT,DARK_BLUE),
-           ('UNIQUE',t0.get('stats',{}).get('uniqueFormulaCount',0),PALE_BLUE,MID_BLUE),
-           ('IFERROR',t0.get('stats',{}).get('totalIferrorCount',0),GREY_LIGHT,DARK_BLUE),
-           ('OFFSET',t0.get('stats',{}).get('totalOffsetCount',0),GREY_LIGHT,DARK_BLUE),
-           ('EXT LINKS',t0.get('stats',{}).get('totalExternalLinks',0),GREY_LIGHT,DARK_BLUE),
-           ('FORMULAS',t0.get('stats',{}).get('totalFormulaCells',0),PALE_BLUE,MID_BLUE)]
-    for i,(label,val,bg,tc) in enumerate(items):
-        col=i+2
-        c13=ws1.cell(13,col); c13.value=label; c13.font=Fn(bold=True,sz=8,col=GREY_DARK); c13.fill=F(bg); c13.alignment=A(h='center',v='center')
-        c14=ws1.cell(14,col); c14.value=val; c14.font=Fn(bold=True,sz=18,col=tc); c14.fill=F(bg); c14.alignment=A(h='center',v='center')
-    set_row(ws1,13,20); set_row(ws1,14,26); set_row(ws1,15,8)
+    # ── Reliance status card — Status / Reason / Required action ──────────────
+    _verdict_display = {
+        'NOT RELIANCE-READY': 'Not ready for reliance',
+        'RELIANCE-READY FOR INTERNAL REVIEW ONLY': 'Ready for internal review only',
+        'RELIANCE-READY FOR MANAGEMENT DISCUSSION': 'Ready for management discussion',
+        'RELIANCE-READY FOR LENDER / INVESTOR REVIEW': 'Ready for lender / investor review',
+        'RELIANCE-READY FOR TRANSACTION EXECUTION': 'Ready for transaction execution',
+    }.get(verdict_short, verdict_short.title())
+    _reason = (f'{p1_open} open P1 finding(s) and {igReadiness}% audit completion' if p1_open>0
+               else f'{igReadiness}% audit completion, {cov_unc} procedure(s) uncertain, {cov_np} not run' if igReadiness<100 or cov_unc or cov_np
+               else 'All planned procedures completed with no open P1 findings')
+    _next_step = ('Close all P1 items and complete outstanding procedures, then reassess.' if p1_open>0
+                  else 'Resolve remaining P2 items and complete outstanding procedures before wider reliance.' if igReadiness<95
+                  else 'No further action required for this reliance level.')
+    merge(ws1,f'B{r}:I{r}',f'Status:   {_verdict_display}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
+    fill_range(ws1,r,2,r,9,verdict_bg); set_row(ws1,r,26); r+=1
+    merge(ws1,f'B{r}:I{r}',f'Reason:   {_reason}',sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+    set_row(ws1,r,20); r+=1
+    merge(ws1,f'B{r}:I{r}',f'Required action:   {_next_step}',sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+    set_row(ws1,r,20); r+=1
+    set_row(ws1,r,8); r+=1
 
-    # Status panel
+    # ── Key Takeaway box ──────────────────────────────────────────────────────
+    _blockers=[]
+    if p1_open>0: _blockers.append('open P1 findings')
+    if t0.get('stats',{}).get('totalExternalLinks',0)>0: _blockers.append('external workbook links')
+    if len(errorScan)>0: _blockers.append('formula errors')
+    if cov_unc>0: _blockers.append('incomplete audit coverage')
+    if redundantIn.get('applicable') and redundantIn.get('redundantCount',0)>0: _blockers.append('redundant input assumptions')
+    _takeaway = (f"The model is not currently suitable for reliance. The main blockers are {', '.join(_blockers[:4])}."
+                 if p1_open>0 or _blockers else
+                 "The model has no open P1 findings and is suitable for reliance at the level shown above.")
+    merge(ws1,f'B{r}:I{r}','KEY TAKEAWAY',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left'); set_row(ws1,r,14); r+=1
+    merge(ws1,f'B{r}:I{r+1}',_takeaway,sz=10,col=CHARCOAL,bg=PALE_ACCENT,wrap=True,v='center')
+    fill_range(ws1,r,2,r+1,9,PALE_ACCENT); set_row(ws1,r,18); set_row(ws1,r+1,18); r+=2
+    set_row(ws1,r,8); r+=1
+
+    # ── Next Actions box ──────────────────────────────────────────────────────
+    _actions=[]
+    if t0.get('stats',{}).get('totalExternalLinks',0)>0: _actions.append('Remove or replace external workbook links.')
+    if len(errorScan)>0: _actions.append('Resolve formula errors shown in the Error Matrix.')
+    if cov_unc>0: _actions.append('Complete uncertain audit procedures.')
+    if redundantIn.get('applicable') and redundantIn.get('redundantCount',0)>0: _actions.append('Review redundant input assumptions.')
+    if p2_open>0: _actions.append('Resolve or formally waive open P2 findings.')
+    _actions.append('Re-run audit checks after remediation.')
+    _actions = _actions[:5]
+    merge(ws1,f'B{r}:I{r}','NEXT ACTIONS',bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws1,r,2,r,9,DARK_BLUE); set_row(ws1,r,18); r+=1
+    for i,act in enumerate(_actions,1):
+        merge(ws1,f'B{r}:I{r}',f'{i}.   {act}',sz=9,col=CHARCOAL,bg=WHITE)
+        for cc in range(2,10): ws1.cell(r,cc).border=B(col=PANEL_BORDER)
+        set_row(ws1,r,18); r+=1
+    set_row(ws1,r,8); r+=1
+
+    # ── KPI cards — Row A: Risk (P1/P2/P3, 2 cols each) + Coverage (2 cols) ───
+    merge(ws1,f'B{r}:G{r}','RISK',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')
+    merge(ws1,f'H{r}:I{r}','COVERAGE',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')
+    set_row(ws1,r,14); r+=1
+    _lbl_row, _val_row = r, r+1
+    kpi_card(ws1,_lbl_row,_val_row,2,3,'P1 OPEN',p1_open,fmt='#,##0;[Red](#,##0);-',val_col=(P1_TXT if p1_open>0 else CHARCOAL))
+    kpi_card(ws1,_lbl_row,_val_row,4,5,'P2 OPEN',p2_open,fmt='#,##0;[Red](#,##0);-',val_col=(P2_TXT if p2_open>0 else CHARCOAL))
+    kpi_card(ws1,_lbl_row,_val_row,6,7,'P3 OPEN',p3_open,fmt='#,##0;[Red](#,##0);-',val_col=(P3_TXT if p3_open>0 else CHARCOAL))
+    ws1.merge_cells(f'H{_lbl_row}:I{_lbl_row}'); ws1[f'H{_lbl_row}'].value='AUDIT COMPLETION'
+    ws1[f'H{_lbl_row}'].font=Fn(bold=True,sz=8,col=GREY_TXT2); ws1[f'H{_lbl_row}'].fill=F(PANEL_GREY); ws1[f'H{_lbl_row}'].alignment=A(h='center')
+    ws1.merge_cells(f'H{_val_row}:I{_val_row}'); ws1[f'H{_val_row}'].value=igReadiness/100.0; ws1[f'H{_val_row}'].number_format='0%;[Red](0%);-'
+    ws1[f'H{_val_row}'].font=Fn(bold=True,sz=18,col=MID_BLUE); ws1[f'H{_val_row}'].fill=F(PANEL_GREY); ws1[f'H{_val_row}'].alignment=A(h='center')
+    for rr in (_lbl_row,_val_row):
+        for cc in range(2,10): ws1.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(ws1,_lbl_row,16); set_row(ws1,_val_row,26); r=_val_row+1
+    set_row(ws1,r,10); r+=1
+
+    # ── KPI cards — Row B: Formula complexity (5×1col) + Input control (3col) ─
+    merge(ws1,f'B{r}:F{r}','FORMULA COMPLEXITY',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')
+    merge(ws1,f'G{r}:I{r}','INPUT CONTROL',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')
+    set_row(ws1,r,14); r+=1
+    _lbl_row, _val_row = r, r+1
+    _stats=t0.get('stats',{})
+    fcells=[('UNIQUE\nFORMULAS',_stats.get('uniqueFormulaCount',0),2),
+            ('FORMULA\nCELLS',_stats.get('totalFormulaCells',0),3),
+            ('IFERROR\nCOUNT',_stats.get('totalIferrorCount',0),4),
+            ('OFFSET\nCOUNT',_stats.get('totalOffsetCount',0),5),
+            ('EXTERNAL\nLINKS',_stats.get('totalExternalLinks',0),6)]
+    for label,val,col in fcells:
+        c1=ws1.cell(_lbl_row,col); c1.value=label; c1.font=Fn(bold=True,sz=7,col=GREY_TXT2); c1.fill=F(PANEL_GREY); c1.alignment=A(h='center',wrap=True)
+        c2=ws1.cell(_val_row,col); c2.value=val; c2.number_format='#,##0;[Red](#,##0);-'
+        ext_warn = (label.startswith('EXTERNAL') and val>0)
+        c2.font=Fn(bold=True,sz=14,col=(P2_TXT if ext_warn else CHARCOAL)); c2.fill=F(PANEL_GREY); c2.alignment=A(h='center')
+        c1.border=B(col=PANEL_BORDER); c2.border=B(col=PANEL_BORDER)
+    set_row(ws1,_lbl_row,22)
+    _rc=redundantIn.get('redundantCount',0); _ti=redundantIn.get('totalInputs',0)
+    merge(ws1,f'G{_lbl_row}:I{_lbl_row}','REDUNDANT INPUTS',bold=True,sz=7,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+    ri_val = f'{_rc:,} of {_ti:,}' if redundantIn.get('applicable') else 'N/A'
+    merge(ws1,f'G{_val_row}:I{_val_row}',ri_val,bold=True,sz=14,col=(P2_TXT if _rc>0 else CHARCOAL),bg=PANEL_GREY,h='center')
+    for rr in (_lbl_row,_val_row):
+        for cc in range(7,10): ws1.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(ws1,_val_row,26); r=_val_row+1
+    set_row(ws1,r,10); r+=1
+
+    # ── Audit coverage bar + compact procedure mini-table ──────────────────────
+    merge(ws1,f'B{r}:I{r}','AUDIT COVERAGE',bold=True,sz=9,col=DARK_BLUE,bg=WHITE,h='left'); set_row(ws1,r,16); r+=1
+    _filled = max(0, min(8, round(igReadiness/100.0*8)))
+    for i in range(8):
+        col=2+i
+        ws1.cell(r,col).fill = F(MID_BLUE if i<_filled else PALE_ACCENT)
+        ws1.cell(r,col).border = B(col=PANEL_BORDER)
+    set_row(ws1,r,10); r+=1
+    merge(ws1,f'B{r}:I{r}',
+          f'{len(checklist_rules)} planned · {cov_perf} performed · {cov_pass} passed · {cov_issue} raised issues · {cov_unc} uncertain · {cov_np} not run',
+          sz=9,col=GREY_TXT2,bg=WHITE)
+    set_row(ws1,r,18); r+=1
+    set_row(ws1,r,10); r+=1
+
+    # ── Top 5 Blockers ──────────────────────────────────────────────────────────
+    merge(ws1,f'B{r}:I{r}','TOP 5 BLOCKERS',bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws1,r,2,r,9,DARK_BLUE); set_row(ws1,r,20); r+=1
+    _tb_headers=[('PRIORITY',2,2),('AREA',3,3),('ISSUE',4,5),('MODEL IMPACT',6,7),('REQUIRED ACTION',8,8),('VIEW',9,9)]
+    for label,c1,c2 in _tb_headers:
+        col_l1=get_column_letter(c1); col_l2=get_column_letter(c2)
+        if c2>c1: merge(ws1,f'{col_l1}{r}:{col_l2}{r}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+        else: cell(ws1,f'{col_l1}{r}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+        ws1[f'{col_l1}{r}'].border=B(col=WHITE)
+    set_row(ws1,r,18); r+=1
+
+    _pri_rank={'P1':0,'P2':1,'P3':2}
+    top5 = sorted(p1+p2+p3, key=lambda f:(
+        _pri_rank.get(priority(f),3),
+        0 if str(f.get('key_output_impact','')).lower() in ('yes','true','high') else 1,
+        -(f.get('fscore') or 0)))[:5]
+    _pri_style={'P1':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
+    for f in top5:
+        i=r
+        pri=priority(f); pf,pt=_pri_style.get(pri,(GREY_LIGHT,CHARCOAL))
+        badge(ws1,i,2,pri,pf,pt)
+        c3=ws1.cell(i,3); c3.value=f.get('category','') or '—'; c3.font=Fn(sz=9,col=CHARCOAL); c3.fill=F(WHITE); c3.alignment=A(h='center',v='center'); c3.border=B(col=PANEL_BORDER)
+        ws1.merge_cells(f'D{i}:E{i}')
+        ws1[f'D{i}'].value=(f.get('title') or f.get('label') or '')[:90]
+        ws1[f'D{i}'].font=Fn(sz=9,col=CHARCOAL); ws1[f'D{i}'].fill=F(WHITE); ws1[f'D{i}'].alignment=A(wrap=True,v='center')
+        ws1.merge_cells(f'F{i}:G{i}')
+        impact = f.get('model_risk') or f.get('consequence') or '—'
+        ws1[f'F{i}'].value=str(impact)[:110]; ws1[f'F{i}'].font=Fn(sz=9,col=CHARCOAL); ws1[f'F{i}'].fill=F(WHITE); ws1[f'F{i}'].alignment=A(wrap=True,v='center')
+        action = f.get('corrective_action') or f.get('fix_instruction') or '—'
+        c8=ws1.cell(i,8); c8.value=str(action)[:80]; c8.font=Fn(sz=9,col=CHARCOAL); c8.fill=F(WHITE); c8.alignment=A(wrap=True,v='center'); c8.border=B(col=PANEL_BORDER)
+        _row_target = id_to_issue_row.get(f.get('id'))
+        c9=ws1.cell(i,9)
+        if _row_target:
+            c9.value=f"=HYPERLINK(\"#'Issue Log'!A{_row_target}\",\"View\")"
+            c9.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
+        else:
+            c9.value='—'; c9.font=Fn(sz=9,col=GREY_MID)
+        c9.fill=F(WHITE); c9.alignment=A(h='center',v='center'); c9.border=B(col=PANEL_BORDER)
+        for cc in (2,3,4,5,6,7,8,9): ws1.cell(i,cc).border=B(col=PANEL_BORDER)
+        set_row(ws1,i,32); r+=1
+    set_row(ws1,r,10); r+=1
+
+    # ── Review area status — soft badges, Reference Tab column ─────────────────
     status_areas=[
         ('Formula integrity',t0.get('stats',{}).get('totalExternalLinks',0)>0 or t0.get('stats',{}).get('totalRefInFormula',0)>0,'formula errors or external links detected'),
         ('Unique formula review',t0.get('stats',{}).get('fscoreDist',{}).get('High',0)>0,'Complex formulas found — see Formula Analysis tab for detail'),
@@ -233,86 +402,66 @@ def build_report(data_path, output_path):
           if redundantIn.get('applicable',False)
           else 'Not applicable — no input/assumption-named sheet detected')),
     ]
-    hdr(ws1,'B16','AUDIT AREA',bg=DARK_BLUE)
-    ws1.merge_cells('C16:D16'); ws1['C16'].value='STATUS'; ws1['C16'].font=Fn(bold=True,col=WHITE); ws1['C16'].fill=F(DARK_BLUE); ws1['C16'].alignment=A(h='center')
-    ws1.merge_cells('E16:I16'); ws1['E16'].value='SUMMARY'; ws1['E16'].font=Fn(bold=True,col=WHITE); ws1['E16'].fill=F(DARK_BLUE)
-    set_row(ws1,16,18)
+    merge(ws1,f'B{r}:I{r}','REVIEW AREA STATUS',bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws1,r,2,r,9,DARK_BLUE); set_row(ws1,r,20); r+=1
+    for label,c1,c2 in [('REVIEW AREA',2,3),('STATUS',4,4),('KEY FINDING',5,8),('REF. TAB',9,9)]:
+        col_l1=get_column_letter(c1); col_l2=get_column_letter(c2)
+        if c2>c1: merge(ws1,f'{col_l1}{r}:{col_l2}{r}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+        else: cell(ws1,f'{col_l1}{r}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+        ws1[f'{col_l1}{r}'].border=B(col=WHITE)
+    set_row(ws1,r,18); r+=1
 
-    for i,(area,has_issue,summary) in enumerate(status_areas,17):
-        bg=GREY_LIGHT if has_issue else WHITE; status_txt='Review' if has_issue else 'Completed'
-        status_bg=GREY_DARK if has_issue else GREY_MID
-        ws1.cell(i,2).value=area; ws1.cell(i,2).font=Fn(bold=True,sz=9); ws1.cell(i,2).fill=F(bg)
-        ws1.merge_cells(f'C{i}:D{i}'); ws1[f'C{i}'].value=status_txt; ws1[f'C{i}'].font=Fn(bold=True,sz=9,col=WHITE); ws1[f'C{i}'].fill=F(status_bg); ws1[f'C{i}'].alignment=A(h='center')
-        ws1.merge_cells(f'E{i}:I{i}'); ws1[f'E{i}'].value=summary; ws1[f'E{i}'].font=Fn(sz=9); ws1[f'E{i}'].fill=F(bg)
-        set_row(ws1,i,18)
-    set_row(ws1,26,8)
+    _ref_tab = {
+        'Formula integrity':'Formula Analysis','Unique formula review':'Formula Analysis',
+        'Input linkage':'Redundant Inputs','Debt / funding logic':'Issue Log',
+        'Financial statements':'Issue Log','Tax logic':'Issue Log',
+    }
+    for area,has_issue,summary in status_areas:
+        i=r
+        status_txt = 'Review' if has_issue else 'Completed'
+        sf,st = (P2_FILL,P2_TXT) if has_issue else (OK_FILL,OK_TXT)
+        ws1.merge_cells(f'B{i}:C{i}')
+        ws1[f'B{i}'].value=area; ws1[f'B{i}'].font=Fn(bold=True,sz=9,col=CHARCOAL); ws1[f'B{i}'].fill=F(WHITE); ws1[f'B{i}'].alignment=A(v='center')
+        badge(ws1,i,4,status_txt,sf,st,sz=8)
+        ws1.merge_cells(f'E{i}:H{i}')
+        ws1[f'E{i}'].value=summary[:130]; ws1[f'E{i}'].font=Fn(sz=9,col=GREY_TXT2); ws1[f'E{i}'].fill=F(WHITE); ws1[f'E{i}'].alignment=A(wrap=True,v='center')
+        ref = _ref_tab.get(area,'Validation Matrix')
+        c9=ws1.cell(i,9); c9.value=f"=HYPERLINK(\"#'{ref}'!A1\",\"{ref}\")"
+        c9.font=Font(size=8,color=MID_BLUE,underline='single',name='Arial'); c9.fill=F(WHITE); c9.alignment=A(h='center',v='center')
+        for cc in range(2,10): ws1.cell(i,cc).border=B(col=PANEL_BORDER)
+        set_row(ws1,i,20); r+=1
+    set_row(ws1,r,10); r+=1
 
-    # Top open issues
-    hdr(ws1,'B27','#'); hdr(ws1,'C27','FINDING',bg=DARK_BLUE); ws1.merge_cells('C27:D27'); ws1['C27'].fill=F(DARK_BLUE)
-    for col,lbl in [(5,'PRIORITY'),(6,'F-SCORE'),(7,'AREA'),(8,'SHEET'),(9,'VIEW ISSUE')]:
-        ws1.cell(27,col).value=lbl; ws1.cell(27,col).font=Fn(bold=True,col=WHITE); ws1.cell(27,col).fill=F(DARK_BLUE); ws1.cell(27,col).alignment=A(h='center')
-    set_row(ws1,27,18)
-
-    # Ordered by decision impact (V11 1.4): P1 first, then key-output impact,
-    # then formula complexity — not by insertion order.
-    _pri_rank={'P1':0,'P2':1,'P3':2}
-    top10 = sorted(p1+p2+p3, key=lambda f:(
-        _pri_rank.get(priority(f),3),
-        0 if str(f.get('key_output_impact','')).lower() in ('yes','true','high') else 1,
-        -(f.get('fscore') or 0)))[:10]
-    for i,f in enumerate(top10,28):
-        pri=priority(f); bg=PALE_BLUE if pri=='P1' else GREY_LIGHT
-        ws1.cell(i,2).value=i-27; ws1.cell(i,2).font=Fn(bold=True,sz=9); ws1.cell(i,2).fill=F(bg); ws1.cell(i,2).alignment=A(h='center')
-        ws1.merge_cells(f'C{i}:D{i}')
-        finding_text = f.get('label') or f.get('reason','')
-        ws1[f'C{i}'].value=finding_text[:120]; ws1[f'C{i}'].font=Fn(sz=9); ws1[f'C{i}'].fill=F(bg); ws1[f'C{i}'].alignment=A(wrap=True)
-        p_cell=ws1.cell(i,5); p_cell.value=pri; p_cell.font=Fn(bold=True,sz=9,col=WHITE)
-        p_cell.fill=F(MID_BLUE if pri=='P1' else GREY_DARK if pri=='P2' else GREY_MID)
-        p_cell.font=Fn(bold=True,sz=9,col=WHITE); p_cell.alignment=A(h='center')
-        fs=f.get('fscore',0) or 0
-        ws1.cell(i,6).value=fs if fs else '—'; ws1.cell(i,6).fill=F(bg); ws1.cell(i,6).alignment=A(h='center')
-        ws1.cell(i,7).value=f.get('category',''); ws1.cell(i,7).fill=F(bg)
-        ws1.cell(i,8).value=f.get('sheet',''); ws1.cell(i,8).fill=F(bg); ws1.cell(i,8).alignment=A(h='center')
-        sheet=f.get('sheet',''); cell_ref=f.get('cell','A1')
-        if sheet and sheet not in ('—','N/A','Multiple'):
-            label='View issue' if (cell_ref and cell_ref not in ('A1','—','N/A')) else sheet
-            link_cell=ws1.cell(i,9)
-            link_cell.value='=HYPERLINK("[' + sourceFile + ']' + sheet + '!A1","' + label + '")'
-            link_cell.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
-            link_cell.fill=F(bg); link_cell.alignment=A(h='center')
-        else:
-            ws1.cell(i,9).value='—'; ws1.cell(i,9).fill=F(bg); ws1.cell(i,9).alignment=A(h='center'); ws1.cell(i,9).font=Fn(sz=9,col=GREY_MID)
-        set_row(ws1,i,22)
-    set_row(ws1,38,8)
-
-    # Accounting review summary — fills previously blank dashboard space
-    merge(ws1,'B39:I39','ACCOUNTING REVIEW SUMMARY',bold=True,sz=9,col=GREY_DARK,bg=GREY_LIGHT,h='left')
-    set_row(ws1,39,16)
-    acct_items = [
-        ('Accounting basis reviewed', 'Extracted cell values — accrual basis assumed from financial statement structure'),
-        ('Areas checked', 'Depreciation & asset treatment, revenue recognition, liability classification, debt treatment, tax balances'),
-        ('Standards consistency', 'Assessed against general accrual accounting practice — no specific framework confirmed in model'),
-    ]
-    r = 40
-    for label, val in acct_items:
-        ws1.cell(r,2).value = label; ws1.cell(r,2).font = Fn(sz=9,bold=True,col=GREY_DARK); ws1.cell(r,2).fill = F(GREY_LIGHT)
+    # ── Accounting review summary — 4 lines only ────────────────────────────────
+    merge(ws1,f'B{r}:I{r}','ACCOUNTING REVIEW SUMMARY',bold=True,sz=9,col=DARK_BLUE,bg=WHITE,h='left'); set_row(ws1,r,16); r+=1
+    _acct=[('Basis','Accrual basis assumed from financial statement structure'),
+           ('Framework','Not confirmed in model'),
+           ('Areas checked','Depreciation, revenue recognition, liability classification, debt treatment, tax balances'),
+           ('Limitations','No source document testing or detailed accounting standard confirmation performed')]
+    for label,val in _acct:
+        ws1.cell(r,2).value=label; ws1.cell(r,2).font=Fn(sz=9,bold=True,col=GREY_TXT2); ws1.cell(r,2).fill=F(PANEL_GREY)
         ws1.merge_cells(f'C{r}:I{r}')
-        ws1.cell(r,3).value = val; ws1.cell(r,3).font = Fn(sz=9); ws1.cell(r,3).fill = F(GREY_LIGHT); ws1.cell(r,3).alignment = A(wrap=True)
-        set_row(ws1,r,16)
-        r += 1
-    set_row(ws1,r,8)
-    r += 1
+        ws1.cell(r,3).value=val; ws1.cell(r,3).font=Fn(sz=9,col=CHARCOAL); ws1.cell(r,3).fill=F(PANEL_GREY); ws1.cell(r,3).alignment=A(wrap=True)
+        for cc in range(2,10): ws1.cell(r,cc).border=B(col=PANEL_BORDER)
+        set_row(ws1,r,16); r+=1
+    set_row(ws1,r,10); r+=1
 
-    # Scope limitations
-    ws1.merge_cells(f'B{r}:I{r}'); ws1[f'B{r}'].value='SCOPE AND LIMITATIONS'
-    ws1[f'B{r}'].font=Fn(bold=True,sz=9,col=GREY_DARK); ws1[f'B{r}'].fill=F(GREY_LIGHT); ws1[f'B{r}'].alignment=A()
-    set_row(ws1,r,16); r+=1
-    ws1.merge_cells(f'B{r}:I{r+1}')
-    scope=f'Review conducted in {reviewMode} mode. Domain skill: {domainSkill}. Tier 0 formula scanner analysed {t0.get("stats",{}).get("totalFormulaCells",0):,} formula cells. The following items were not included in this review: formula text inspection, named range audit, VBA review, source document testing. See the Scope and Reliance tab for a full list of items not included in this review.'
-    ws1['B40'].value=scope; ws1['B40'].font=Fn(sz=9,col=GREY_DARK,italic=True); ws1['B40'].fill=F(GREY_LIGHT); ws1['B40'].alignment=A(wrap=True,v='top')
-    for r in [40,41]:
-        set_row(ws1,r,18)
-        for c in range(2,10): ws1.cell(r,c).fill=F(GREY_LIGHT)
+    # ── Scope footer — short, links to detail tab ───────────────────────────────
+    merge(ws1,f'B{r}:I{r}',
+          'Scope limitations: formula text inspection, named-range audit, VBA review and source document testing were not included. Full detail: Scope and Reliance tab.',
+          sz=8,col=GREY_TXT2,bg=PANEL_GREY,italic=True,wrap=True)
+    set_row(ws1,r,26); r+=1
+    set_row(ws1,r,10); r+=1
+
+    # ── Navigation row ───────────────────────────────────────────────────────
+    _nav=['Issue Log','Remediation','Scope and Reliance','Assumption Register','Validation Matrix','Formula Analysis']
+    for i,tab in enumerate(_nav):
+        col=2+i
+        c=ws1.cell(r,col); c.value=f"=HYPERLINK(\"#'{tab}'!A1\",\"{tab}\")"
+        c.font=Font(size=8,bold=True,color=DARK_BLUE,underline='single',name='Arial')
+        c.fill=F(PALE_ACCENT); c.alignment=A(h='center',v='center'); c.border=B(col=PANEL_BORDER)
+    set_row(ws1,r,20)
+    _audit_output_last_row = r
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB 2 — READ ME
@@ -828,9 +977,9 @@ def build_report(data_path, output_path):
 
         _rows=redundantIn.get('redundant',[])
         for i,item in enumerate(_rows,4):
-            sheet=item.get('sheet',''); cell=item.get('cell',''); val=item.get('value','')
+            sheet=item.get('sheet',''); cell_addr=item.get('cell',''); val=item.get('value','')
             label=item.get('label','') or ''
-            vals=['',i-3,sheet,cell,val,label,'','' ,'']
+            vals=['',i-3,sheet,cell_addr,val,label,'','' ,'']
             for col,v in enumerate(vals,1):
                 if col in (1,9): continue
                 c=wst.cell(i,col); c.value=v if v!='' or col in (6,8) else v
@@ -839,7 +988,7 @@ def build_report(data_path, output_path):
                 c.alignment=A(h='center' if col in (2,4) else 'right' if col==5 else 'left',v='top',wrap=(col in (6,8)))
                 c.border=B()
             link=wst.cell(i,7)
-            link.value='=HYPERLINK("[' + sourceFile + ']' + sheet + '!' + cell + '","Go to ' + cell + '")'
+            link.value='=HYPERLINK("[' + sourceFile + ']' + sheet + '!' + cell_addr + '","Go to ' + cell_addr + '")'
             link.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
             link.alignment=A(h='center'); link.border=B()
             set_row(wst,i,16)
@@ -957,6 +1106,25 @@ def build_report(data_path, output_path):
         set_row(ws9,row_i,30)
 
     # ── Save ─────────────────────────────────────────────────────────────────
+    # ── Workbook-wide polish — tab colours + print setup ──────────────────────
+    _tab_colors = {
+        'Audit Output': DARK_BLUE, 'Read Me': '5B7C99', 'Scope and Reliance': '5B7C99',
+        'Issue Log': AMBER, 'Remediation': AMBER,
+        'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
+        'Formula Analysis': GREY_MID, 'Redundant Inputs': GREY_MID,
+        'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
+        'F-Score Rules': GREY_MID, 'Audit Log': GREY_MID,
+    }
+    for _ws in wb.worksheets:
+        if _ws.title in _tab_colors:
+            _ws.sheet_properties.tabColor = _tab_colors[_ws.title]
+
+    ws1.page_setup.orientation = 'landscape'
+    ws1.page_setup.fitToWidth = 1
+    ws1.page_setup.fitToHeight = 0
+    ws1.sheet_properties.pageSetUpPr.fitToPage = True
+    ws1.print_area = f'B1:I{_audit_output_last_row}'
+
     wb.save(output_path)
     return {'status':'ok','tabs':13,'findings':len(findings)}
 
