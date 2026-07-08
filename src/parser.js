@@ -114,7 +114,18 @@ function headerCellText(cell) {
     const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return `${monthNames[v.result.getMonth()]} ${v.result.getFullYear()}`;
   }
-  return cell.text != null ? String(cell.text).trim() : '';
+  // cell.text can throw rather than return a value: exceljs's internal
+  // MergeValue.toString() assumes the merge's master cell reference is
+  // intact, and throws "Cannot read properties of null" when a workbook's
+  // merge metadata is stale/broken (e.g. the master cell was cleared or
+  // deleted while the merge range itself persisted — common in models
+  // edited over many years). Treat any such cell as empty rather than
+  // crashing the whole parse.
+  try {
+    return cell.text != null ? String(cell.text).trim() : '';
+  } catch (_) {
+    return '';
+  }
 }
 
 function findHeaderRow(ws) {
