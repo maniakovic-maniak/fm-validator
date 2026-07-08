@@ -78,6 +78,16 @@ function requireApiKey(req, res, next) {
   const API_KEY = process.env.VALIDATOR_API_KEY;
   // If no API key configured, allow all (dev mode)
   if (!API_KEY) return next();
+
+  // The x-api-key gate is for programmatic/API callers (curl, integrations,
+  // future clients) — NOT the first-party browser UI, which never embeds
+  // the key (that would expose it in public HTML/JS). Exempt same-origin
+  // browser requests, identified by Origin/Referer matching this server's
+  // own allowed origins.
+  const originHeader = req.headers.origin ||
+    (req.headers.referer ? (() => { try { return new URL(req.headers.referer).origin; } catch (_) { return null; } })() : null);
+  if (originHeader && allowedOrigins.includes(originHeader)) return next();
+
   const provided = req.headers['x-api-key'] || req.query.apiKey;
   if (provided === API_KEY) return next();
   return res.status(401).json({ error: 'Unauthorised — valid API key required in x-api-key header' });
