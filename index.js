@@ -2,6 +2,8 @@ require('dotenv').config();
 const { fetchAndParse, scanFormulaErrors }                            = require('./src/parser');
 const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
 const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
+const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
+const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill }                          = require('./src/classifier');
 const { preValidate }                              = require('./src/pre-validator');
@@ -41,9 +43,18 @@ async function run() {
   // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────────
   console.log('[1.5/6] Scanning formula text...');
   const tier0 = await runTier0(parsed);
+  // Opt-in only — this is an additional-cost, additional-time review
+  // beyond the standard run. Off by default; set ENABLE_FORMULA_DEEPDIVE=true
+  // (or pass formulaDeepDive:true in the request body, for server.js) to enable.
+  const wantsDeepDive = process.env.ENABLE_FORMULA_DEEPDIVE === 'true';
+  const formulaDeepDive = wantsDeepDive
+    ? await (async () => { try { return await runFormulaDeepDive(parsed, tier0, {}); }
+        catch (e) { console.error('   \u26a0\ufe0f  Formula Deep Dive failed:', e.message); return { applicable:false, note:e.message, reviewed:0, findings:[] }; } })()
+    : { applicable:false, note:'Not requested for this run.', reviewed:0, findings:[] };
   const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Error scan failed:', e.message); return []; } })();
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
   const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
+  const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
 
   // ── Step 2: Familiarise ────────────────────────────────────────────────────
   console.log('[1/6] Familiarising with the model...');
@@ -140,6 +151,44 @@ async function run() {
       urgency: 'Before next reliance', confidence: 90
     });
   }
+  // Named-range findings — unused (P2, may include legitimate benign
+  // cases) and broken (P1, unambiguously wrong) get separate findings so
+  // severity isn't diluted by mixing them.
+  if (namedRangeAudit.applicable && namedRangeAudit.broken.length > 0) {
+    const names = namedRangeAudit.broken.map(b => b.name).join(', ');
+    allFlagged.push({
+      id: 'T0-NR-001',
+      label: `${namedRangeAudit.broken.length} named range(s) point to a broken or deleted reference`,
+      severity: 'critical', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Linkage',
+      condition: `The following named range(s) no longer resolve to a valid location: ${names}. Any formula that used to reference these would show #REF!/#NAME? errors.`,
+      reason: `${namedRangeAudit.broken.length} broken named range(s): ${names}`,
+      corrective_action: 'Repair or remove each broken named range; check whether any formula was relying on it before the underlying range was deleted.',
+      workstream: 'Structure', category: 'Linkage', issue_type: 'Broken named range',
+      model_risk: 'A broken named range signals a structural change (deleted sheet/range) that was not fully cleaned up — worth checking nothing else was silently affected.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Named range reference invalid', escalation_flag: true,
+      urgency: 'Before next reliance', confidence: 95
+    });
+  }
+  if (namedRangeAudit.applicable && namedRangeAudit.unused.length > 0) {
+    const names = namedRangeAudit.unused.slice(0, 8).map(u => u.name).join(', ');
+    allFlagged.push({
+      id: 'T0-NR-002',
+      label: `${namedRangeAudit.unused.length} named range(s) are defined but never referenced by any formula`,
+      severity: 'high', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Linkage',
+      condition: `The following named range(s) exist but no formula anywhere references them, by name or by the cell address they point to: ${names}${namedRangeAudit.unused.length > 8 ? ' and others' : ''}. A name whose wording suggests a key output (total, capex, revenue, debt) deserves particular attention.`,
+      reason: `${namedRangeAudit.unused.length} unused named range(s)`,
+      corrective_action: 'For each: confirm whether it should be linked into the model, or remove it if genuinely no longer needed.',
+      workstream: 'Structure', category: 'Linkage', issue_type: 'Unused named range',
+      model_risk: 'The underlying value may be a real output that never reaches the financial statements — the exact failure mode described in the capex linkage case study.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Named range not referenced', escalation_flag: true,
+      urgency: 'Before next reliance', confidence: 85
+    });
+  }
+  if (formulaDeepDive.findings && formulaDeepDive.findings.length) allFlagged.push(...formulaDeepDive.findings);
   console.log(`   ℹ️  ${allFlagged.length} items flagged`);
   // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
   const ruleResults = [...t1Results, ...t2Results].map(r => ({
@@ -191,7 +240,9 @@ async function run() {
     ruleResults,
     errorScan,
     redundantInputs,
-    orphanSheets
+    orphanSheets,
+    namedRangeAudit,
+    formulaDeepDive
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────

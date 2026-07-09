@@ -352,4 +352,4 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   }
 }
 
-module.exports = { runTier2 };
+module.exports = { runTier2, parseResponse };

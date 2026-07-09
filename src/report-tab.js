@@ -12,7 +12,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
   const {
     originalName, modelType, modelIndustry, modelPurpose,
     modelSummary, tier0, auditLog, overallAssessment,
-    igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets
+    igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets, namedRangeAudit, formulaDeepDive
   } = meta;
 
   // Enrich findings with F-score using the cell-level index built by Tier 0.
@@ -67,6 +67,8 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     errorScan:       errorScan || [],
     redundantInputs: redundantInputs || { applicable:false, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] },
     orphanSheets: orphanSheets || { applicable:false, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 },
+    namedRangeAudit: namedRangeAudit || { applicable:false, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 },
+    formulaDeepDive: formulaDeepDive || { applicable:false, reviewed:0, findings:[] },
     auditLog:        auditLog || []
   };
 

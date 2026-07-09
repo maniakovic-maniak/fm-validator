@@ -127,6 +127,7 @@ def build_report(data_path, output_path):
     redundantIn  = d.get('redundantInputs',{'applicable':False,'totalInputs':0,'redundantCount':0,'redundant':[],'inputSheets':[]})
     orphanIn     = d.get('orphanSheets',{'applicable':False,'orphanSheets':[],'financialStatementSheets':[],'reachableSheets':[],'totalSheets':0})
     namedRangeIn = d.get('namedRangeAudit',{'applicable':False,'unused':[],'poorlyNamed':[],'broken':[],'totalNamedRanges':0})
+    formulaDeepIn = d.get('formulaDeepDive',{'applicable':False,'reviewed':0,'findings':[]})
 
     # Checklist rules for the Validation Matrix — loaded from config
     checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
@@ -645,15 +646,23 @@ def build_report(data_path, output_path):
         cell(ws3,f'{get_column_letter(c1)}{r3}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
         ws3.cell(r3,c1).border=B(col=WHITE)
     set_row(ws3,r3,16); r3+=1
+    _fdd_performed = formulaDeepIn.get('applicable', False)
+    _fdd_summary = (f"Individually reviewed the {formulaDeepIn.get('reviewed',0)} highest-complexity formulas in this model (Tier 0 F-score ranked), not sampled — a targeted, not exhaustive, set. {len(formulaDeepIn.get('findings',[]))} finding(s) resulted."
+                     if _fdd_performed else 'Best-effort via Tier 0 only')
     _exclusions=[
-        ('Formula text inspection','Partial','Best-effort via Tier 0 only','Full review requires direct Excel/formula access'),
+        ('Formula text inspection', 'Performed' if _fdd_performed else 'Partial',
+         _fdd_summary,
+         'None — opt-in deep review was performed for this run' if _fdd_performed else 'Enable the Formula Deep Dive opt-in for individual review of the highest-risk formulas, or provide direct Excel/formula access for full coverage'),
         ('Source document review','Not performed','This review has no access to contracts, invoices, bank statements or other source records — only the Excel file itself. An assumption can look internally consistent without being independently verified against reality.','Provide source documents for Mode C review'),
-        ('Cell-by-cell audit','Not performed','Formula logic inspection requires formula text access','Engage manual reviewer or provide formula export'),
+        ('Cell-by-cell audit', 'Performed (targeted)' if _fdd_performed else 'Not performed',
+         (f"The {formulaDeepIn.get('reviewed',0)} highest-risk formulas received individual review this run — not full coverage of every cell, but not merely pattern-based either."
+          if _fdd_performed else 'Formula logic inspection requires formula text access'),
+         'None for the reviewed set — engage a manual reviewer for full coverage beyond the targeted set' if _fdd_performed else 'Engage manual reviewer or provide formula export'),
         ('Commercial omission testing','Not performed','Requires challenger model and commercial judgment','Commission a challenger-model review'),
         ('VBA and macro audit','Not performed','This review reads formula cells directly; it does not execute or trace VBA/macro code, so any calculation performed inside a macro is invisible to it, however well the macro itself is written.','Provide macro source for manual review'),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
-    _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT)}
+    _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT)}
     _col_chars = {2:22, 4:34, 5:22}  # rough usable characters per line, by column width
     for proc,status,impact,nxt in _exclusions:
         ws3.cell(r3,2).value=proc; ws3.cell(r3,2).font=Fn(sz=9,col=CHARCOAL); ws3.cell(r3,2).fill=F(WHITE); ws3.cell(r3,2).alignment=A(wrap=True,v='center')
