@@ -418,7 +418,7 @@ def build_report(data_path, output_path):
     set_row(ws1,r,18); r+=1
 
     _ref_tab = {
-        'Formula integrity':'Formula Analysis','Unique formula review':'Formula Analysis',
+        'Formula integrity':'Formula Risk Review','Unique formula review':'Formula Risk Review',
         'Input linkage':'Redundant Inputs','Debt / funding logic':'Issue Log',
         'Financial statements':'Issue Log','Tax logic':'Issue Log',
     }
@@ -484,7 +484,7 @@ def build_report(data_path, output_path):
     set_row(ws1,r,10); r+=1
 
     # ── Navigation row ───────────────────────────────────────────────────────
-    _nav=['Issue Log','Formula Analysis','Redundant Inputs','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
+    _nav=['Issue Log','Formula Risk Review','Redundant Inputs','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
     for i,tab in enumerate(_nav):
         col=2+i
         c=ws1.cell(r,col); c.value=f"=HYPERLINK(\"#'{tab}'!A1\",\"{tab}\")"
@@ -1236,67 +1236,132 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 6 — FORMULA ANALYSIS
     # ════════════════════════════════════════════════════════════════════════
-    ws6=wb.create_sheet('Formula Analysis'); ws6.sheet_view.showGridLines=False; ws6.freeze_panes='A3'
-    for col,w in [(1,3),(2,10),(3,12),(4,8),(5,50),(6,8),(7,12),(8,40),(9,16),(10,8),(11,8),(12,8),(13,8),(14,8),(15,25),(16,10),(17,10),(18,20),(19,3)]:
+    ws6=wb.create_sheet('Formula Risk Review'); ws6.sheet_view.showGridLines=False
+    for col,w in [(1,3),(2,10),(3,12),(4,8),(5,10),(6,14),(7,20),(8,26),(9,16),(10,32)]:
         set_col(ws6,col,w)
+    uf_headers=['','UFI','Sheet','Cell','F-Score','Complexity Band','Formula Class','Key Risk',
+                'Status','Reviewer Comment','Formula Text','F-Score Explanation','External Link',
+                'Volatile','Hardcode','IFERROR','Cross-Sheet Refs','Precedent Sheets','']
+    n_fa_cols = len(uf_headers)
+    n_fa_visible = 10  # UFI..Reviewer Comment (column NUMBER of last visible field, not a count)
+    uf_idx = {h.replace('\n',' '): i for i,h in enumerate(uf_headers,1) if h}
+    FA_HEADER_ROW=6
 
-    merge(ws6,'B1:R1','FORMULA DUE DILIGENCE — KEY FORMULA REVIEW',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(ws6,1,2,1,18,DARK_BLUE); set_row(ws6,1,28)
+    merge(ws6,f'B1:{get_column_letter(n_fa_cols-1)}1','FORMULA RISK REVIEW',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws6,1,2,1,n_fa_cols-1,DARK_BLUE); set_row(ws6,1,26)
 
-    # Stats summary
     stats=t0.get('stats',{})
-    merge(ws6,'B2:D2',f"Total formulas: {stats.get('totalFormulaCells',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
-    merge(ws6,'E2:G2',f"Unique patterns: {stats.get('uniqueFormulaCount',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
-    merge(ws6,'H2:J2',f"IFERROR usage: {stats.get('totalIferrorCount',0):,}",sz=9,col=GREY_DARK,bg=PALE_BLUE)
-    merge(ws6,'K2:M2',f"OFFSET: {stats.get('totalOffsetCount',0):,}",sz=9,col=AMBER,bg=LIGHT_AMBER)
-    merge(ws6,'N2:P2',f"External links: {stats.get('totalExternalLinks',0)}",sz=9,col=GREY_DARK,bg=GREY_LIGHT)
-    set_row(ws6,2,18)
-
-    uf_headers=['','UFI','Sheet','Cell','Formula Text (snapshot at detection)','F-Score','Complexity\nBand',
-                'F-Score Explanation','Formula Class','External\nLink','Volatile','Hardcode',
-                'IFERROR','Cross-Sheet\nRefs','Precedent Sheets','Priority','Status','Reviewer\nComment','']
-    for col,h in enumerate(uf_headers,1):
-        c=ws6.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
-        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-    set_row(ws6,3,32)
-
-    band_colors={'Critical':GREY_LIGHT,'High':LIGHT_AMBER,'Moderate':LIGHT_YELL,'Low':LIGHT_GREEN}
     ufs=t0.get('uniqueFormulas',[])
-    for row_i,uf in enumerate(ufs[:200],4):  # Max 200 unique formulas
-        band=uf.get('band','Low'); bg=band_colors.get(band,GREY_LIGHT)
-        # Auto-generate reviewer comment for High/Moderate complexity
-        auto_comment = ''
-        if band in ('High','Very High','Critical','Moderate'):
-            flags = []
-            if uf.get('externalLinkFlag'): flags.append('references an external workbook — verify the link is current and the source file is accessible')
-            if uf.get('volatileFlag'): flags.append('uses a volatile function (OFFSET/INDIRECT) — check whether a static alternative would work')
-            if uf.get('iferrorFlag'): flags.append('contains error suppression — confirm this is not hiding a genuine calculation error')
-            if uf.get('hardcodeFlag'): flags.append('contains hardcoded values — check whether these should be on the Inputs sheet')
-            xrefs = uf.get('crossSheetRefs',0)
-            if xrefs > 2: flags.append(f'references {xrefs} sheets — trace the dependency chain to confirm all source data is correct')
-            if flags:
-                auto_comment = 'Review required: ' + '; '.join(flags) + '.'
-            else:
-                auto_comment = f'Complex formula ({band} F-score). Review the logic and confirm it produces the intended result.'
-        vals=['',uf.get('ufi',''),uf.get('sheet',''),uf.get('cell',''),
-              uf.get('formulaText',''),uf.get('fscore',0),band,
-              uf.get('explanation',''),uf.get('formulaClass',''),
-              'Yes' if uf.get('externalLinkFlag') else 'No',
-              'Yes' if uf.get('volatileFlag') else 'No',
-              'Yes' if uf.get('hardcodeFlag') else 'No',
-              'Yes' if uf.get('iferrorFlag') else 'No',
-              uf.get('crossSheetRefs',0),uf.get('precedentSheets',''),
-              '','OK','','']
-        for col,val in enumerate(vals,1):
-            c=ws6.cell(row_i,col); c.value=val
-            c.font=Fn(sz=9,bold=(col in [2,6,7]))
-            c.fill=F(bg)
-            c.alignment=A(h='center' if col in [2,3,4,6,7,10,11,12,13,14,16,17] else 'left',v='top',wrap=(col in [5,8]))
-            c.border=B()
-        set_row(ws6,row_i,40)
+    n_high_risk = sum(1 for uf in ufs if uf.get('band') in ('High','Very High','Critical'))
+    n_volatile  = sum(1 for uf in ufs if uf.get('volatileFlag'))
+    _fa_first, _fa_last = FA_HEADER_ROW+1, FA_HEADER_ROW+min(len(ufs),200)
+    BAND_L = get_column_letter(uf_idx['Complexity Band'])
 
-    # ════════════════════════════════════════════════════════════════════════
-    # TAB 7 — FORMULA MAP
+    # ── Summary cards — exact 6 metrics from the brief ──────────────────────
+    _fa_cards=[('Total Formulas', stats.get('totalFormulaCells',0), 2,3),
+               ('Unique Patterns', stats.get('uniqueFormulaCount',0), 4,4),
+               ('High Risk', n_high_risk, 5,5),
+               ('External Links', stats.get('totalExternalLinks',0), 6,6),
+               ('Volatile', n_volatile, 7,8),
+               ('IFERROR', stats.get('totalIferrorCount',0), 9,10)]
+    for label,val,c1,c2 in _fa_cards:
+        col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
+        if c2>c1: merge(ws6,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        else: cell(ws6,f'{col_l1}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        if c2>c1: merge(ws6,f'{col_l1}4:{col_l2}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        else: cell(ws6,f'{col_l1}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        ws6.cell(4,c1).number_format='#,##0'
+        for rr in (3,4):
+            for cc in range(c1,c2+1): ws6.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(ws6,3,14); set_row(ws6,4,24)
+    merge(ws6,f'B5:{get_column_letter(n_fa_cols-1)}5',
+          'High-risk and volatile formulas warrant reviewer attention first — use the Complexity Band filter below.',
+          sz=8,col=GREY_TXT2,italic=True)
+    set_row(ws6,5,16)
+
+    for col,h in enumerate(uf_headers,1):
+        c=ws6.cell(FA_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+    set_row(ws6,FA_HEADER_ROW,28)
+    ws6.freeze_panes = f'{get_column_letter(uf_idx["F-Score"])}{FA_HEADER_ROW+1}'
+
+    _band_badge={'Critical':(P1_FILL,P1_TXT),'Very High':(P1_FILL,P1_TXT),'High':(P2_FILL,P2_TXT),
+                 'Moderate':(P3_FILL,P3_TXT),'Low':(OK_FILL,OK_TXT)}
+    _centered5={'F-Score','Complexity Band','External Link','Volatile','Hardcode','IFERROR','Cross-Sheet Refs'}
+    _wrapped5={'Key Risk','Reviewer Comment','F-Score Explanation'}
+    for idx,uf in enumerate(ufs[:200]):
+        row_i = FA_HEADER_ROW+1+idx
+        row_bg = WHITE if idx%2==0 else 'FAFBFC'
+        band=uf.get('band','Low')
+
+        # Key Risk — one short label, not a full sentence (auto_comment in
+        # Reviewer Comment carries the detail)
+        risk_flags=[]
+        if uf.get('externalLinkFlag'): risk_flags.append('External link')
+        if uf.get('volatileFlag'): risk_flags.append('Volatile function')
+        if uf.get('hardcodeFlag'): risk_flags.append('Hardcoded value')
+        if uf.get('iferrorFlag'): risk_flags.append('Error suppression')
+        xrefs=uf.get('crossSheetRefs',0)
+        if xrefs>2: risk_flags.append(f'{xrefs} sheet refs')
+        key_risk = risk_flags[0] if len(risk_flags)==1 else (f'{risk_flags[0]} +{len(risk_flags)-1} more' if risk_flags else '—')
+
+        auto_comment=''
+        if band in ('High','Very High','Critical','Moderate'):
+            parts=[]
+            if uf.get('externalLinkFlag'): parts.append('references an external workbook — verify the link is current and the source file is accessible')
+            if uf.get('volatileFlag'): parts.append('uses a volatile function (OFFSET/INDIRECT) — check whether a static alternative would work')
+            if uf.get('iferrorFlag'): parts.append('contains error suppression — confirm this is not hiding a genuine calculation error')
+            if uf.get('hardcodeFlag'): parts.append('contains hardcoded values — check whether these should be on the Inputs sheet')
+            if xrefs>2: parts.append(f'references {xrefs} sheets — trace the dependency chain to confirm all source data is correct')
+            auto_comment = ('Review required: '+'; '.join(parts)+'.') if parts else f'Complex formula ({band} F-score). Review the logic and confirm it produces the intended result.'
+
+        row_values={
+            'UFI': uf.get('ufi',''), 'Sheet': uf.get('sheet',''), 'Cell': uf.get('cell',''),
+            'F-Score': uf.get('fscore',0), 'Complexity Band': band, 'Formula Class': uf.get('formulaClass',''),
+            'Key Risk': key_risk, 'Status': '', 'Reviewer Comment': auto_comment,
+            'Formula Text': uf.get('formulaText',''), 'F-Score Explanation': uf.get('explanation',''),
+            'External Link': 'Yes' if uf.get('externalLinkFlag') else 'No',
+            'Volatile': 'Yes' if uf.get('volatileFlag') else 'No',
+            'Hardcode': 'Yes' if uf.get('hardcodeFlag') else 'No',
+            'IFERROR': 'Yes' if uf.get('iferrorFlag') else 'No',
+            'Cross-Sheet Refs': xrefs, 'Precedent Sheets': uf.get('precedentSheets',''),
+        }
+        for name,val in row_values.items():
+            col=uf_idx[name]
+            c=ws6.cell(row_i,col); c.value=val
+            is_formula_text = (name=='Formula Text')
+            c.font=Font(name='Consolas',size=8,color='000000') if is_formula_text else Fn(sz=9,bold=(name=='UFI'))
+            c.fill=F(row_bg)
+            c.alignment=A(h='center' if name in _centered5 else 'left', v='top', wrap=(name in _wrapped5 or is_formula_text))
+            c.border=B(col=PANEL_BORDER)
+
+        bf,bt=_band_badge.get(band,(GREY_LIGHT,CHARCOAL))
+        badge(ws6,row_i,uf_idx['Complexity Band'],band,bf,bt,sz=8,bold=False)
+        set_row(ws6,row_i,30)
+
+    _fa_last_row = FA_HEADER_ROW+min(len(ufs),200)
+
+    for col in range(n_fa_visible+1, n_fa_cols):
+        ws6.column_dimensions[get_column_letter(col)].hidden = True
+
+    if len(ufs) > 0:
+        _fa_table = Table(displayName="FormulaRiskTable", ref=f'B{FA_HEADER_ROW}:{get_column_letter(n_fa_cols-1)}{_fa_last_row}')
+        _fa_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                    showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        ws6.add_table(_fa_table)
+
+        status_dv = DataValidation(type='list',
+            formula1='"Accept,Split Formula,Replace Link,Investigate,Not Relevant"', allow_blank=True)
+        ws6.add_data_validation(status_dv)
+        status_dv.add(f'{get_column_letter(uf_idx["Status"])}{_fa_first}:{get_column_letter(uf_idx["Status"])}{_fa_last}')
+
+    if len(ufs) > 200:
+        _note_row = _fa_last_row + 1
+        merge(ws6,f'B{_note_row}:{get_column_letter(n_fa_cols-1)}{_note_row}',
+              f'List capped at 200 unique formulas of {len(ufs):,} total — remaining formulas are represented in the summary counts above.',
+              sz=8,col=GREY_TXT2,italic=True)
+        set_row(ws6,_note_row,16)
+
     # ════════════════════════════════════════════════════════════════════════
     # TAB — ERROR-CODE ROOT CAUSE MATRIX (V11 §4)
     # ════════════════════════════════════════════════════════════════════════
@@ -1307,7 +1372,7 @@ def build_report(data_path, output_path):
     fill_range(wse,1,2,1,6,DARK_BLUE); set_row(wse,1,28)
     _ifer=t0.get('stats',{}).get('totalIferrorCount',0)
     merge(wse,'B2:F2',(f'Live error values found in the workbook, grouped by code. '
-        f'{_ifer:,} IFERROR/IFNA wrappers exist in this model — errors inside wrapped formulas do not appear here and may be silently masked; see Formula Due Diligence.'),
+        f'{_ifer:,} IFERROR/IFNA wrappers exist in this model — errors inside wrapped formulas do not appear here and may be silently masked; see Formula Risk Review.'),
         sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
     set_row(wse,2,26)
 
@@ -1523,7 +1588,7 @@ def build_report(data_path, output_path):
         'Audit Output': DARK_BLUE, 'Read Me': '5B7C99', 'Scope and Reliance': '5B7C99',
         'Issue Log': AMBER, 'Remediation': AMBER,
         'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
-        'Formula Analysis': GREY_MID, 'Redundant Inputs': GREY_MID,
+        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID,
         'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
         'F-Score Rules': GREY_MID, 'Audit Log': GREY_MID,
     }
