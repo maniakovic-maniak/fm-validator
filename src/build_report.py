@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FM Validator — _VALIDATED.xlsx Report Builder
-13-tab transaction-grade audit report
+14-tab transaction-grade audit report
 """
 import sys, json, os, re
 from datetime import datetime
@@ -125,6 +125,7 @@ def build_report(data_path, output_path):
     ruleResults  = d.get('ruleResults',[])
     errorScan    = d.get('errorScan',[])
     redundantIn  = d.get('redundantInputs',{'applicable':False,'totalInputs':0,'redundantCount':0,'redundant':[],'inputSheets':[]})
+    orphanIn     = d.get('orphanSheets',{'applicable':False,'orphanSheets':[],'financialStatementSheets':[],'reachableSheets':[],'totalSheets':0})
 
     # Checklist rules for the Validation Matrix — loaded from config
     checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
@@ -407,6 +408,13 @@ def build_report(data_path, output_path):
           else f"All {redundantIn.get('totalInputs',0)} input-sheet constants are referenced by model formulas"
           if redundantIn.get('applicable',False)
           else 'Not applicable — no input/assumption-named sheet detected')),
+        ('Statement linkage',
+         orphanIn.get('applicable',False) and len(orphanIn.get('orphanSheets',[]))>0,
+         (f"{len(orphanIn.get('orphanSheets',[]))} sheet(s) have no traceable path to a financial statement ({', '.join(orphanIn.get('orphanSheets',[])[:5])}) — see the Sheet Linkage tab and Issue Log finding T0-LINK-001"
+          if orphanIn.get('applicable',False) and len(orphanIn.get('orphanSheets',[]))>0
+          else f"All {orphanIn.get('totalSheets',0)} sheets have a traceable path to a financial statement"
+          if orphanIn.get('applicable',False)
+          else 'Not applicable — no financial-statement-named sheet detected')),
     ]
     merge(ws1,f'B{r}:I{r}','Review Area Status',bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(ws1,r,2,r,9,DARK_BLUE); set_row(ws1,r,20); r+=1
@@ -421,15 +429,20 @@ def build_report(data_path, output_path):
         'Formula integrity':'Formula Risk Review','Unique formula review':'Formula Risk Review',
         'Input linkage':'Redundant Inputs','Debt / funding logic':'Issue Log',
         'Financial statements':'Issue Log','Tax logic':'Issue Log',
+        'Statement linkage':'Sheet Linkage',
     }
     _blocked_areas = {'Debt / funding logic','Financial statements'} if p1_open>0 else set()
     for area,has_issue,summary in status_areas:
         i=r
-        if area in _blocked_areas and any(f.get('category') in ('Debt','Integration') and priority(f)=='P1' for f in findings):
+        if area=='Statement linkage' and orphanIn.get('applicable',False) and len(orphanIn.get('orphanSheets',[]))>0:
+            status_txt='Blocked'; sf,st=(P1_FILL,P1_TXT)
+        elif area in _blocked_areas and any(f.get('category') in ('Debt','Integration') and priority(f)=='P1' for f in findings):
             status_txt='Blocked'; sf,st=(P1_FILL,P1_TXT)
         elif has_issue:
             status_txt='Review'; sf,st=(P2_FILL,P2_TXT)
         elif area=='Input linkage' and not redundantIn.get('applicable',False):
+            status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
+        elif area=='Statement linkage' and not orphanIn.get('applicable',False):
             status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
         else:
             status_txt='Completed'; sf,st=(OK_FILL,OK_TXT)
@@ -484,7 +497,7 @@ def build_report(data_path, output_path):
     set_row(ws1,r,10); r+=1
 
     # ── Navigation row ───────────────────────────────────────────────────────
-    _nav=['Issue Log','Formula Risk Review','Redundant Inputs','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
+    _nav=['Issue Log','Formula Risk Review','Redundant Inputs','Sheet Linkage','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
     for i,tab in enumerate(_nav):
         col=2+i
         c=ws1.cell(r,col); c.value=f"=HYPERLINK(\"#'{tab}'!A1\",\"{tab}\")"
@@ -1598,6 +1611,90 @@ def build_report(data_path, output_path):
             status_dv.add(f'{get_column_letter(ri_idx["Status"])}{RI_HEADER_ROW+1}:{get_column_letter(ri_idx["Status"])}{_ri_last_row}')
 
     # ════════════════════════════════════════════════════════════════════════
+    # TAB — SHEET LINKAGE (inverse of Redundant Inputs) — orphan sheet detection
+    # ════════════════════════════════════════════════════════════════════════
+    wsl=wb.create_sheet('Sheet Linkage'); wsl.sheet_view.showGridLines=False
+    sl_headers=['','Sheet','Reviewer Decision','Owner','Status','Notes','']
+    n_sl_cols = len(sl_headers)
+    for i,w in enumerate([3,22,20,16,12,34,3],1): set_col(wsl,i,w)
+    sl_idx = {h.replace('\n',' '): i for i,h in enumerate(sl_headers,1) if h}
+    SL_HEADER_ROW=6
+
+    merge(wsl,f'B1:{get_column_letter(n_sl_cols-1)}1','SHEET LINKAGE',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wsl,1,2,1,n_sl_cols-1,DARK_BLUE); set_row(wsl,1,26)
+
+    if not orphanIn.get('applicable',False):
+        merge(wsl,f'B2:{get_column_letter(n_sl_cols-1)}2',
+              'Not applicable — no sheet matching financial-statement naming (AFS/IFS/Balance Sheet/Cash Flow/P&L) was detected in this model.',
+              sz=9,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+        set_row(wsl,2,20)
+    else:
+        _orphans = orphanIn.get('orphanSheets',[])
+        _fin_sheets = orphanIn.get('financialStatementSheets',[])
+        _total = orphanIn.get('totalSheets',0)
+
+        # ── Summary cards ─────────────────────────────────────────────────
+        _sl_cards=[('Orphan Sheets', len(_orphans), 2,3), ('Total Sheets', _total, 4,5),
+                   ('Financial Statement Sheets', len(_fin_sheets), 6,7)]
+        for label,val,c1,c2 in _sl_cards:
+            col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
+            merge(wsl,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+            merge(wsl,f'{col_l1}4:{col_l2}4',val,bold=True,sz=18,col=(P1_TXT if label=='Orphan Sheets' and val>0 else CHARCOAL),bg=PANEL_GREY,h='center')
+            wsl.cell(4,c1).number_format='#,##0;[Red](#,##0);-'
+            for rr in (3,4):
+                for cc in range(c1,c2+1): wsl.cell(rr,cc).border=B(col=PANEL_BORDER)
+        set_row(wsl,3,14); set_row(wsl,4,26)
+
+        # ── Instruction box ───────────────────────────────────────────────
+        merge(wsl,f'B5:{get_column_letter(n_sl_cols-1)}5',
+              (f'Every sheet must have a traceable formula path — direct or indirect, including named ranges — to a '
+               f'financial-statement sheet ({", ".join(_fin_sheets) if _fin_sheets else "none detected"}), or a documented reason it is intentionally standalone. '
+               + orphanIn.get('note','')),
+              sz=8,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wsl,5,26)
+
+        for col,h in enumerate(sl_headers,1):
+            c=wsl.cell(SL_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+            c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+        set_row(wsl,SL_HEADER_ROW,22)
+        wsl.freeze_panes = f'{get_column_letter(sl_idx["Owner"])}{SL_HEADER_ROW+1}'
+
+        if not _orphans:
+            merge(wsl,f'B{SL_HEADER_ROW+1}:{get_column_letter(n_sl_cols-1)}{SL_HEADER_ROW+1}',
+                  'No orphan sheets detected — every sheet has a traceable path to a financial statement.',
+                  sz=9,col=OK_TXT,bg=OK_FILL,wrap=True)
+            set_row(wsl,SL_HEADER_ROW+1,20)
+        else:
+            for idx,sheet_name in enumerate(_orphans):
+                row_i = SL_HEADER_ROW+1+idx
+                row_bg = WHITE if idx%2==0 else 'FAFBFC'
+                row_values={'Sheet':sheet_name,'Reviewer Decision':'','Owner':'','Status':'Open','Notes':''}
+                for name,val in row_values.items():
+                    col=sl_idx[name]
+                    c=wsl.cell(row_i,col); c.value=val
+                    c.font=Fn(sz=9,bold=(name=='Sheet'))
+                    c.fill=F(row_bg)
+                    c.alignment=A(h='center' if name=='Status' else 'left', v='top', wrap=(name=='Notes'))
+                    c.border=B(col=PANEL_BORDER)
+                set_row(wsl,row_i,20)
+
+            _sl_last_row = SL_HEADER_ROW+len(_orphans)
+            _sl_table = Table(displayName="SheetLinkageTable", ref=f'B{SL_HEADER_ROW}:{get_column_letter(n_sl_cols-1)}{_sl_last_row}')
+            _sl_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                        showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+            wsl.add_table(_sl_table)
+
+            decision_dv = DataValidation(type='list',
+                formula1='"Link into statements,Confirm intentionally standalone,Remove sheet,Investigate"', allow_blank=True)
+            wsl.add_data_validation(decision_dv)
+            decision_dv.add(f'{get_column_letter(sl_idx["Reviewer Decision"])}{SL_HEADER_ROW+1}:{get_column_letter(sl_idx["Reviewer Decision"])}{_sl_last_row}')
+
+            status_dv2 = DataValidation(type='list', formula1='"Open,Cleared,Deferred"', allow_blank=False)
+            wsl.add_data_validation(status_dv2)
+            status_dv2.add(f'{get_column_letter(sl_idx["Status"])}{SL_HEADER_ROW+1}:{get_column_letter(sl_idx["Status"])}{_sl_last_row}')
+
+
+    # ════════════════════════════════════════════════════════════════════════
     ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False
     sd_headers=['','Target Sheet','Precedent Sheet','Link Count','Direction','Dependency Risk',
                 'Reviewer Action','Reviewer Note','Priority Count','Avg F-Score','Max F-Score','']
@@ -1817,7 +1914,7 @@ def build_report(data_path, output_path):
         'Audit Output': DARK_BLUE, 'Read Me': '5B7C99', 'Scope and Reliance': '5B7C99',
         'Issue Log': AMBER, 'Remediation': AMBER,
         'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
-        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID,
+        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID,
         'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
         'F-Score Rules': GREY_MID, 'Pipeline Audit Trail': GREY_MID,
     }
@@ -1832,7 +1929,7 @@ def build_report(data_path, output_path):
     ws1.print_area = f'B1:I{_audit_output_last_row}'
 
     wb.save(output_path)
-    return {'status':'ok','tabs':13,'findings':len(findings)}
+    return {'status':'ok','tabs':14,'findings':len(findings)}
 
 if __name__=='__main__':
     if len(sys.argv)<3:

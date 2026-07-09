@@ -14,6 +14,7 @@ const { startRunLog }                = require('./src/utils/run-logger');
 // Core pipeline modules
 const { parseExcel, scanFormulaErrors }                             = require('./src/parser');
 const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
+const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill }                        = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
@@ -194,6 +195,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const tier0 = await runTier0(parsed);
   const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Error scan failed:', e.message); return []; } })();
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
+  const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
 
     // Check for potential formula caching issue — if many formulas but few errors
     // detected, warn that cached values may be missing
@@ -277,6 +279,28 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       urgency: 'Before next reliance', confidence: 95
     });
   }
+  // Orphan-sheet finding — deterministic; a whole calculation area that
+  // never reaches the financial statements is more serious than a single
+  // unused input, so this gets its own T1-level treatment.
+  if (orphanSheets.applicable && orphanSheets.orphanSheets.length > 0) {
+    const _sheets = orphanSheets.orphanSheets.join(', ');
+    allFlagged.push({
+      id: 'T0-LINK-001',
+      label: `${orphanSheets.orphanSheets.length} sheet(s) have no traceable path to a financial statement`,
+      severity: 'critical',
+      status: 'fail',
+      sheet: orphanSheets.orphanSheets[0],
+      cell: 'A1',
+      condition: `The following sheet(s) contain formulas but have no static reference path (direct or indirect, including named ranges) to a detected financial-statement sheet (${orphanSheets.financialStatementSheets.join(', ')}): ${_sheets}. ${orphanSheets.note}`,
+      reason: `${orphanSheets.orphanSheets.length} sheet(s) not traceable to financial statements: ${_sheets}`,
+      corrective_action: 'For each listed sheet: confirm whether it should feed the financial statements and link it in, or document why it is intentionally standalone.',
+      workstream: 'Structure', category: 'Linkage', issue_type: 'Orphan sheet',
+      model_risk: 'This sheet may calculate real values that never reach the reported outputs — assumptions here can be changed with no visible effect on the model, or a genuine result may be silently missing from the financial statements.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Sheet not linked to financial statements', escalation_flag: true,
+      urgency: 'Before next reliance', confidence: 90
+    });
+  }
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
     const ruleResults = [...t1Results, ...t2Results].map(r => ({
@@ -330,7 +354,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       reviewMode:        'llm_only',
       ruleResults,
       errorScan,
-      redundantInputs
+      redundantInputs,
+      orphanSheets
     });
 
     let driveResult = null;

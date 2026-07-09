@@ -122,7 +122,7 @@ function normalizeFormula(formula) {
 }
 
 // Extract sheet names referenced in a formula
-function extractPrecedentSheets(formula, allSheetNames) {
+function extractPrecedentSheets(formula, allSheetNames, nameToSheets) {
   if (!formula) return [];
   const refs = new Set();
 
@@ -138,6 +138,17 @@ function extractPrecedentSheets(formula, allSheetNames) {
     const name = r.replace('!', '');
     if (allSheetNames.includes(name)) refs.add(name);
   });
+
+  // Named-range usages — a bare token like GST_Payable never contains the
+  // literal "Sheet!" text, so without this resolution step it would be
+  // invisible here even though it genuinely creates a cross-sheet dependency.
+  if (nameToSheets) {
+    for (const [name, sheets] of Object.entries(nameToSheets)) {
+      if (name.length < 2) continue;
+      const re = new RegExp('(?<![A-Za-z0-9_.])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9_(])');
+      if (re.test(formula)) sheets.forEach(s => { if (allSheetNames.includes(s)) refs.add(s); });
+    }
+  }
 
   // External refs contain [
   if (formula.includes('[')) refs.add('[EXTERNAL]');
@@ -157,6 +168,24 @@ async function runTier0(parsed) {
   const startTime = Date.now();
 
   console.log('   Scanning formula text across all sheets...');
+
+  // Defined-name -> sheet(s) it points to. Needed because a formula like
+  // =GST_Payable never contains the literal text "GST!" — without this,
+  // named-range references (which the ICAEW Financial Modelling Code
+  // explicitly recommends as best practice) would be invisible to the
+  // dependency graph, silently under-counting exactly the models built
+  // most carefully.
+  const nameToSheets = {};
+  try {
+    for (const dn of wb.definedNames.model || []) {
+      const sheets = new Set();
+      for (const rangeStr of dn.ranges || []) {
+        const m = /^'?([^'!]+)'?!/.exec(rangeStr);
+        if (m) sheets.add(m[1]);
+      }
+      if (dn.name && sheets.size) nameToSheets[dn.name] = [...sheets];
+    }
+  } catch (_) { /* older exceljs shapes — proceed without name resolution */ }
 
   // ── Per-sheet statistics ──────────────────────────────────────────────────
   const sheetStats = {};
@@ -249,7 +278,7 @@ async function runTier0(parsed) {
           }
 
           // Precedent sheet tracking for formula map
-          const precedents = extractPrecedentSheets(formula, allSheetNames);
+          const precedents = extractPrecedentSheets(formula, allSheetNames, nameToSheets);
           precedents.forEach(prec => {
             if (prec !== sheetName && prec !== '[EXTERNAL]') {
               dependencyMap[sheetName][prec] = (dependencyMap[sheetName][prec] || 0) + 1;
