@@ -824,42 +824,140 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5 — REMEDIATION & RETEST
     # ════════════════════════════════════════════════════════════════════════
-    ws5=wb.create_sheet('Remediation'); ws5.sheet_view.showGridLines=False; ws5.freeze_panes='A4'
-    for col,w in [(1,3),(2,6),(3,14),(4,22),(5,10),(6,10),(7,10),(8,10),(9,45),(10,18),(11,14),(12,14),(13,14),(14,14),(15,14),(16,18),(17,18),(18,3)]:
-        set_col(ws5,col,w)
+    ws5=wb.create_sheet('Remediation'); ws5.sheet_view.showGridLines=False
+    rem_headers=['','#','Finding ID','Priority','Action Status','Timing','Owner','Target Date',
+                 'Suggested Action','Promised Fix Version','Retest Required','Retest Result',
+                 'Root Cause Group','F-Score','Urgency','Retested By','Retest Date','Eligible to Close','']
+    n_rem_cols = len(rem_headers)
+    n_rem_visible = 12  # #..Retest Result
+    rem_widths=[3,5,14,8,14,12,14,12,36,16,12,14]+[16]*(n_rem_cols-1-n_rem_visible)
+    for i,w in enumerate(rem_widths,1): set_col(ws5,i,w)
+    rem_idx = {h.replace('\n',' '): i for i,h in enumerate(rem_headers,1) if h}
+    REM_HEADER_ROW=5
 
-    merge(ws5,'B1:Q1','REMEDIATION AND RETEST TRACKER',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(ws5,1,2,1,17,DARK_BLUE); set_row(ws5,1,28)
+    merge(ws5,f'B1:{get_column_letter(n_rem_cols-1)}1','REMEDIATION & RETEST TRACKER',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws5,1,2,1,n_rem_cols-1,DARK_BLUE); set_row(ws5,1,26)
+    merge(ws5,f'B2:{get_column_letter(n_rem_cols-1)}2',
+          'Suggested actions are AI-generated and should be reviewed before implementation. Some recommendations may not be necessary or appropriate for the specific model.',
+          sz=8,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+    set_row(ws5,2,20)
 
-    # AI-generated caveat
-    merge(ws5,'B2:Q2','Suggested actions are AI-generated and should be reviewed before implementation. Some recommendations may not be necessary or appropriate for the specific model.',sz=8,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
-    set_row(ws5,2,26)
-
-    rem_headers=['','#','Finding ID','Root Cause Group','Priority','F-Score','Urgency',
-                 'Suggested Action','Owner','Target Date','Promised Fix Version',
-                 'Retest Required','Retested By','Retest Date','Retest Result','Eligible to Close','']
-    for col,h in enumerate(rem_headers,1):
-        c=ws5.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
-        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-    set_row(ws5,3,32)
-
-    # Only P1 and P2 in remediation
     rem_findings=[f for f in findings if priority(f) in ('P1','P2')]
-    for row_i,f in enumerate(rem_findings,4):
-        pri=priority(f); bg=LIGHT_AMBER if pri=='P1' else LIGHT_YELL if pri=='P2' else GREY_LIGHT
-        vals=['',row_i-2,f.get('id',''),f.get('root_cause',''),pri,
-              f.get('fscore','') or '—',f.get('urgency','') or '',
-              f.get('corrective_action') or f.get('fix_instruction',''),
-              '','','',
-              'Yes','','','Pending','',
-              '']
-        for col,val in enumerate(vals,1):
+    _rf_first, _rf_last = REM_HEADER_ROW+1, REM_HEADER_ROW+len(rem_findings)
+    PRI_L2 = get_column_letter(rem_idx['Priority']); AS_L = get_column_letter(rem_idx['Action Status'])
+    TIM_L  = get_column_letter(rem_idx['Timing'])
+    _pri_rng2 = f'{PRI_L2}{_rf_first}:{PRI_L2}{_rf_last}'
+    _as_rng   = f'{AS_L}{_rf_first}:{AS_L}{_rf_last}'
+    _tim_rng  = f'{TIM_L}{_rf_first}:{TIM_L}{_rf_last}'
+
+    # ── Top summary strip — live formulas ──────────────────────────────────
+    _rem_strip=[
+        ('Open Actions', f'=COUNTIF({_as_rng},"<>Closed")'),
+        ('P1 Actions', f'=COUNTIFS({_pri_rng2},"P1",{_as_rng},"<>Closed")'),
+        ('Ready for Retest', f'=COUNTIF({_as_rng},"Ready for Retest")'),
+        ('Overdue', f'=COUNTIF({_tim_rng},"Overdue")'),
+    ]
+    for i,(label,formula) in enumerate(_rem_strip):
+        c1,c2 = 2+i*2, 3+i*2
+        col_l1,col_l2 = get_column_letter(c1), get_column_letter(c2)
+        merge(ws5,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        merge(ws5,f'{col_l1}4:{col_l2}4',formula,bold=True,sz=14,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        for rr in (3,4):
+            for cc in range(c1,c2+1): ws5.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(ws5,3,16); set_row(ws5,4,24)
+
+    for col,h in enumerate(rem_headers,1):
+        c=ws5.cell(REM_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+    set_row(ws5,REM_HEADER_ROW,30)
+
+    # Freeze header row + first four key columns (#, Finding ID, Priority,
+    # Action Status) per spec.
+    ws5.freeze_panes = f'{get_column_letter(rem_idx["Timing"])}{REM_HEADER_ROW+1}'
+
+    _pri_badge2={'P1':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
+    for idx,f in enumerate(rem_findings):
+        row_i = REM_HEADER_ROW+1+idx
+        pri=priority(f)
+        row_bg = WHITE if idx%2==0 else 'FAFBFC'
+        # Punchier action wording — lead with an imperative verb where the
+        # source text already starts with one; otherwise keep as-is but cap
+        # length tightly so it reads as an action item, not a paragraph.
+        raw_action = f.get('corrective_action') or f.get('fix_instruction','')
+        action_text = raw_action[:100].rstrip(' ,;:')+('...' if len(raw_action)>100 else '')
+
+        row_values={
+            '#': idx+1, 'Finding ID': f.get('id',''), 'Priority': pri,
+            'Action Status': 'Not Started', 'Timing': '',  # Timing set as a live formula below
+            'Owner': '', 'Target Date': '', 'Suggested Action': action_text,
+            'Promised Fix Version': '', 'Retest Required': 'Yes', 'Retest Result': 'Pending',
+            'Root Cause Group': f.get('root_cause',''), 'F-Score': f.get('fscore','') or '—',
+            'Urgency': f.get('urgency','') or '', 'Retested By': '', 'Retest Date': '',
+            'Eligible to Close': 'No',
+        }
+        _centered2 = {'#','Priority','Action Status','Timing','Target Date','Retest Required',
+                      'Retest Result','F-Score','Retest Date','Eligible to Close'}
+        _wrapped2  = {'Suggested Action'}
+        for name,val in row_values.items():
+            col = rem_idx[name]
             c=ws5.cell(row_i,col); c.value=val
-            c.font=Fn(sz=9,bold=(col in [2,3,5]))
-            c.fill=F(bg)
-            c.alignment=A(h='center' if col in [2,5,6,7,8,12,13,14,15,16,17] else 'left',v='top',wrap=(col==9))
-            c.border=B()
-        set_row(ws5,row_i,50)
+            c.font=Fn(sz=9,bold=(name in ('Finding ID','Priority')))
+            c.fill=F(row_bg)
+            c.alignment=A(h='center' if name in _centered2 else 'left', v='top', wrap=(name in _wrapped2))
+            c.border=B(col=PANEL_BORDER)
+
+        # Priority badge — colour confined to this cell only, never the row
+        pf,pt=_pri_badge2.get(pri,(GREY_LIGHT,CHARCOAL))
+        badge(ws5,row_i,rem_idx['Priority'],pri,pf,pt,sz=9)
+
+        # Suggested Target Date so Timing has real data immediately
+        _target = datetime.strptime(reviewDate,'%d %b %Y') + timedelta(days=(7 if pri=='P1' else 30))
+        tc = ws5.cell(row_i, rem_idx['Target Date']); tc.value=_target; tc.number_format='dd mmm yyyy'
+        tc.fill=F(row_bg); tc.alignment=A(h='center',v='center'); tc.border=B(col=PANEL_BORDER)
+
+        # Timing — live formula, so it updates as time passes rather than
+        # freezing at whatever was true when the report was generated.
+        tgt_ref = f'{get_column_letter(rem_idx["Target Date"])}{row_i}'
+        as_ref  = f'{get_column_letter(rem_idx["Action Status"])}{row_i}'
+        timing_formula = (f'=IF({as_ref}="Closed","-",'
+                           f'IF({tgt_ref}<TODAY(),"Overdue",IF({tgt_ref}<TODAY()+7,"Due Soon","On Track")))')
+        tim_c = ws5.cell(row_i, rem_idx['Timing']); tim_c.value = timing_formula
+        tim_c.font=Fn(bold=True,sz=9,col=CHARCOAL); tim_c.fill=F(row_bg)
+        tim_c.alignment=A(h='center',v='center'); tim_c.border=B(col=PANEL_BORDER)
+
+        set_row(ws5,row_i,32)
+
+    _rem_last_row = REM_HEADER_ROW+len(rem_findings)
+
+    for col in range(n_rem_visible+1, n_rem_cols):
+        ws5.column_dimensions[get_column_letter(col)].hidden = True
+
+    if len(rem_findings) > 0:
+        _rem_table = Table(displayName="RemediationTable", ref=f'B{REM_HEADER_ROW}:{get_column_letter(n_rem_cols-1)}{_rem_last_row}')
+        _rem_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                     showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        ws5.add_table(_rem_table)
+
+        action_status_dv = DataValidation(type='list',
+            formula1='"Not Started,In Progress,Ready for Retest,Closed"', allow_blank=False)
+        ws5.add_data_validation(action_status_dv); action_status_dv.add(_as_rng)
+
+        retest_dv = DataValidation(type='list', formula1='"Yes,No"', allow_blank=False)
+        ws5.add_data_validation(retest_dv); retest_dv.add(f'{get_column_letter(rem_idx["Retest Required"])}{_rf_first}:{get_column_letter(rem_idx["Retest Required"])}{_rf_last}')
+
+        # ── Conditional formatting — Timing and Priority only, per spec ─────
+        ws5.conditional_formatting.add(_tim_rng,
+            CellIsRule(operator='equal', formula=['"Overdue"'],
+                       fill=PatternFill(start_color=P1_FILL,end_color=P1_FILL,fill_type='solid'), font=Font(color=P1_TXT)))
+        ws5.conditional_formatting.add(_tim_rng,
+            CellIsRule(operator='equal', formula=['"Due Soon"'],
+                       fill=PatternFill(start_color=P2_FILL,end_color=P2_FILL,fill_type='solid'), font=Font(color=P2_TXT)))
+        ws5.conditional_formatting.add(_tim_rng,
+            CellIsRule(operator='equal', formula=['"On Track"'],
+                       fill=PatternFill(start_color=OK_FILL,end_color=OK_FILL,fill_type='solid'), font=Font(color=OK_TXT)))
+        ws5.conditional_formatting.add(_pri_rng2,
+            CellIsRule(operator='equal', formula=['"P1"'],
+                       fill=PatternFill(start_color=P1_FILL,end_color=P1_FILL,fill_type='solid'), font=Font(color=P1_TXT,bold=True)))
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5B — VALIDATION MATRIX (B6) — every checklist rule with its outcome
