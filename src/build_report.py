@@ -1085,14 +1085,17 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5C — ASSUMPTION REGISTER (B7) — assumption provenance template
     # ════════════════════════════════════════════════════════════════════════
-    wsa=wb.create_sheet('Assumption Register'); wsa.sheet_view.showGridLines=False; wsa.freeze_panes='A4'
-    for col,w in [(1,3),(2,5),(3,28),(4,30),(5,20),(6,12),(7,14),(8,26),(9,14),(10,32),(11,3)]:
-        set_col(wsa,col,w)
+    wsa=wb.create_sheet('Assumption Register'); wsa.sheet_view.showGridLines=False
+    ar_headers=['','Assumption Area','Evidence Status','Decision Critical','Related Findings',
+                'Source','Source Date','Owner','Basis','Externally Supported','Notes','']
+    n_ar_cols = len(ar_headers)
+    ar_widths=[3,26,14,14,22,18,12,14,16,16,34,3]
+    for i,w in enumerate(ar_widths,1): set_col(wsa,i,w)
+    ar_idx = {h.replace('\n',' '): i for i,h in enumerate(ar_headers,1) if h}
+    AR_HEADER_ROW=6
 
-    merge(wsa,'B1:J1','ASSUMPTION REGISTER \u2014 KEY ASSUMPTION PROVENANCE',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(wsa,1,2,1,10,DARK_BLUE); set_row(wsa,1,28)
-    merge(wsa,'B2:J2','Related findings are pre-populated from this review. Source, Source Date, Owner, Basis and Externally Supported are for the model owner to complete and the reviewer to verify.',sz=8,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
-    set_row(wsa,2,24)
+    merge(wsa,f'B1:{get_column_letter(n_ar_cols-1)}1','ASSUMPTION REGISTER',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wsa,1,2,1,n_ar_cols-1,DARK_BLUE); set_row(wsa,1,26)
 
     mining_areas=[('Commodity prices (PCI / thermal / benchmark)',['price','pricing','benchmark','hcc','pci','thermal']),
         ('FX rates',['fx','exchange rate','aud/usd','currency']),
@@ -1126,23 +1129,109 @@ def build_report(data_path, output_path):
         return ' '.join(str(f.get(k,'') or '') for k in ('label','title','condition','reason','workstream','category')).lower()
     ftexts=[(f.get('id',''),_ftext(f)) for f in findings]
 
-    ar_headers=['','#','Assumption Area','Related Findings','Source','Source Date','Owner','Basis (contract / market / management)','Externally\nSupported?','Notes','']
-    for col,h in enumerate(ar_headers,1):
-        c=wsa.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
-        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-    set_row(wsa,3,30)
+    _ar_first, _ar_last = AR_HEADER_ROW+1, AR_HEADER_ROW+len(areas)
+    ES_L = get_column_letter(ar_idx['Evidence Status']); SRC_L = get_column_letter(ar_idx['Source'])
+    OWN_L2 = get_column_letter(ar_idx['Owner']); EXT_L = get_column_letter(ar_idx['Externally Supported'])
+    _es_rng = f'{ES_L}{_ar_first}:{ES_L}{_ar_last}'
 
-    for row_i,(area,kws) in enumerate(areas,4):
+    # ── Status line — live, reflects real state as reviewers fill the sheet ──
+    merge(wsa,f'B2:{get_column_letter(n_ar_cols-1)}2',
+          f'=IF(COUNTIF({_es_rng},"Missing")=0,"Evidence register complete — every assumption has a documented basis.","Evidence register incomplete — "&COUNTIF({_es_rng},"Missing")&" assumption(s) still need supporting evidence.")',
+          bold=True,sz=10,col=WHITE,bg=P2_FILL,v='center')
+    # colour set as a flat amber to start (register starts incomplete by
+    # definition — every row defaults to Missing); flip to green only once
+    # genuinely complete would require a formula-driven fill, which Excel
+    # can't apply to font/fill directly from a cell formula — handled via
+    # conditional formatting on this same range instead, below.
+    fill_range(wsa,2,2,2,n_ar_cols-1,P2_FILL); set_row(wsa,2,20)
+    wsa.conditional_formatting.add(f'B2:{get_column_letter(n_ar_cols-1)}2',
+        FormulaRule(formula=[f'COUNTIF({_es_rng},"Missing")=0'],
+                    fill=PatternFill(start_color=OK_FILL,end_color=OK_FILL,fill_type='solid'), font=Font(color=OK_TXT,bold=True)))
+
+    # ── Summary cards — Total / Missing Source / Missing Owner / Externally Supported ──
+    _ar_cards=[('Total Assumptions', f'={_ar_last-_ar_first+1}', 2,3),
+               ('Missing Source', f'=COUNTIF({SRC_L}{_ar_first}:{SRC_L}{_ar_last},"Not yet provided")', 4,5),
+               ('Missing Owner', f'=COUNTIF({OWN_L2}{_ar_first}:{OWN_L2}{_ar_last},"Not yet provided")', 6,7),
+               ('Externally Supported', f'=COUNTIF({EXT_L}{_ar_first}:{EXT_L}{_ar_last},"Yes")', 8,9)]
+    for label,formula,c1,c2 in _ar_cards:
+        col_l1,col_l2 = get_column_letter(c1), get_column_letter(c2)
+        merge(wsa,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        merge(wsa,f'{col_l1}4:{col_l2}4',formula,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        for rr in (3,4):
+            for cc in range(c1,c2+1): wsa.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wsa,3,14); set_row(wsa,4,24)
+    merge(wsa,f'B5:{get_column_letter(n_ar_cols-1)}5',
+          'Related findings are pre-populated from this review. Source, Source Date, Owner, Basis and Externally Supported are for the model owner to complete and the reviewer to verify.',
+          sz=8,col=GREY_TXT2,italic=True,wrap=True)
+    set_row(wsa,5,16)
+
+    for col,h in enumerate(ar_headers,1):
+        c=wsa.cell(AR_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+    set_row(wsa,AR_HEADER_ROW,28)
+    wsa.freeze_panes = f'{get_column_letter(ar_idx["Related Findings"])}{AR_HEADER_ROW+1}'
+
+    _placeholder='Not yet provided'
+    _centered4={'Decision Critical','Source Date','Externally Supported'}
+    _wrapped4={'Assumption Area','Related Findings','Notes'}
+    for idx,(area,kws) in enumerate(areas):
+        row_i = AR_HEADER_ROW+1+idx
+        row_bg = WHITE if idx%2==0 else 'FAFBFC'
         hits=[fid for fid,txt in ftexts if any(k in txt for k in kws)]
-        ref_txt=', '.join(hits[:4])+(f' +{len(hits)-4} more' if len(hits)>4 else '') if hits else '\u2014'
-        vals=['',row_i-3,area,ref_txt,'','','','','','','']
-        for col,val in enumerate(vals,1):
+        ref_txt=', '.join(hits[:4])+(f' +{len(hits)-4} more' if len(hits)>4 else '') if hits else '—'
+        row_values={
+            'Assumption Area': area, 'Evidence Status': 'Missing', 'Decision Critical': '',
+            'Related Findings': ref_txt, 'Source': _placeholder, 'Source Date': _placeholder,
+            'Owner': _placeholder, 'Basis': '', 'Externally Supported': 'No', 'Notes': '',
+        }
+        for name,val in row_values.items():
+            col = ar_idx[name]
             c=wsa.cell(row_i,col); c.value=val
-            c.font=Fn(sz=9,bold=(col==3))
-            c.fill=F(WHITE)
-            c.alignment=A(h='center' if col in [2,9] else 'left',v='top',wrap=(col in [3,4,8,10]))
-            c.border=B()
-        set_row(wsa,row_i,26)
+            c.font=Fn(sz=9,bold=(name=='Assumption Area'),
+                      italic=(val==_placeholder), col=(GREY_MID if val==_placeholder else '000000'))
+            c.fill=F(row_bg)
+            c.alignment=A(h='center' if name in _centered4 else 'left', v='top', wrap=(name in _wrapped4))
+            c.border=B(col=PANEL_BORDER)
+        badge(wsa,row_i,ar_idx['Evidence Status'],'Missing',GREY_LIGHT,GREY_TXT2,sz=8,bold=False)
+        set_row(wsa,row_i,24)
+
+    _ar_last_row = AR_HEADER_ROW+len(areas)
+
+    if len(areas) > 0:
+        _ar_table = Table(displayName="AssumptionRegisterTable", ref=f'B{AR_HEADER_ROW}:{get_column_letter(n_ar_cols-1)}{_ar_last_row}')
+        _ar_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                    showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        wsa.add_table(_ar_table)
+
+        evidence_dv = DataValidation(type='list', formula1='"Missing,Management,External,Verified"', allow_blank=False)
+        wsa.add_data_validation(evidence_dv); evidence_dv.add(_es_rng)
+
+        critical_dv = DataValidation(type='list', formula1='"Yes,No"', allow_blank=True)
+        wsa.add_data_validation(critical_dv)
+        critical_dv.add(f'{get_column_letter(ar_idx["Decision Critical"])}{_ar_first}:{get_column_letter(ar_idx["Decision Critical"])}{_ar_last}')
+
+        basis_dv = DataValidation(type='list', formula1='"Contract,Market,Management,Model,Other"', allow_blank=True)
+        wsa.add_data_validation(basis_dv)
+        basis_dv.add(f'{get_column_letter(ar_idx["Basis"])}{_ar_first}:{get_column_letter(ar_idx["Basis"])}{_ar_last}')
+
+        ext_dv = DataValidation(type='list', formula1='"Yes,No"', allow_blank=False)
+        wsa.add_data_validation(ext_dv); ext_dv.add(f'{EXT_L}{_ar_first}:{EXT_L}{_ar_last}')
+
+        # ── Highlight still-missing Source / Source Date / Owner — pale blue,
+        #    clears automatically once a reviewer replaces the placeholder ──
+        for col_letter in (SRC_L, get_column_letter(ar_idx['Source Date']), OWN_L2):
+            _rng = f'{col_letter}{_ar_first}:{col_letter}{_ar_last}'
+            wsa.conditional_formatting.add(_rng,
+                CellIsRule(operator='equal', formula=[f'"{_placeholder}"'],
+                           fill=PatternFill(start_color=PALE_ACCENT,end_color=PALE_ACCENT,fill_type='solid')))
+
+        # Evidence Status badge colours track the dropdown value live
+        _ev_colors=[('Missing',GREY_LIGHT,GREY_TXT2),('Management',P2_FILL,P2_TXT),
+                    ('External',MID_BLUE,WHITE),('Verified',OK_FILL,OK_TXT)]
+        for val,fill,txt in _ev_colors:
+            wsa.conditional_formatting.add(_es_rng,
+                CellIsRule(operator='equal', formula=[f'"{val}"'],
+                           fill=PatternFill(start_color=fill,end_color=fill,fill_type='solid'), font=Font(color=txt,bold=True)))
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB 6 — FORMULA ANALYSIS
