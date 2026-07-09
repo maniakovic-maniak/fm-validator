@@ -20,18 +20,36 @@
 // no extra scan cost.
 
 const FIN_STATEMENT_KEYWORDS = [
-  'AFS', 'IFS', 'Cons', 'Balance Sheet', 'BS', 'Cash Flow', 'CFS',
+  'AFS', 'IFS', 'Consolidated', 'Balance Sheet', 'BS', 'Cash Flow', 'Cashflow', 'CFS',
   'P&L', 'Profit and Loss', 'Income Statement'
 ];
 
+// Sheets that are legitimately standalone by design — their whole purpose
+// is not to feed forward, so absence from the reachable set is expected,
+// not a defect. Extended from an initial list against a real client model
+// (Legend, VBA, Disclaimer and (backup) sheets were all real false
+// positives there).
 const EXCLUDE_KEYWORDS = [
   'cover', 'read me', 'readme', 'toc', 'table of contents', 'instruction',
   'check', 'audit', 'control', 'version', 'change log', 'changelog',
-  'glossary', 'note'
+  'glossary', 'note', 'legend', 'vba', 'backup', 'disclaimer'
 ];
 
 function isFinStatementSheet(name) {
-  return FIN_STATEMENT_KEYWORDS.some(kw => name.toLowerCase().includes(kw.toLowerCase()));
+  const lower = name.toLowerCase();
+  return FIN_STATEMENT_KEYWORDS.some(kw => {
+    const kwLower = kw.toLowerCase();
+    // Short/ambiguous keywords (<=3 chars) need a word boundary — the old
+    // keyword "Cons" matched inside "Construction Timeline" in a real
+    // model we tested against, wrongly treating a supporting schedule as
+    // a financial statement. Longer, more specific keywords are safe as
+    // plain substrings.
+    if (kwLower.length <= 3) {
+      const re = new RegExp('(?<![a-z0-9])' + kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])', 'i');
+      return re.test(name);
+    }
+    return lower.includes(kwLower);
+  });
 }
 
 function isExcludedSheet(name) {
@@ -79,6 +97,34 @@ function detectOrphanSheets(dependencyMap, allSheetNames, inputSheetNames = []) 
     }
   }
 
+  // Downstream reachability — the reverse question. A sheet a decision-
+  // maker reads (a dashboard, a summary) legitimately consumes FROM the
+  // financial statements rather than feeding them; it will never appear
+  // in the upstream set above, but that's correct behaviour, not a
+  // defect. Missing this direction entirely produced real false
+  // positives against a real client model (Equity Dashboard, Financial
+  // Summary — both legitimate downstream consumers of P&L/Balance Sheet).
+  // Built as a reverse index of the SAME dependencyMap: for each sheet S
+  // with formulas referencing sheet Y, record Y -> S.
+  const reverseMap = {};
+  for (const [target, precs] of Object.entries(dependencyMap)) {
+    for (const prec of Object.keys(precs)) {
+      if (prec === '[EXTERNAL]') continue;
+      (reverseMap[prec] = reverseMap[prec] || new Set()).add(target);
+    }
+  }
+  const downstreamQueue = [...finStatementSheets];
+  while (downstreamQueue.length) {
+    const current = downstreamQueue.shift();
+    const dependents = reverseMap[current] || new Set();
+    for (const dep of dependents) {
+      if (!reachable.has(dep)) {
+        reachable.add(dep);
+        downstreamQueue.push(dep);
+      }
+    }
+  }
+
   const inputSet = new Set(inputSheetNames);
   const orphanSheets = allSheetNames.filter(name =>
     !reachable.has(name) && !isExcludedSheet(name) && !inputSet.has(name)
@@ -91,7 +137,7 @@ function detectOrphanSheets(dependencyMap, allSheetNames, inputSheetNames = []) 
     orphanSheets,
     totalSheets: allSheetNames.length,
     note: orphanSheets.length > 0
-      ? 'Static reachability analysis — a sheet listed here has no traceable formula path (direct or indirect, including named ranges) to any detected financial-statement sheet. Dynamic references built via OFFSET/INDIRECT cannot be traced statically; treat listed sheets as review candidates, not a final verdict.'
+      ? 'Static reachability analysis — a sheet listed here has no traceable formula path (direct or indirect, including named ranges) either feeding INTO or being fed BY any detected financial-statement sheet. Dynamic references built via OFFSET/INDIRECT cannot be traced statically; treat listed sheets as review candidates, not a final verdict.'
       : 'Static reachability analysis — every non-excluded sheet has a traceable path to a financial-statement sheet.'
   };
 }
