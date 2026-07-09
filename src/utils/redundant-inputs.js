@@ -164,30 +164,29 @@ function detectRedundantInputs(workbook) {
         if (v instanceof Date) return;
         totalInputs++;
         if (!refs.has(sheetName, colNum, rowNum)) {
-          if (redundant.length < 200) {
-            // Nearest text cell to the left = the assumption's label/context —
-            // the client needs to know WHAT the orphaned number is, not just where.
-            let label = '';
-            for (let lc = colNum - 1; lc >= Math.max(1, colNum - 8); lc--) {
-              const lv = row.getCell(lc).value;
-              const txt = lv == null ? '' : (typeof lv === 'object' ? (lv.richText ? lv.richText.map(t => t.text).join('') : (lv.text || '')) : String(lv));
-              if (txt && isNaN(Number(txt))) { label = txt.slice(0, 60); break; }
-            }
-            redundant.push({ sheet: sheetName, cell: cell.address, value: v, label });
-          } else redundant.push(null);
+          // No cap — every redundant cell is reported. This tab's entire
+          // purpose is "every listed input must be linked, removed or
+          // relabelled"; silently dropping some past an arbitrary limit
+          // would leave real findings invisible to the client.
+          let label = '';
+          for (let lc = colNum - 1; lc >= Math.max(1, colNum - 8); lc--) {
+            const lv = row.getCell(lc).value;
+            const txt = lv == null ? '' : (typeof lv === 'object' ? (lv.richText ? lv.richText.map(t => t.text).join('') : (lv.text || '')) : String(lv));
+            if (txt && isNaN(Number(txt))) { label = txt.slice(0, 60); break; }
+          }
+          redundant.push({ sheet: sheetName, cell: cell.address, value: v, label });
         }
       });
     });
   }
   const redundantCount = redundant.length;
-  const capped = redundant.filter(Boolean);
 
   return {
     applicable: true,
     inputSheets,
     totalInputs,
     redundantCount,
-    redundant: capped,
+    redundant,
     offsetIndirectFormulas: offsetIndirect,
     note: offsetIndirect > 0
       ? `Static reference analysis — ${offsetIndirect.toLocaleString()} OFFSET/INDIRECT formulas exist in this model; inputs consumed only through dynamic windows may appear here despite being used. Treat listed cells as review candidates.`
