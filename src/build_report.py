@@ -1478,50 +1478,115 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB — TIDY-UP: REDUNDANT INPUTS (V11 §2) — full client-actionable list
     # ════════════════════════════════════════════════════════════════════════
-    wst=wb.create_sheet('Redundant Inputs'); wst.sheet_view.showGridLines=False; wst.freeze_panes='A4'
-    for col,w in [(1,3),(2,6),(3,14),(4,10),(5,16),(6,26),(7,14),(8,30),(9,3)]:
-        set_col(wst,col,w)
-    merge(wst,'B1:H1','REDUNDANT INPUTS — UNREFERENCED ASSUMPTIONS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(wst,1,2,1,8,DARK_BLUE); set_row(wst,1,28)
+    wst=wb.create_sheet('Redundant Inputs'); wst.sheet_view.showGridLines=False
+    ri_headers=['','Sheet','Cell','Value','Value Type','Nearby Label','Go to Cell',
+                'Review Decision','Owner','Status','']
+    n_ri_cols = len(ri_headers)
+    for i,w in enumerate([3,14,10,14,14,26,12,16,16,12,3],1): set_col(wst,i,w)
+    ri_idx = {h.replace('\n',' '): i for i,h in enumerate(ri_headers,1) if h}
+    RI_HEADER_ROW=6
+
+    merge(wst,f'B1:{get_column_letter(n_ri_cols-1)}1','REDUNDANT INPUTS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wst,1,2,1,n_ri_cols-1,DARK_BLUE); set_row(wst,1,26)
 
     if not redundantIn.get('applicable',False):
-        merge(wst,'B2:H2','Not applicable — no sheet matching input/assumption/driver naming was detected in this model.',sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
-        set_row(wst,2,22)
+        merge(wst,f'B2:{get_column_letter(n_ri_cols-1)}2',
+              'Not applicable — no sheet matching input/assumption/driver naming was detected in this model.',
+              sz=9,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+        set_row(wst,2,20)
     else:
         _rc=redundantIn.get('redundantCount',0); _ti=redundantIn.get('totalInputs',0)
         _pct=(100.0*_rc/_ti) if _ti else 0.0
-        merge(wst,'B2:H2',(f"{_rc} of {_ti} numeric constants ({_pct:.1f}%) on {', '.join(redundantIn.get('inputSheets',[]))} are not referenced by any static formula reference. "
-            f"Each cell below should be linked into the calculation chain, removed, or relabelled as a memo item. {redundantIn.get('note','')}"),
-            sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
-        set_row(wst,2,34)
 
-        tu_headers=['','#','Sheet','Cell','Value (observed)','Nearby label (context)','Go to cell','Resolution (link / remove / relabel)','']
-        for col,h in enumerate(tu_headers,1):
-            if not h: continue
-            c=wst.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE); c.fill=F(DARK_BLUE)
-            c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-        set_row(wst,3,26)
+        # ── Summary cards — exact 3 metrics from the brief ──────────────────
+        _ri_cards=[('Redundant Inputs', _rc, 2,3), ('Input Constants', _ti, 4,5), ('Redundancy Rate', _pct/100.0, 6,7)]
+        for label,val,c1,c2 in _ri_cards:
+            col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
+            merge(wst,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+            merge(wst,f'{col_l1}4:{col_l2}4',val,bold=True,sz=18,col=(P2_TXT if label=='Redundant Inputs' and _rc>0 else CHARCOAL),bg=PANEL_GREY,h='center')
+            wst.cell(4,c1).number_format = '0.0%' if label=='Redundancy Rate' else '#,##0'
+            for rr in (3,4):
+                for cc in range(c1,c2+1): wst.cell(rr,cc).border=B(col=PANEL_BORDER)
+        set_row(wst,3,14); set_row(wst,4,26)
 
-        _rows=redundantIn.get('redundant',[])
-        for i,item in enumerate(_rows,4):
+        # ── Instruction box — short, per the brief ───────────────────────────
+        merge(wst,f'B5:{get_column_letter(n_ri_cols-1)}5',
+              'Every listed input must be linked into the calculation chain, removed, or relabelled as a memo item. '
+              + redundantIn.get('note',''),
+              sz=8,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wst,5,20)
+
+        for col,h in enumerate(ri_headers,1):
+            c=wst.cell(RI_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+            c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+        set_row(wst,RI_HEADER_ROW,26)
+        wst.freeze_panes = f'{get_column_letter(ri_idx["Nearby Label"])}{RI_HEADER_ROW+1}'
+
+        def _colnum(addr):
+            m = re.match(r'^([A-Z]+)(\d+)$', addr or '')
+            if not m: return (0,0)
+            c=0
+            for ch in m.group(1): c = c*26 + (ord(ch)-64)
+            return (c, int(m.group(2)))
+
+        _rows=sorted(redundantIn.get('redundant',[]), key=lambda item: (item.get('sheet',''), _colnum(item.get('cell',''))))
+
+        def _value_type(v):
+            try: v=float(v)
+            except (TypeError,ValueError): return 'Other'
+            if v==0: return 'Zero'
+            if v<0: return 'Negative'
+            if 0<abs(v)<=1: return 'Percentage-like'
+            if v==int(v): return 'Whole number'
+            return 'Decimal'
+
+        _vt_badge={'Zero':(GREY_LIGHT,GREY_TXT2),'Negative':(P1_FILL,P1_TXT),'Percentage-like':(P3_FILL,P3_TXT),
+                   'Whole number':(PANEL_GREY,CHARCOAL),'Decimal':(PANEL_GREY,CHARCOAL),'Other':(GREY_LIGHT,GREY_TXT2)}
+
+        for idx,item in enumerate(_rows):
+            row_i = RI_HEADER_ROW+1+idx
+            row_bg = WHITE if idx%2==0 else 'FAFBFC'
             sheet=item.get('sheet',''); cell_addr=item.get('cell',''); val=item.get('value','')
             label=item.get('label','') or ''
-            vals=['',i-3,sheet,cell_addr,val,label,'','' ,'']
-            for col,v in enumerate(vals,1):
-                if col in (1,9): continue
-                c=wst.cell(i,col); c.value=v if v!='' or col in (6,8) else v
-                c.font=Fn(sz=9,bold=(col==4))
-                c.fill=F(WHITE)
-                c.alignment=A(h='center' if col in (2,4) else 'right' if col==5 else 'left',v='top',wrap=(col in (6,8)))
-                c.border=B()
-            link=wst.cell(i,7)
-            link.value='=HYPERLINK("[' + sourceFile + ']' + sheet + '!' + cell_addr + '","Go to ' + cell_addr + '")'
-            link.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
-            link.alignment=A(h='center'); link.border=B()
-            set_row(wst,i,16)
-        if _rc>len(_rows):
-            r=len(_rows)+4
-            merge(wst,f'B{r}:H{r}',f'List capped at {len(_rows)} cells — {_rc-len(_rows)} further unreferenced constants exist beyond the cap.',sz=9,col=GREY_DARK,italic=True)
+            vtype=_value_type(val)
+            row_values={'Sheet':sheet,'Cell':cell_addr,'Value':val,'Value Type':vtype,'Nearby Label':label or '—',
+                        'Go to Cell':'','Review Decision':'','Owner':'','Status':'Open'}
+            for name,v in row_values.items():
+                col=ri_idx[name]
+                c=wst.cell(row_i,col); c.value=v
+                c.font=Fn(sz=9,bold=(name=='Cell'))
+                c.fill=F(row_bg)
+                c.alignment=A(h='center' if name in ('Cell','Value','Value Type','Status') else 'left', v='top', wrap=(name=='Nearby Label'))
+                c.border=B(col=PANEL_BORDER)
+            if isinstance(val,(int,float)):
+                wst.cell(row_i, ri_idx['Value']).number_format='#,##0.####'
+            vf,vt=_vt_badge.get(vtype,(GREY_LIGHT,GREY_TXT2))
+            badge(wst,row_i,ri_idx['Value Type'],vtype,vf,vt,sz=8,bold=False)
+
+            # Clean fixed label — no cell-address suffix, no raw formula text
+            link=wst.cell(row_i, ri_idx['Go to Cell'])
+            if sheet:
+                link.value=f'=HYPERLINK("[{sourceFile}]{sheet}!{cell_addr}","Go to cell")'
+                link.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
+            else:
+                link.value='—'; link.font=Fn(sz=9,col=GREY_MID)
+            link.fill=F(row_bg); link.alignment=A(h='center',v='center'); link.border=B(col=PANEL_BORDER)
+            set_row(wst,row_i,18)
+
+        _ri_last_row = RI_HEADER_ROW+len(_rows)
+        if _rows:
+            _ri_table = Table(displayName="RedundantInputsTable", ref=f'B{RI_HEADER_ROW}:{get_column_letter(n_ri_cols-1)}{_ri_last_row}')
+            _ri_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                        showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+            wst.add_table(_ri_table)
+
+            decision_dv = DataValidation(type='list', formula1='"Link,Remove,Relabel,Keep as Memo"', allow_blank=True)
+            wst.add_data_validation(decision_dv)
+            decision_dv.add(f'{get_column_letter(ri_idx["Review Decision"])}{RI_HEADER_ROW+1}:{get_column_letter(ri_idx["Review Decision"])}{_ri_last_row}')
+
+            status_dv = DataValidation(type='list', formula1='"Open,Cleared,Deferred"', allow_blank=False)
+            wst.add_data_validation(status_dv)
+            status_dv.add(f'{get_column_letter(ri_idx["Status"])}{RI_HEADER_ROW+1}:{get_column_letter(ri_idx["Status"])}{_ri_last_row}')
 
     # ════════════════════════════════════════════════════════════════════════
     ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False; ws7.freeze_panes='A4'
