@@ -942,6 +942,15 @@ def build_report(data_path, output_path):
             formula1='"Not Started,In Progress,Ready for Retest,Closed"', allow_blank=False)
         ws5.add_data_validation(action_status_dv); action_status_dv.add(_as_rng)
 
+        # Action Status badges — live, so the colour tracks the dropdown
+        # value if a reviewer changes it later (same pattern as Timing).
+        _as_colors=[('Not Started',GREY_LIGHT,GREY_TXT2),('In Progress',P2_FILL,P2_TXT),
+                    ('Ready for Retest',P3_FILL,P3_TXT),('Closed',OK_FILL,OK_TXT)]
+        for val,fill,txt in _as_colors:
+            ws5.conditional_formatting.add(_as_rng,
+                CellIsRule(operator='equal', formula=[f'"{val}"'],
+                           fill=PatternFill(start_color=fill,end_color=fill,fill_type='solid'), font=Font(color=txt,bold=False)))
+
         retest_dv = DataValidation(type='list', formula1='"Yes,No"', allow_blank=False)
         ws5.add_data_validation(retest_dv); retest_dv.add(f'{get_column_letter(rem_idx["Retest Required"])}{_rf_first}:{get_column_letter(rem_idx["Retest Required"])}{_rf_last}')
 
@@ -1058,7 +1067,7 @@ def build_report(data_path, output_path):
             c.alignment=A(h='center' if name in _centered3 else 'left', v='top', wrap=(name in _wrapped3))
             c.border=B(col=PANEL_BORDER)
         if isinstance(row_values['Confidence'], float):
-            wsm.cell(row_i, vm_idx['Confidence']).number_format='0%'
+            wsm.cell(row_i, vm_idx['Confidence']).number_format='0%;[Red](0%);-'
 
         pf,pt = _status_badge.get(m['status'],(GREY_LIGHT,CHARCOAL))
         badge(wsm,row_i,vm_idx['Status'],m['status'],pf,pt,sz=8,bold=False)
@@ -1270,7 +1279,7 @@ def build_report(data_path, output_path):
         else: cell(ws6,f'{col_l1}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
         if c2>c1: merge(ws6,f'{col_l1}4:{col_l2}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
         else: cell(ws6,f'{col_l1}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
-        ws6.cell(4,c1).number_format='#,##0'
+        ws6.cell(4,c1).number_format='#,##0;[Red](#,##0);-'
         for rr in (3,4):
             for cc in range(c1,c2+1): ws6.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(ws6,3,14); set_row(ws6,4,24)
@@ -1414,7 +1423,7 @@ def build_report(data_path, output_path):
         col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
         merge(wse,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
         merge(wse,f'{col_l1}4:{col_l2}4',val,bold=True,sz=18,col=CHARCOAL,bg=PANEL_GREY,h='center')
-        ws_val_cell = wse.cell(4,c1); ws_val_cell.number_format='#,##0'
+        ws_val_cell = wse.cell(4,c1); ws_val_cell.number_format='#,##0;[Red](#,##0);-'
         for rr in (3,4):
             for cc in range(c1,c2+1): wse.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(wse,3,14); set_row(wse,4,26)
@@ -1460,7 +1469,7 @@ def build_report(data_path, output_path):
                 c.alignment=A(h='center' if name in ('Count','Severity','Fix Status') else 'left',
                               v='top', wrap=(name in ('Sample Locations','Typical Root Cause','Recommended Action')))
                 c.border=B(col=PANEL_BORDER)
-            c_count = wse.cell(row_i, em_idx['Count']); c_count.number_format='#,##0'
+            c_count = wse.cell(row_i, em_idx['Count']); c_count.number_format='#,##0;[Red](#,##0);-'
             bf,bt=_sev_badge.get(severity,(GREY_LIGHT,CHARCOAL))
             badge(wse,row_i,em_idx['Severity'],severity,bf,bt,sz=8,bold=False)
             set_row(wse,row_i,32); row_i+=1
@@ -1504,7 +1513,7 @@ def build_report(data_path, output_path):
             col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
             merge(wst,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
             merge(wst,f'{col_l1}4:{col_l2}4',val,bold=True,sz=18,col=(P2_TXT if label=='Redundant Inputs' and _rc>0 else CHARCOAL),bg=PANEL_GREY,h='center')
-            wst.cell(4,c1).number_format = '0.0%' if label=='Redundancy Rate' else '#,##0'
+            wst.cell(4,c1).number_format = '0%;[Red](0%);-' if label=='Redundancy Rate' else '#,##0;[Red](#,##0);-'
             for rr in (3,4):
                 for cc in range(c1,c2+1): wst.cell(rr,cc).border=B(col=PANEL_BORDER)
         set_row(wst,3,14); set_row(wst,4,26)
@@ -1648,7 +1657,7 @@ def build_report(data_path, output_path):
             c.alignment=A(h='center' if name in ('Link Count','Direction','Dependency Risk','Priority Count','Avg F-Score','Max F-Score') else 'left',
                           v='top', wrap=(name=='Reviewer Note'))
             c.border=B(col=PANEL_BORDER)
-        ws7.cell(row_i, sd_idx['Link Count']).number_format='#,##0'
+        ws7.cell(row_i, sd_idx['Link Count']).number_format='#,##0;[Red](#,##0);-'
         rf,rt=_risk_badge.get(risk,(GREY_LIGHT,CHARCOAL))
         badge(ws7,row_i,sd_idx['Dependency Risk'],risk,rf,rt,sz=8,bold=False)
         df,dt=_dir_badge.get(direction,(GREY_LIGHT,CHARCOAL))
@@ -1760,7 +1769,7 @@ def build_report(data_path, output_path):
         else: cell(ws9,f'{col_l1}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
         if c2>c1: merge(ws9,f'{col_l1}4:{col_l2}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
         else: cell(ws9,f'{col_l1}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
-        ws9.cell(4,c1).number_format='#,##0'
+        ws9.cell(4,c1).number_format='#,##0;[Red](#,##0);-'
         for rr in (3,4):
             for cc in range(c1,c2+1): ws9.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(ws9,3,14); set_row(ws9,4,24); set_row(ws9,5,8)
@@ -1782,11 +1791,12 @@ def build_report(data_path, output_path):
         row_i = AL_HEADER_ROW+1+idx
         row_bg = WHITE if idx%2==0 else 'FAFBFC'
         raw_dur = entry.get('duration','')
-        try: dur_display = f'{float(raw_dur):.1f}s'
-        except (TypeError,ValueError): dur_display = str(raw_dur) if raw_dur else '—'
+        try: dur_val = float(raw_dur)
+        except (TypeError,ValueError): dur_val = None
         result_label,_ = _result_class(entry.get('result','✓ Pass'))
         row_values={'Timestamp':entry.get('timestamp',''),'Step':entry.get('step',''),'Action':entry.get('action',''),
-                    'Artifact':entry.get('artifact',''),'Result':result_label,'Duration':dur_display,'Notes':entry.get('notes','')}
+                    'Artifact':entry.get('artifact',''),'Result':result_label,
+                    'Duration':(dur_val if dur_val is not None else '—'),'Notes':entry.get('notes','')}
         for name,val in row_values.items():
             col=al_idx[name]
             c=ws9.cell(row_i,col); c.value=val
@@ -1794,6 +1804,8 @@ def build_report(data_path, output_path):
             c.fill=F(row_bg)
             c.alignment=A(h='center' if name in ('Timestamp','Result','Duration') else 'left', v='top', wrap=(name in ('Action','Artifact','Notes')))
             c.border=B(col=PANEL_BORDER)
+        if dur_val is not None:
+            ws9.cell(row_i, al_idx['Duration']).number_format = '0.0 "s"'
         _,rescol = _result_class(entry.get('result','✓ Pass'))
         badge(ws9,row_i,al_idx['Result'],result_label,rescol[0],rescol[1],sz=8,bold=False)
         set_row(ws9,row_i,26)
