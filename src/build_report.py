@@ -12,6 +12,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
+from openpyxl.formatting.rule import CellIsRule, FormulaRule
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 DARK_BLUE   = '1F4E79'; MID_BLUE   = '2E75B6'; LIGHT_BLUE  = 'D6E4F0'; PALE_BLUE = 'EBF3FA'
@@ -162,7 +163,7 @@ def build_report(data_path, output_path):
             else:
                 _t=_f.get('id','')
         _f['title']=_t; _f['label']=_t
-    id_to_issue_row = {f.get('id'): i for i, f in enumerate(findings, 3)}
+    id_to_issue_row = {f.get('id'): i for i, f in enumerate(findings, 5)}  # Issue Log header now at row 4, data from row 5
 
     # Audit coverage counts — feeds the dashboard completion breakdown (V11 1.3)
     def _rmatch0(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
@@ -653,110 +654,176 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 4 — ISSUE LOG
     # ════════════════════════════════════════════════════════════════════════
-    ws4=wb.create_sheet('Issue Log'); ws4.sheet_view.showGridLines=False; ws4.freeze_panes='A3'
-    col_widths=[3,12,8,14,10,10,18,14,14,30,30,30,30,30,25,14,10,12,10,10,8,10,8,12,8,8,12,14,14,16,18,18,22,22,3]
+    ws4=wb.create_sheet('Issue Log'); ws4.sheet_view.showGridLines=False
+    # Column order: first 12 are the default-visible client-facing set;
+    # everything after col 13 is real audit-trail detail, pushed right and
+    # hidden by default (available for reviewer drill-down, not deleted).
+    # 'View' is genuinely useful (one click to the affected cell), not a
+    # technical scan artefact — it stays in the default-visible set even
+    # though it isn't literally named in the brief's 12-column list.
+    il_headers=['','ID','Priority','Status','Area','Sheet','Cell','View','Finding',
+                'Model Impact','Required Fix','Owner','Target Date','Closure Evidence',
+                'Relevance','Urgency','Issue Type','Workstream','What is wrong',
+                'Why it matters','Output affected','Key Output\nImpact','F-Score',
+                'Confidence','Method','Range','Root Cause',
+                'Investment\nBlocker','Escalation\nFlag','Date Raised','Days Open',
+                'Management\nResponse','Reviewer\nResponse','Client\nResponse','']
+    n_cols = len(il_headers)
+    n_visible = 14  # ID..Closure Evidence, cols 2-14 inclusive
+    col_widths=[3,12,8,12,14,10,8,10,32,32,32,14,12,20]+[16]*(n_cols-1-n_visible)
     for i,w in enumerate(col_widths,1): set_col(ws4,i,w)
+    # Name-based column lookup — avoids the index-drift bugs that hardcoded
+    # column numbers caused twice already this session.
+    col_idx = {h.replace('\n',' '): i for i,h in enumerate(il_headers,1) if h}
+    HEADER_ROW=4
 
-    merge(ws4,'B1:AH1','ISSUE LOG',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(ws4,1,2,1,34,DARK_BLUE); set_row(ws4,1,28)
+    merge(ws4,f'B1:{get_column_letter(n_cols-1)}1','ISSUE LOG',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws4,1,2,1,n_cols-1,DARK_BLUE); set_row(ws4,1,26)
 
-    il_headers=['','Finding ID','Priority','Status','Relevance','Urgency',
-                'Issue Type','Workstream','Category',
-                'Issue Title','What is wrong','Why it matters','Output affected',
-                'Corrective Action',
-                'Model Risk','Key Output\nImpact','F-Score','Confidence','Method',
-                'Sheet','Cell','Range',
-                'View Issue',
-                'Root Cause','Investment\nBlocker','Escalation\nFlag',
-                'Date Raised','Owner','Target Date','Days Open',
-                'Management\nResponse','Reviewer\nResponse',
-                'Client\nResponse','']
+    # ── Top filter strip — live formulas, updates as reviewers fill the sheet ──
+    # Row/column references all derive from col_idx and the real header/data
+    # boundaries — never hardcoded, since hardcoded refs are exactly what
+    # broke twice already when columns got reordered.
+    _first_data_row = HEADER_ROW+1
+    _il_last_data_row = HEADER_ROW+len(findings)
+    PRI_L = get_column_letter(col_idx['Priority']); ST_L = get_column_letter(col_idx['Status'])
+    OWN_L = get_column_letter(col_idx['Owner']);    TGT_L = get_column_letter(col_idx['Target Date'])
+    _pri_rng = f'{PRI_L}{_first_data_row}:{PRI_L}{_il_last_data_row}'
+    _st_rng  = f'{ST_L}{_first_data_row}:{ST_L}{_il_last_data_row}'
+    _own_rng = f'{OWN_L}{_first_data_row}:{OWN_L}{_il_last_data_row}'
+    _tgt_rng = f'{TGT_L}{_first_data_row}:{TGT_L}{_il_last_data_row}'
+    _strip=[
+        ('P1 Open', f'=COUNTIFS({_pri_rng},"P1",{_st_rng},"<>Closed",{_st_rng},"<>Waived",{_st_rng},"<>Deferred",{_st_rng},"<>Superseded")'),
+        ('P2 Open', f'=COUNTIFS({_pri_rng},"P2",{_st_rng},"<>Closed",{_st_rng},"<>Waived",{_st_rng},"<>Deferred",{_st_rng},"<>Superseded")'),
+        ('Needs Owner', f'=COUNTIFS({_own_rng},"",{_st_rng},"<>Closed",{_st_rng},"<>Waived")'),
+        ('Overdue', f'=COUNTIFS({_tgt_rng},"<"&TODAY(),{_st_rng},"<>Closed",{_st_rng},"<>Waived",{_st_rng},"<>Deferred",{_st_rng},"<>Superseded",{_st_rng},"<>Ready for Retest")'),
+        ('Ready for Retest', f'=COUNTIF({_st_rng},"Ready for Retest")'),
+    ]
+    for i,(label,formula) in enumerate(_strip):
+        c1,c2 = 2+i*2, 3+i*2
+        col_l1,col_l2 = get_column_letter(c1), get_column_letter(c2)
+        merge(ws4,f'{col_l1}2:{col_l2}2',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        merge(ws4,f'{col_l1}3:{col_l2}3',formula,bold=True,sz=14,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        for rr in (2,3):
+            for cc in range(c1,c2+1): ws4.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(ws4,2,16); set_row(ws4,3,24)
+
+    # ── Header row ──────────────────────────────────────────────────────────
     for col,h in enumerate(il_headers,1):
-        c=ws4.cell(2,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c=ws4.cell(HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-    set_row(ws4,2,36)
-    VIEW_COL=il_headers.index('View Issue')+1
+    set_row(ws4,HEADER_ROW,32)
+    VIEW_COL=col_idx['View']
 
-    p_fill={'P1':PALE_BLUE,'P2':GREY_LIGHT,'P3':GREY_LIGHT,'pass':LIGHT_GREEN}
-    for row_i,f in enumerate(findings,3):
+    # Freeze header row + first three key columns (ID, Priority, Status —
+    # columns B,C,D; column A is just the margin) per spec.
+    ws4.freeze_panes = f'E{HEADER_ROW+1}'
+
+    _pri_badge={'P1':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
+    _default_urgency_days={'P1':7,'P2':30,'P3':90}
+    from datetime import timedelta
+    for idx,f in enumerate(findings):
+        row_i = HEADER_ROW+1+idx
         pri=priority(f)
-        # Title fallback: never show the raw Finding ID as the title
         _t=(f.get('title') or f.get('label') or '').strip()
-        if not _t or _t==f.get('id'):
-            _w=str(f.get('condition') or f.get('what_wrong') or f.get('reason') or f.get('detail') or '').replace('\n',' ').strip()
-            if _w:
-                _t=re.split(r'(?<=[.;])\s',_w)[0]
-                if len(_t)>70: _t=_t[:67].rstrip(' ,;:')+'...'
-            else:
-                _t=f.get('id','')
         f['title']=_t; f['label']=_t
-        bg=PALE_BLUE if pri=='P1' else GREY_LIGHT if pri=='P2' else GREY_LIGHT if pri=='P3' else LIGHT_GREEN if f.get('status')=='pass' else GREY_LIGHT
-        # Map old severity to High/Medium/Low
-        raw_sev = (f.get('severity') or f.get('priority') or 'Medium').lower()
-        sev = 'High' if raw_sev in ('fatal','critical','high','p1') else 'Low' if raw_sev in ('low','p3') else 'Medium'
+        raw_sev=(f.get('severity') or f.get('priority') or 'Medium').lower()
         sheet=f.get('sheet',''); cell_ref=f.get('cell','A1') or 'A1'
-        urgency=f.get('urgency',''); category=f.get('category','')
+        category=f.get('category','')
+        issue_title=f.get('label') or f.get('id','')
+        what_wrong=f.get('condition') or f.get('reason','')
+        why_matters=f.get('consequence','')
+        fix_action=f.get('corrective_action') or f.get('fix_instruction','')
+        out_impact=f.get('dollar_impact','')
+        urgency=('Before next reliance' if pri=='P1' else 'Before external circulation' if pri=='P2' else 'When convenient')
+        fscore_val=f.get('fscore','') or '—'
+        confidence_val=f.get('confidence','')
+        confidence_display=f'{confidence_val}%' if confidence_val!='' else '—'
+        # Suggested target date so Overdue conditional formatting has real
+        # data to work against immediately, not just once a reviewer fills it.
+        _target_date = (datetime.strptime(reviewDate,'%d %b %Y') + timedelta(days=_default_urgency_days.get(pri,30)))
 
-        # Build plain-English fields from Five C's
-        issue_title = f.get('label') or f.get('id','')
-        what_wrong  = f.get('condition') or f.get('reason','')
-        why_matters = f.get('consequence','')
-        fix_action  = f.get('corrective_action') or f.get('fix_instruction','')
-        out_impact  = f.get('dollar_impact','')
+        # White base with very light alternating banding — priority colour
+        # lives ONLY in the badge cell, never the whole row.
+        row_bg = WHITE if idx%2==0 else 'FAFBFC'
 
-        # Compute urgency from priority — no Claude field needed, keeps tone calm
-        if pri == 'P1':
-            urgency = 'Before next reliance'
-        elif pri == 'P2':
-            urgency = 'Before external circulation'
-        else:
-            urgency = 'When convenient'
-
-        fscore_val = f.get('fscore', '') or '—'
-        confidence_val = f.get('confidence', '')
-        confidence_display = f'{confidence_val}%' if confidence_val != '' else '—'
-
-        vals=['',f.get('id',''),pri,'Open','Relevant',urgency,
-              f.get('issue_type',''),f.get('workstream',''),category,
-              issue_title,what_wrong,why_matters,out_impact,
-              fix_action,
-              f.get('model_risk',''),f.get('key_output_impact','Unknown'),fscore_val,confidence_display,f.get('method',''),
-              sheet,cell_ref,'',
-              '',  # View issue — set separately
-              f.get('root_cause',''),
-              'Yes' if f.get('investment_grade_blocker') else 'No',
-              'Yes' if f.get('escalation_flag') else 'No',
-              reviewDate,'','','',
-              '','',
-              '','']
-
-        for col,val in enumerate(vals,1):
+        # Name-keyed, not positional — immune to header reordering.
+        row_values = {
+            'ID': f.get('id',''), 'Priority': pri, 'Status': 'Open', 'Area': category,
+            'Sheet': sheet, 'Cell': cell_ref, 'View': '',  # View written separately below
+            'Finding': issue_title, 'Model Impact': f.get('model_risk','') or why_matters,
+            'Required Fix': fix_action, 'Owner': '', 'Target Date': _target_date, 'Closure Evidence': '',
+            'Relevance': 'Relevant', 'Urgency': urgency, 'Issue Type': f.get('issue_type',''),
+            'Workstream': f.get('workstream',''), 'What is wrong': what_wrong, 'Why it matters': why_matters,
+            'Output affected': out_impact, 'Key Output Impact': f.get('key_output_impact','Unknown'),
+            'F-Score': fscore_val, 'Confidence': confidence_display, 'Method': f.get('method',''), 'Range': '',
+            'Root Cause': f.get('root_cause',''),
+            'Investment Blocker': 'Yes' if f.get('investment_grade_blocker') else 'No',
+            'Escalation Flag': 'Yes' if f.get('escalation_flag') else 'No',
+            'Date Raised': reviewDate, 'Days Open': '', 'Management Response': '',
+            'Reviewer Response': '', 'Client Response': '',
+        }
+        _centered = {'Priority','Status','Sheet','Cell','View','Target Date','F-Score','Confidence',
+                     'Method','Investment Blocker','Escalation Flag','Days Open'}
+        _wrapped  = {'Finding','Model Impact','Required Fix','Closure Evidence'}
+        for name,val in row_values.items():
+            col = col_idx[name]
             c=ws4.cell(row_i,col); c.value=val
-            c.font=Fn(sz=9,bold=(col in [2,3,6]))
-            c.fill=F(bg)
-            c.alignment=A(h='center' if col in [3,4,5,6,7,17,18,19,20,21,22,26,27,28,30] else 'left',v='top',wrap=(col in [11,12,13,14,15,16]))
-            c.border=B()
+            c.font=Fn(sz=9,bold=(name=='ID'))
+            c.fill=F(row_bg)
+            c.alignment=A(h='center' if name in _centered else 'left', v='top', wrap=(name in _wrapped))
+            c.border=B(col=PANEL_BORDER)
+        ws4.cell(row_i,col_idx['Target Date']).number_format='dd mmm yyyy'
 
-        # View issue hyperlink
+        # Priority badge — soft colour confined to this one cell only
+        pf,pt=_pri_badge.get(pri,(GREY_LIGHT,CHARCOAL))
+        badge(ws4,row_i,col_idx['Priority'],pri,pf,pt,sz=9)
+
+        # View hyperlink — jumps into the SOURCE model file. This is
+        # necessarily a cross-workbook reference (it has to reach outside
+        # this report into the client's own file), so full compatibility
+        # can't be guaranteed the way an internal same-workbook link can —
+        # but the label itself is now always exactly "View", never raw
+        # formula/implementation text, never a variable fallback label.
         vc=ws4.cell(row_i,VIEW_COL)
         if sheet and sheet not in ('—','N/A','Multiple'):
-            label='View issue' if cell_ref not in ('A1','—','N/A') else sheet
-            vc.value=f'=HYPERLINK("[{sourceFile}]{sheet}!A1","{label}")'
+            vc.value=f'=HYPERLINK("[{sourceFile}]{sheet}!A1","View")'
             vc.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
         else:
             vc.value='—'; vc.font=Fn(sz=9,col=GREY_MID)
-        vc.fill=F(bg); vc.alignment=A(h='center',v='center'); vc.border=B()
-        set_row(ws4,row_i,55)
+        vc.fill=F(row_bg); vc.alignment=A(h='center',v='center'); vc.border=B(col=PANEL_BORDER)
+        set_row(ws4,row_i,44)
+
+    # ── Hide technical columns beyond the 12 default-visible ones ───────────
+    for col in range(n_visible+1, n_cols):
+        ws4.column_dimensions[get_column_letter(col)].hidden = True
+
+    # ── Real Excel Table — adds filter dropdowns to every visible header ────
+    if len(findings) > 0:
+        _table_ref = f'B{HEADER_ROW}:{get_column_letter(n_cols-1)}{_il_last_data_row}'
+        _il_table = Table(displayName="IssueLogTable", ref=_table_ref)
+        _il_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                    showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        ws4.add_table(_il_table)
+
+        # ── Data validation dropdowns ──────────────────────────────────────
+        REL_L = get_column_letter(col_idx['Relevance'])
+        status_dv = DataValidation(type='list',
+            formula1='"Open,In Progress,Ready for Retest,Closed,Waived,Deferred,Superseded"', allow_blank=False)
+        ws4.add_data_validation(status_dv); status_dv.add(_st_rng)
+
+        relevance_dv = DataValidation(type='list', formula1='"Relevant,Not Relevant,Needs Review"', allow_blank=False)
+        ws4.add_data_validation(relevance_dv); relevance_dv.add(f'{REL_L}{_first_data_row}:{REL_L}{_il_last_data_row}')
+
+        # ── Conditional formatting — overdue target dates only ──────────────
+        ws4.conditional_formatting.add(_tgt_rng,
+            FormulaRule(formula=[f'AND({TGT_L}{_first_data_row}<TODAY(),NOT(OR({ST_L}{_first_data_row}="Closed",{ST_L}{_first_data_row}="Waived",{ST_L}{_first_data_row}="Deferred",{ST_L}{_first_data_row}="Superseded")))'],
+                        fill=PatternFill(start_color=P1_FILL,end_color=P1_FILL,fill_type='solid'),
+                        font=Font(color=P1_TXT)))
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5 — REMEDIATION & RETEST
     # ════════════════════════════════════════════════════════════════════════
-    # Relevance Status dropdown — Relevant / Not Relevant / Needs Review
-    if len(findings) > 0:
-        relevance_dv = DataValidation(type='list', formula1='"Relevant,Not Relevant,Needs Review"', allow_blank=False)
-        ws4.add_data_validation(relevance_dv)
-        relevance_dv.add(f'E3:E{2+len(findings)}')
-
     ws5=wb.create_sheet('Remediation'); ws5.sheet_view.showGridLines=False; ws5.freeze_panes='A4'
     for col,w in [(1,3),(2,6),(3,14),(4,22),(5,10),(6,10),(7,10),(8,10),(9,45),(10,18),(11,14),(12,14),(13,14),(14,14),(15,14),(16,18),(17,18),(18,3)]:
         set_col(ws5,col,w)
