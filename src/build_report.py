@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FM Validator — _VALIDATED.xlsx Report Builder
-14-tab transaction-grade audit report
+15-tab transaction-grade audit report
 """
 import sys, json, os, re
 from datetime import datetime
@@ -126,6 +126,7 @@ def build_report(data_path, output_path):
     errorScan    = d.get('errorScan',[])
     redundantIn  = d.get('redundantInputs',{'applicable':False,'totalInputs':0,'redundantCount':0,'redundant':[],'inputSheets':[]})
     orphanIn     = d.get('orphanSheets',{'applicable':False,'orphanSheets':[],'financialStatementSheets':[],'reachableSheets':[],'totalSheets':0})
+    namedRangeIn = d.get('namedRangeAudit',{'applicable':False,'unused':[],'poorlyNamed':[],'broken':[],'totalNamedRanges':0})
 
     # Checklist rules for the Validation Matrix — loaded from config
     checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
@@ -415,6 +416,13 @@ def build_report(data_path, output_path):
           else f"All {orphanIn.get('totalSheets',0)} sheets have a traceable path to a financial statement"
           if orphanIn.get('applicable',False)
           else 'Not applicable — no financial-statement-named sheet detected')),
+        ('Named range audit',
+         namedRangeIn.get('applicable',False) and (len(namedRangeIn.get('broken',[]))>0 or len(namedRangeIn.get('unused',[]))>0),
+         (f"{len(namedRangeIn.get('broken',[]))} broken, {len(namedRangeIn.get('unused',[]))} unused of {namedRangeIn.get('totalNamedRanges',0)} named ranges — see the Named Range Audit tab"
+          if namedRangeIn.get('applicable',False) and (len(namedRangeIn.get('broken',[]))>0 or len(namedRangeIn.get('unused',[]))>0)
+          else f"All {namedRangeIn.get('totalNamedRanges',0)} named ranges are used and resolve correctly"
+          if namedRangeIn.get('applicable',False)
+          else 'Not applicable — no named ranges defined in this model')),
     ]
     merge(ws1,f'B{r}:I{r}','Review Area Status',bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(ws1,r,2,r,9,DARK_BLUE); set_row(ws1,r,20); r+=1
@@ -429,12 +437,14 @@ def build_report(data_path, output_path):
         'Formula integrity':'Formula Risk Review','Unique formula review':'Formula Risk Review',
         'Input linkage':'Redundant Inputs','Debt / funding logic':'Issue Log',
         'Financial statements':'Issue Log','Tax logic':'Issue Log',
-        'Statement linkage':'Sheet Linkage',
+        'Statement linkage':'Sheet Linkage','Named range audit':'Named Range Audit',
     }
     _blocked_areas = {'Debt / funding logic','Financial statements'} if p1_open>0 else set()
     for area,has_issue,summary in status_areas:
         i=r
         if area=='Statement linkage' and orphanIn.get('applicable',False) and len(orphanIn.get('orphanSheets',[]))>0:
+            status_txt='Blocked'; sf,st=(P1_FILL,P1_TXT)
+        elif area=='Named range audit' and namedRangeIn.get('applicable',False) and len(namedRangeIn.get('broken',[]))>0:
             status_txt='Blocked'; sf,st=(P1_FILL,P1_TXT)
         elif area in _blocked_areas and any(f.get('category') in ('Debt','Integration') and priority(f)=='P1' for f in findings):
             status_txt='Blocked'; sf,st=(P1_FILL,P1_TXT)
@@ -443,6 +453,8 @@ def build_report(data_path, output_path):
         elif area=='Input linkage' and not redundantIn.get('applicable',False):
             status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
         elif area=='Statement linkage' and not orphanIn.get('applicable',False):
+            status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
+        elif area=='Named range audit' and not namedRangeIn.get('applicable',False):
             status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
         else:
             status_txt='Completed'; sf,st=(OK_FILL,OK_TXT)
@@ -497,13 +509,16 @@ def build_report(data_path, output_path):
     set_row(ws1,r,10); r+=1
 
     # ── Navigation row ───────────────────────────────────────────────────────
-    _nav=['Issue Log','Formula Risk Review','Redundant Inputs','Sheet Linkage','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
+    _nav=['Issue Log','Formula Risk Review','Redundant Inputs','Sheet Linkage','Named Range Audit','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
     for i,tab in enumerate(_nav):
-        col=2+i
-        c=ws1.cell(r,col); c.value=f"=HYPERLINK(\"#'{tab}'!A1\",\"{tab}\")"
+        col=2+(i%8)
+        row_offset=i//8
+        c=ws1.cell(r+row_offset,col); c.value=f"=HYPERLINK(\"#'{tab}'!A1\",\"{tab}\")"
         c.font=Font(size=8,bold=True,color=DARK_BLUE,underline='single',name='Arial')
         c.fill=F(PALE_ACCENT); c.alignment=A(h='center',v='center'); c.border=B(col=PANEL_BORDER)
-    set_row(ws1,r,20)
+    _nav_rows = (len(_nav)-1)//8 + 1
+    for rr in range(_nav_rows): set_row(ws1,r+rr,20)
+    r += _nav_rows - 1
     _audit_output_last_row = r
 
     # ════════════════════════════════════════════════════════════════════════
@@ -567,7 +582,7 @@ def build_report(data_path, output_path):
     # TAB 3 — SCOPE AND RELIANCE
     # ════════════════════════════════════════════════════════════════════════
     ws3=wb.create_sheet('Scope and Reliance'); ws3.sheet_view.showGridLines=False
-    for col,w in [(1,3),(2,26),(3,20),(4,20),(5,32),(6,3)]: set_col(ws3,col,w)
+    for col,w in [(1,3),(2,24),(3,16),(4,36),(5,24),(6,3)]: set_col(ws3,col,w)
     r3=1
 
     merge(ws3,f'B{r3}:E{r3}','SCOPE AND RELIANCE',bold=True,sz=18,col=WHITE,bg=DARK_BLUE,v='center')
@@ -632,13 +647,14 @@ def build_report(data_path, output_path):
     set_row(ws3,r3,16); r3+=1
     _exclusions=[
         ('Formula text inspection','Partial','Best-effort via Tier 0 only','Full review requires direct Excel/formula access'),
-        ('Source document review','Not performed','Actuals reconciliation to source accounts not verified','Provide source documents for Mode C review'),
+        ('Source document review','Not performed','This review has no access to contracts, invoices, bank statements or other source records — only the Excel file itself. An assumption can look internally consistent without being independently verified against reality.','Provide source documents for Mode C review'),
         ('Cell-by-cell audit','Not performed','Formula logic inspection requires formula text access','Engage manual reviewer or provide formula export'),
         ('Commercial omission testing','Not performed','Requires challenger model and commercial judgment','Commission a challenger-model review'),
-        ('VBA and macro audit','Not performed','Macro documentation checked only, code not executed','Provide macro source for manual review'),
-        ('Named range audit','Partial','Broken named-range detection via Tier 0 only','Full audit requires direct model access'),
+        ('VBA and macro audit','Not performed','This review reads formula cells directly; it does not execute or trace VBA/macro code, so any calculation performed inside a macro is invisible to it, however well the macro itself is written.','Provide macro source for manual review'),
+        ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
     _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT)}
+    _col_chars = {2:22, 4:34, 5:22}  # rough usable characters per line, by column width
     for proc,status,impact,nxt in _exclusions:
         ws3.cell(r3,2).value=proc; ws3.cell(r3,2).font=Fn(sz=9,col=CHARCOAL); ws3.cell(r3,2).fill=F(WHITE); ws3.cell(r3,2).alignment=A(wrap=True,v='center')
         sf,st=_status_style.get(status,(GREY_LIGHT,CHARCOAL))
@@ -646,7 +662,11 @@ def build_report(data_path, output_path):
         ws3.cell(r3,4).value=impact; ws3.cell(r3,4).font=Fn(sz=9,col=GREY_TXT2); ws3.cell(r3,4).fill=F(WHITE); ws3.cell(r3,4).alignment=A(wrap=True,v='center')
         ws3.cell(r3,5).value=nxt; ws3.cell(r3,5).font=Fn(sz=9,col=GREY_TXT2); ws3.cell(r3,5).fill=F(WHITE); ws3.cell(r3,5).alignment=A(wrap=True,v='center')
         for cc in range(2,6): ws3.cell(r3,cc).border=B(col=PANEL_BORDER)
-        set_row(ws3,r3,30); r3+=1
+        # Row height sized to the longest wrapped text in the row — a fixed
+        # height clips longer explanations even with wrap=True set, since
+        # wrap only breaks the text into lines, it doesn't grow the row.
+        _max_lines = max(1, *[-(-len(t)//_col_chars[c]) for c,t in [(2,proc),(4,impact),(5,nxt)]])
+        set_row(ws3,r3, max(30, 16 + _max_lines*13)); r3+=1
     set_row(ws3,r3,10); r3+=1
 
     # ── Sign-Off panel — proper table, not floating rows ────────────────────
@@ -1695,6 +1715,95 @@ def build_report(data_path, output_path):
 
 
     # ════════════════════════════════════════════════════════════════════════
+    # TAB — NAMED RANGE AUDIT
+    # ════════════════════════════════════════════════════════════════════════
+    wnr=wb.create_sheet('Named Range Audit'); wnr.sheet_view.showGridLines=False
+    nr_headers=['','Name','Issue','Target','Sheets','Reviewer Decision','Owner','Status','']
+    n_nr_cols = len(nr_headers)
+    for i,w in enumerate([3,24,16,26,16,20,16,12,3],1): set_col(wnr,i,w)
+    nr_idx = {h.replace('\n',' '): i for i,h in enumerate(nr_headers,1) if h}
+    NR_HEADER_ROW=6
+
+    merge(wnr,f'B1:{get_column_letter(n_nr_cols-1)}1','NAMED RANGE AUDIT',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wnr,1,2,1,n_nr_cols-1,DARK_BLUE); set_row(wnr,1,26)
+
+    if not namedRangeIn.get('applicable',False):
+        merge(wnr,f'B2:{get_column_letter(n_nr_cols-1)}2',
+              namedRangeIn.get('note','No named ranges are defined in this model.'),
+              sz=9,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+        set_row(wnr,2,20)
+    else:
+        _unused = namedRangeIn.get('unused',[])
+        _poor = namedRangeIn.get('poorlyNamed',[])
+        _broken = namedRangeIn.get('broken',[])
+        _total = namedRangeIn.get('totalNamedRanges',0)
+
+        _nr_cards=[('Total Named Ranges', _total, 2,3), ('Unused', len(_unused), 4,5),
+                   ('Poorly Named', len(_poor), 6,6), ('Broken', len(_broken), 7,7)]
+        for label,val,c1,c2 in _nr_cards:
+            col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
+            merge(wnr,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+            merge(wnr,f'{col_l1}4:{col_l2}4',val,bold=True,sz=16,col=(P1_TXT if label=='Broken' and val>0 else P2_TXT if label=='Unused' and val>0 else CHARCOAL),bg=PANEL_GREY,h='center')
+            wnr.cell(4,c1).number_format='#,##0;[Red](#,##0);-'
+            for rr in (3,4):
+                for cc in range(c1,c2+1): wnr.cell(rr,cc).border=B(col=PANEL_BORDER)
+        set_row(wnr,3,14); set_row(wnr,4,26)
+
+        merge(wnr,f'B5:{get_column_letter(n_nr_cols-1)}5', namedRangeIn.get('note',''),
+              sz=8,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wnr,5,20)
+
+        for col,h in enumerate(nr_headers,1):
+            c=wnr.cell(NR_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+            c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+        set_row(wnr,NR_HEADER_ROW,22)
+        wnr.freeze_panes = f'{get_column_letter(nr_idx["Target"])}{NR_HEADER_ROW+1}'
+
+        _rows_data=[]
+        for b in _broken: _rows_data.append((b['name'],'Broken',b['target'],'', P1_FILL,P1_TXT))
+        for u in _unused: _rows_data.append((u['name'],'Unused',u['target'],u.get('sheets',''), P2_FILL,P2_TXT))
+        for p in _poor:
+            already = any(rd[0]==p['name'] and rd[1]=='Unused' for rd in _rows_data)
+            _rows_data.append((p['name'], 'Unused + Poorly Named' if already else 'Poorly Named', p['target'], p.get('sheets',''), P2_FILL,P2_TXT))
+
+        if not _rows_data:
+            merge(wnr,f'B{NR_HEADER_ROW+1}:{get_column_letter(n_nr_cols-1)}{NR_HEADER_ROW+1}',
+                  'No issues detected — every named range is used, clearly named, and resolves correctly.',
+                  sz=9,col=OK_TXT,bg=OK_FILL,wrap=True)
+            set_row(wnr,NR_HEADER_ROW+1,20)
+        else:
+            for idx,(name,issue,target,sheets,bf,bt) in enumerate(_rows_data):
+                row_i = NR_HEADER_ROW+1+idx
+                row_bg = WHITE if idx%2==0 else 'FAFBFC'
+                row_values={'Name':name,'Issue':issue,'Target':target,'Sheets':sheets,
+                            'Reviewer Decision':'','Owner':'','Status':'Open'}
+                for name2,val in row_values.items():
+                    col=nr_idx[name2]
+                    c=wnr.cell(row_i,col); c.value=val
+                    c.font=Fn(sz=9,bold=(name2=='Name'))
+                    c.fill=F(row_bg)
+                    c.alignment=A(h='center' if name2 in ('Issue','Status') else 'left', v='top', wrap=(name2=='Target'))
+                    c.border=B(col=PANEL_BORDER)
+                badge(wnr,row_i,nr_idx['Issue'],issue,bf,bt,sz=8,bold=False)
+                set_row(wnr,row_i,20)
+
+            _nr_last_row = NR_HEADER_ROW+len(_rows_data)
+            _nr_table = Table(displayName="NamedRangeAuditTable", ref=f'B{NR_HEADER_ROW}:{get_column_letter(n_nr_cols-1)}{_nr_last_row}')
+            _nr_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                        showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+            wnr.add_table(_nr_table)
+
+            decision_dv2 = DataValidation(type='list',
+                formula1='"Link into calculation,Rename,Remove,Confirm intentional,Investigate"', allow_blank=True)
+            wnr.add_data_validation(decision_dv2)
+            decision_dv2.add(f'{get_column_letter(nr_idx["Reviewer Decision"])}{NR_HEADER_ROW+1}:{get_column_letter(nr_idx["Reviewer Decision"])}{_nr_last_row}')
+
+            status_dv3 = DataValidation(type='list', formula1='"Open,Cleared,Deferred"', allow_blank=False)
+            wnr.add_data_validation(status_dv3)
+            status_dv3.add(f'{get_column_letter(nr_idx["Status"])}{NR_HEADER_ROW+1}:{get_column_letter(nr_idx["Status"])}{_nr_last_row}')
+
+
+    # ════════════════════════════════════════════════════════════════════════
     ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False
     sd_headers=['','Target Sheet','Precedent Sheet','Link Count','Direction','Dependency Risk',
                 'Reviewer Action','Reviewer Note','Priority Count','Avg F-Score','Max F-Score','']
@@ -1914,7 +2023,7 @@ def build_report(data_path, output_path):
         'Audit Output': DARK_BLUE, 'Read Me': '5B7C99', 'Scope and Reliance': '5B7C99',
         'Issue Log': AMBER, 'Remediation': AMBER,
         'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
-        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID,
+        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID, 'Named Range Audit': GREY_MID,
         'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
         'F-Score Rules': GREY_MID, 'Pipeline Audit Trail': GREY_MID,
     }
@@ -1929,7 +2038,7 @@ def build_report(data_path, output_path):
     ws1.print_area = f'B1:I{_audit_output_last_row}'
 
     wb.save(output_path)
-    return {'status':'ok','tabs':14,'findings':len(findings)}
+    return {'status':'ok','tabs':15,'findings':len(findings)}
 
 if __name__=='__main__':
     if len(sys.argv)<3:
