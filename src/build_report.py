@@ -1365,41 +1365,34 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB — ERROR-CODE ROOT CAUSE MATRIX (V11 §4)
     # ════════════════════════════════════════════════════════════════════════
-    wse=wb.create_sheet('Error Matrix'); wse.sheet_view.showGridLines=False; wse.freeze_panes='A4'
-    for col,w in [(1,3),(2,10),(3,8),(4,34),(5,34),(6,34),(7,3)]:
-        set_col(wse,col,w)
-    merge(wse,'B1:F1','ERROR-CODE ROOT CAUSE MATRIX',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(wse,1,2,1,6,DARK_BLUE); set_row(wse,1,28)
-    _ifer=t0.get('stats',{}).get('totalIferrorCount',0)
-    merge(wse,'B2:F2',(f'Live error values found in the workbook, grouped by code. '
-        f'{_ifer:,} IFERROR/IFNA wrappers exist in this model — errors inside wrapped formulas do not appear here and may be silently masked; see Formula Risk Review.'),
-        sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True)
-    set_row(wse,2,26)
+    wse=wb.create_sheet('Error Matrix'); wse.sheet_view.showGridLines=False
+    err_headers=['','Code','Count','Severity','Sample Locations','Typical Root Cause','Recommended Action','Owner','Fix Status','']
+    n_em_cols = len(err_headers)
+    for i,w in enumerate([3,10,8,10,32,32,32,14,14,3],1): set_col(wse,i,w)
+    em_idx = {h.replace('\n',' '): i for i,h in enumerate(err_headers,1) if h}
+    EM_HEADER_ROW=6
+
+    merge(wse,f'B1:{get_column_letter(n_em_cols-1)}1','ERROR MATRIX',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wse,1,2,1,n_em_cols-1,DARK_BLUE); set_row(wse,1,26)
 
     _ERR_GUIDE={
         '#REF!':   ('Referenced rows, columns or sheets were deleted or moved after the formula was written.',
-                    'Rebuild the reference against the current layout; add named ranges for structural anchors.'),
+                    'Rebuild the reference against the current layout; add named ranges for structural anchors.', 'High'),
         '#DIV/0!': ('Division where the denominator is zero or blank — typically an unguarded ratio in early or terminal periods.',
-                    'Guard the denominator explicitly (IF(den=0,...)) rather than wrapping the result in IFERROR.'),
+                    'Guard the denominator explicitly (IF(den=0,...)) rather than wrapping the result in IFERROR.', 'Medium'),
         '#N/A':    ('A lookup failed to find its key — missing key, mismatched type/format, or approximate match on unsorted data.',
-                    'Confirm key existence and exact-match settings; reconcile key lists between source and lookup tables.'),
+                    'Confirm key existence and exact-match settings; reconcile key lists between source and lookup tables.', 'Medium'),
         '#VALUE!': ('Operation applied to the wrong data type — text in arithmetic, ranges of mismatched size, or stray characters in inputs.',
-                    'Trace the offending operand; clean input typing and separate text from numeric columns.'),
+                    'Trace the offending operand; clean input typing and separate text from numeric columns.', 'Medium'),
         '#NAME?':  ('Formula references an undefined name — deleted named range, misspelled function, or missing add-in.',
-                    'Repair or redefine the name; remove dependencies on unavailable add-ins.'),
+                    'Repair or redefine the name; remove dependencies on unavailable add-ins.', 'High'),
         '#NUM!':   ('Invalid numeric operation — IRR failing to converge, negative value in a root/log, or overflow.',
-                    'Check the input domain; for IRR provide a guess or use XIRR with explicit dates.'),
+                    'Check the input domain; for IRR provide a guess or use XIRR with explicit dates.', 'Medium'),
         '#NULL!':  ('Range intersection that does not intersect — usually a typo (space instead of comma/colon) in a range reference.',
-                    'Correct the range operator in the formula.'),
+                    'Correct the range operator in the formula.', 'Low'),
         '#SPILL!': ('A dynamic array result is blocked by existing content in its spill range.',
-                    'Clear the blocking cells or convert the formula to a fixed range.'),
+                    'Clear the blocking cells or convert the formula to a fixed range.', 'Low'),
     }
-    hdr_cells=['','CODE','COUNT','SAMPLE LOCATIONS','TYPICAL ROOT CAUSE','RECOMMENDED ACTION','']
-    for col,h in enumerate(hdr_cells,1):
-        if not h: continue
-        c=wse.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE); c.fill=F(DARK_BLUE)
-        c.alignment=A(h='center',v='center'); c.border=B(col=WHITE)
-    set_row(wse,3,20)
 
     from collections import OrderedDict
     _by_code=OrderedDict()
@@ -1407,23 +1400,80 @@ def build_report(data_path, output_path):
         code=str(e.get('error','')).strip()
         if not code: continue
         _by_code.setdefault(code,[]).append(f"{e.get('sheet','')}!{e.get('cell','')}")
-    row_i=4
+
+    _live_total = sum(len(v) for v in _by_code.values())
+    _error_types = len(_by_code)
+    _ifer=t0.get('stats',{}).get('totalIferrorCount',0)
+    # A code counts as High severity, and a large count amplifies it —
+    # structural breakage (#REF!/#NAME?) with real volume is the reliance blocker.
+    _has_high_severity = any(_ERR_GUIDE.get(c,('','','Medium'))[2]=='High' and len(locs)>0 for c,locs in _by_code.items())
+
+    # ── Summary cards — Live Errors / Error Types / IFERROR Wrappers ────────
+    _em_cards=[('Live Errors', _live_total, 2,3), ('Error Types', _error_types, 4,5), ('IFERROR Wrappers', _ifer, 6,7)]
+    for label,val,c1,c2 in _em_cards:
+        col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
+        merge(wse,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        merge(wse,f'{col_l1}4:{col_l2}4',val,bold=True,sz=18,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        ws_val_cell = wse.cell(4,c1); ws_val_cell.number_format='#,##0'
+        for rr in (3,4):
+            for cc in range(c1,c2+1): wse.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wse,3,14); set_row(wse,4,26)
+
+    # ── Reliance-blocker status line ─────────────────────────────────────────
+    if _live_total==0:
+        _blocker_txt='No live formula errors detected — not currently a reliance blocker on this basis.'
+        _blocker_bg=OK_FILL; _blocker_fg=OK_TXT
+    elif _has_high_severity:
+        _blocker_txt=f'{_live_total:,} live error(s) including High-severity codes — formula errors ARE a reliance blocker until resolved.'
+        _blocker_bg=P1_FILL; _blocker_fg=P1_TXT
+    else:
+        _blocker_txt=f'{_live_total:,} live error(s), no High-severity codes — review recommended but not an immediate reliance blocker.'
+        _blocker_bg=P2_FILL; _blocker_fg=P2_TXT
+    merge(wse,f'B5:{get_column_letter(n_em_cols-1)}5',_blocker_txt,bold=True,sz=9,col=_blocker_fg,bg=_blocker_bg,v='center')
+    set_row(wse,5,18)
+
+    for col,h in enumerate(err_headers,1):
+        c=wse.cell(EM_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+    set_row(wse,EM_HEADER_ROW,22)
+    wse.freeze_panes = f'{get_column_letter(em_idx["Sample Locations"])}{EM_HEADER_ROW+1}'
+
+    _sev_badge={'High':(P1_FILL,P1_TXT),'Medium':(P2_FILL,P2_TXT),'Low':(P3_FILL,P3_TXT)}
+    row_i=EM_HEADER_ROW+1
     if not _by_code:
-        merge(wse,f'B{row_i}:F{row_i}','No live error values detected in any cell. Note: errors masked by IFERROR/IFNA wrappers are not visible as live values — masking risk is assessed separately.',sz=9,col=GREY_DARK,wrap=True)
+        merge(wse,f'B{row_i}:{get_column_letter(n_em_cols-1)}{row_i}',
+              'No live error values detected in any cell. Note: errors masked by IFERROR/IFNA wrappers are not visible as live values — masking risk is assessed separately (see Formula Risk Review).',
+              sz=9,col=GREY_TXT2,wrap=True)
         set_row(wse,row_i,24); row_i+=1
     else:
-        for code, locs in sorted(_by_code.items(), key=lambda kv:-len(kv[1])):
-            cause,action=_ERR_GUIDE.get(code,('Unclassified error code.','Investigate the listed cells directly.'))
+        for _idx,(code, locs) in enumerate(sorted(_by_code.items(), key=lambda kv:-len(kv[1]))):
+            cause,action,severity=_ERR_GUIDE.get(code,('Unclassified error code.','Investigate the listed cells directly.','Medium'))
             loc_txt=', '.join(locs[:5])+(f' +{len(locs)-5} more' if len(locs)>5 else '')
-            vals=['',code,len(locs),loc_txt,cause,action,'']
-            for col,val in enumerate(vals,1):
-                if col in (1,7): continue
+            row_bg = WHITE if _idx%2==0 else 'FAFBFC'
+            row_values={'Code':code,'Count':len(locs),'Severity':severity,'Sample Locations':loc_txt,
+                        'Typical Root Cause':cause,'Recommended Action':action,'Owner':'','Fix Status':'Open'}
+            for name,val in row_values.items():
+                col=em_idx[name]
                 c=wse.cell(row_i,col); c.value=val
-                c.font=Fn(sz=9,bold=(col==2),col=DARK_BLUE if col==2 else '000000')
-                c.fill=F(PALE_BLUE if col==2 else WHITE)
-                c.alignment=A(h='center' if col==3 else 'left',v='top',wrap=(col in (4,5,6)))
-                c.border=B()
-            set_row(wse,row_i,30); row_i+=1
+                c.font=Fn(sz=9,bold=(name=='Code'))
+                c.fill=F(row_bg)
+                c.alignment=A(h='center' if name in ('Count','Severity','Fix Status') else 'left',
+                              v='top', wrap=(name in ('Sample Locations','Typical Root Cause','Recommended Action')))
+                c.border=B(col=PANEL_BORDER)
+            c_count = wse.cell(row_i, em_idx['Count']); c_count.number_format='#,##0'
+            bf,bt=_sev_badge.get(severity,(GREY_LIGHT,CHARCOAL))
+            badge(wse,row_i,em_idx['Severity'],severity,bf,bt,sz=8,bold=False)
+            set_row(wse,row_i,32); row_i+=1
+
+    _em_last_row = row_i-1
+    if _by_code:
+        _em_table = Table(displayName="ErrorMatrixTable", ref=f'B{EM_HEADER_ROW}:{get_column_letter(n_em_cols-1)}{_em_last_row}')
+        _em_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                    showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        wse.add_table(_em_table)
+        fix_dv = DataValidation(type='list', formula1='"Open,In Progress,Fixed,Not Applicable"', allow_blank=False)
+        wse.add_data_validation(fix_dv)
+        fix_dv.add(f'{get_column_letter(em_idx["Fix Status"])}{EM_HEADER_ROW+1}:{get_column_letter(em_idx["Fix Status"])}{_em_last_row}')
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB — TIDY-UP: REDUNDANT INPUTS (V11 §2) — full client-actionable list
