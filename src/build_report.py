@@ -1589,113 +1589,215 @@ def build_report(data_path, output_path):
             status_dv.add(f'{get_column_letter(ri_idx["Status"])}{RI_HEADER_ROW+1}:{get_column_letter(ri_idx["Status"])}{_ri_last_row}')
 
     # ════════════════════════════════════════════════════════════════════════
-    ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False; ws7.freeze_panes='A4'
-    for col,w in [(1,3),(2,22),(3,22),(4,10),(5,16),(6,10),(7,10),(8,14),(9,18),(10,20),(11,3)]:
-        set_col(ws7,col,w)
+    ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False
+    sd_headers=['','Target Sheet','Precedent Sheet','Link Count','Direction','Dependency Risk',
+                'Reviewer Action','Reviewer Note','Priority Count','Avg F-Score','Max F-Score','']
+    n_sd_cols = len(sd_headers)
+    n_sd_visible = 8  # Target Sheet..Reviewer Note
+    for i,w in enumerate([3,22,22,12,12,14,14,26]+[14]*(n_sd_cols-1-n_sd_visible),1): set_col(ws7,i,w)
+    sd_idx = {h.replace('\n',' '): i for i,h in enumerate(sd_headers,1) if h}
+    SD_HEADER_ROW=6
 
-    merge(ws7,'B1:J1','SHEET DEPENDENCY ANALYSIS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(ws7,1,2,1,10,DARK_BLUE); set_row(ws7,1,28)
-    merge(ws7,'B2:J2','Shows how sheets reference each other. High-risk dependencies are flagged for review.',sz=9,col=GREY_DARK,bg=GREY_LIGHT)
+    merge(ws7,f'B1:{get_column_letter(n_sd_cols-1)}1','SHEET DEPENDENCY RISK MAP',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws7,1,2,1,n_sd_cols-1,DARK_BLUE); set_row(ws7,1,26)
+    merge(ws7,f'B2:{get_column_letter(n_sd_cols-1)}2',
+          'How sheets reference each other — where model dependency risk sits, and which links warrant review first.',
+          sz=8,col=GREY_TXT2,italic=True)
     set_row(ws7,2,16)
 
-    fm_headers=['','Target Sheet\n(formula lives here)','Precedent Sheet\n(sheet referenced)','Link\nCount','Direction','Avg\nF-Score','Max\nF-Score','Priority\nCount','Dependency\nRisk','Reviewer Note','']
-    for col,h in enumerate(fm_headers,1):
-        c=ws7.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
-        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-    set_row(ws7,3,32)
-
-    risk_fill={'High':LIGHT_AMBER,'Moderate':LIGHT_YELL,'Low':LIGHT_GREEN,'Critical':LIGHT_AMBER}
-    dir_fill={'Normal':LIGHT_GREEN,'External':LIGHT_AMBER,'Backward':LIGHT_AMBER,'Circular':LIGHT_AMBER}
     edges=t0.get('edgeList',[])
-    for row_i,edge in enumerate(edges[:100],4):
+    _risk_rank={'Critical':0,'High':1,'Moderate':2,'Low':3}
+    _sorted_edges = sorted(edges[:100], key=lambda e: (_risk_rank.get(e.get('risk','Low'),3), -e.get('linkCount',0)))
+    _critical = [e for e in _sorted_edges if e.get('risk') in ('Critical','High')][:5]
+
+    # ── Critical Dependency panel — highest-risk links, surfaced first ──────
+    if _critical:
+        merge(ws7,f'B3:{get_column_letter(n_sd_cols-1)}3','CRITICAL DEPENDENCIES',bold=True,sz=9,col=WHITE,bg=DARK_BLUE,h='left')
+        set_row(ws7,3,16)
+        _cd_row=4
+        for e in _critical:
+            txt=f"{e.get('targetSheet','')} → {e.get('precedentSheet','')}: {e.get('linkCount',0):,} links ({e.get('risk','')})"
+            merge(ws7,f'B{_cd_row}:{get_column_letter(n_sd_cols-1)}{_cd_row}',txt,sz=9,col=P1_TXT,bg=P1_FILL)
+            set_row(ws7,_cd_row,16); _cd_row+=1
+        set_row(ws7,_cd_row,8); SD_HEADER_ROW=_cd_row+1
+    else:
+        merge(ws7,f'B3:{get_column_letter(n_sd_cols-1)}3','No Critical or High-risk dependencies detected.',sz=9,col=GREY_TXT2,italic=True)
+        set_row(ws7,3,16); set_row(ws7,4,8); SD_HEADER_ROW=5
+
+    for col,h in enumerate(sd_headers,1):
+        c=ws7.cell(SD_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+    set_row(ws7,SD_HEADER_ROW,26)
+    ws7.freeze_panes = f'{get_column_letter(sd_idx["Dependency Risk"])}{SD_HEADER_ROW+1}'
+
+    _risk_badge={'Critical':(P1_FILL,P1_TXT),'High':(P1_FILL,P1_TXT),'Moderate':(P2_FILL,P2_TXT),'Low':(OK_FILL,OK_TXT)}
+    _dir_badge={'Normal':(OK_FILL,OK_TXT),'Backward':(P1_FILL,P1_TXT),'External':(P2_FILL,P2_TXT),'Circular':(P1_FILL,P1_TXT)}
+    for idx,edge in enumerate(_sorted_edges):
+        row_i = SD_HEADER_ROW+1+idx
+        row_bg = WHITE if idx%2==0 else 'FAFBFC'
         risk=edge.get('risk','Low'); direction=edge.get('direction','Normal')
-        bg=risk_fill.get(risk,GREY_LIGHT)
-        vals=['',edge.get('targetSheet',''),edge.get('precedentSheet',''),edge.get('linkCount',0),
-              direction,'','',0,risk,'','']
-        for col,val in enumerate(vals,1):
+        row_values={'Target Sheet':edge.get('targetSheet',''),'Precedent Sheet':edge.get('precedentSheet',''),
+                    'Link Count':edge.get('linkCount',0),'Direction':direction,'Dependency Risk':risk,
+                    'Reviewer Action':'','Reviewer Note':'','Priority Count':edge.get('priorityCount',0),
+                    'Avg F-Score':edge.get('avgFscore',''),'Max F-Score':edge.get('maxFscore','')}
+        for name,val in row_values.items():
+            col=sd_idx[name]
             c=ws7.cell(row_i,col); c.value=val
-            c.font=Fn(sz=9,bold=(col==9))
-            c.fill=F(dir_fill.get(direction,bg) if col==5 else bg)
-            c.alignment=A(h='center' if col in [4,5,6,7,8,9] else 'left',v='center')
-            c.border=B()
-        set_row(ws7,row_i,18)
+            c.font=Fn(sz=9,bold=(name in ('Target Sheet','Precedent Sheet')))
+            c.fill=F(row_bg)
+            c.alignment=A(h='center' if name in ('Link Count','Direction','Dependency Risk','Priority Count','Avg F-Score','Max F-Score') else 'left',
+                          v='top', wrap=(name=='Reviewer Note'))
+            c.border=B(col=PANEL_BORDER)
+        ws7.cell(row_i, sd_idx['Link Count']).number_format='#,##0'
+        rf,rt=_risk_badge.get(risk,(GREY_LIGHT,CHARCOAL))
+        badge(ws7,row_i,sd_idx['Dependency Risk'],risk,rf,rt,sz=8,bold=False)
+        df,dt=_dir_badge.get(direction,(GREY_LIGHT,CHARCOAL))
+        badge(ws7,row_i,sd_idx['Direction'],direction,df,dt,sz=8,bold=False)
+        set_row(ws7,row_i,20)
 
-    # ════════════════════════════════════════════════════════════════════════
-    # TAB 8 — F-SCORE RULES
-    # ════════════════════════════════════════════════════════════════════════
+    _sd_last_row = SD_HEADER_ROW+len(_sorted_edges)
+    for col in range(n_sd_visible+1, n_sd_cols):
+        ws7.column_dimensions[get_column_letter(col)].hidden = True
+
+    if _sorted_edges:
+        _sd_table = Table(displayName="SheetDependencyTable", ref=f'B{SD_HEADER_ROW}:{get_column_letter(n_sd_cols-1)}{_sd_last_row}')
+        _sd_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                    showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        ws7.add_table(_sd_table)
+        action_dv = DataValidation(type='list', formula1='"Review,Accept,Simplify,Investigate"', allow_blank=True)
+        ws7.add_data_validation(action_dv)
+        action_dv.add(f'{get_column_letter(sd_idx["Reviewer Action"])}{SD_HEADER_ROW+1}:{get_column_letter(sd_idx["Reviewer Action"])}{_sd_last_row}')
+
+
     ws8=wb.create_sheet('F-Score Rules'); ws8.sheet_view.showGridLines=False
-    for col,w in [(1,3),(2,10),(3,38),(4,42),(5,3)]: set_col(ws8,col,w)
+    for col,w in [(1,3),(2,10),(3,34),(4,38),(5,32),(6,3)]: set_col(ws8,col,w)
 
-    merge(ws8,'B1:D1','F-SCORE RULES — FORMULA COMPLEXITY SCORING METHODOLOGY',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(ws8,1,2,1,4,DARK_BLUE); set_row(ws8,1,28)
-    merge(ws8,'B2:D2','The F-score is calculated automatically by the Tier 0 formula scanner. Every formula receives a score. Higher scores warrant closer inspection.',sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True)
-    set_row(ws8,2,16)
+    merge(ws8,'B1:E1','F-SCORE RULES',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws8,1,2,1,5,DARK_BLUE); set_row(ws8,1,26)
+    merge(ws8,'B2:E2','The F-score measures formula complexity and audit risk — every formula in the model receives one automatically. Higher scores warrant closer review.',
+          sz=9,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+    set_row(ws8,2,26)
 
-    hdr(ws8,'B3','Score',h='center'); hdr(ws8,'C3','Feature'); hdr(ws8,'D3','Reason'); set_row(ws8,3,18)
+    hdr(ws8,'B3','Score',h='center'); hdr(ws8,'C3','Feature'); hdr(ws8,'D3','Reason'); hdr(ws8,'E3','Review Action'); set_row(ws8,3,18)
     rules_data=[
-        ('+1','Formula length > 100 characters','Longer formulas are harder to review and audit'),
-        ('+2','Formula length > 250 characters','Indicates significant formula density'),
-        ('+3','Formula length > 500 characters','Indicates very high formula density — consider splitting'),
-        ('+1 each','Nested IF / IFS / CHOOSE / SWITCH','Nested branching increases scenario and edge-case risk'),
-        ('+1','XLOOKUP / INDEX-MATCH / VLOOKUP / HLOOKUP','Lookup formulas require range and error-handling review'),
-        ('+3','OFFSET or INDIRECT','Dynamic references are difficult to trace and audit'),
-        ('+3','Volatile function (TODAY / NOW / RAND)','Volatile formulas recalculate on every workbook change'),
-        ('+5','External workbook reference ([ marker)','Broken-link and version-control risk on file relocation'),
-        ('+1','Hardcoded numeric constant inside formula','May bypass the centralised input structure'),
-        ('+1','IFERROR / IFNA / ISERROR','Can hide genuine calculation errors if misused'),
-        ('+5','Circularity-sensitive formula','Requires controlled iteration switch and convergence testing'),
-        ('+1','> 5 arithmetic or logical operators','Moderate calculation density — review for clarity'),
-        ('+2','> 10 arithmetic or logical operators','High calculation density — consider helper rows'),
-        ('+1','Cross-sheet reference (! marker)','Increases dependency and traceability complexity'),
+        ('+1','Formula length > 100 characters','Longer formulas are harder to review and audit','Read through for clarity; simplify if easy to do so'),
+        ('+2','Formula length > 250 characters','Indicates significant formula density','Consider splitting into helper cells'),
+        ('+3','Formula length > 500 characters','Indicates very high formula density','Split into helper rows before relying on the output'),
+        ('+1 each','Nested IF / IFS / CHOOSE / SWITCH','Nested branching increases scenario and edge-case risk','Trace each branch against a known scenario'),
+        ('+1','XLOOKUP / INDEX-MATCH / VLOOKUP / HLOOKUP','Lookup formulas require range and error-handling review','Confirm exact-match settings and range boundaries'),
+        ('+3','OFFSET or INDIRECT','Dynamic references are difficult to trace and audit','Replace with a static reference where possible'),
+        ('+3','Volatile function (TODAY / NOW / RAND)','Volatile formulas recalculate on every workbook change','Confirm recalculation timing is intended, not accidental'),
+        ('+5','External workbook reference ([ marker)','Broken-link and version-control risk on file relocation','Break the link or document the external dependency'),
+        ('+1','Hardcoded numeric constant inside formula','May bypass the centralised input structure','Move the constant to the Inputs sheet'),
+        ('+1','IFERROR / IFNA / ISERROR','Can hide genuine calculation errors if misused','Confirm the wrapped error is expected, not masked'),
+        ('+5','Circularity-sensitive formula','Requires controlled iteration switch and convergence testing','Verify the iteration switch and test for convergence'),
+        ('+1','> 5 arithmetic or logical operators','Moderate calculation density','Review for clarity; consider breaking into steps'),
+        ('+2','> 10 arithmetic or logical operators','High calculation density','Split into helper rows for auditability'),
+        ('+1','Cross-sheet reference (! marker)','Increases dependency and traceability complexity','Confirm the source sheet and cell are correct'),
     ]
-    for row_i,(score,feature,reason) in enumerate(rules_data,4):
-        bg=GREY_LIGHT if row_i%2==0 else WHITE
-        ws8.cell(row_i,2).value=score; ws8.cell(row_i,2).font=Fn(bold=True,sz=9); ws8.cell(row_i,2).fill=F(bg); ws8.cell(row_i,2).alignment=A(h='center'); ws8.cell(row_i,2).border=B()
-        ws8.cell(row_i,3).value=feature; ws8.cell(row_i,3).font=Fn(sz=9); ws8.cell(row_i,3).fill=F(bg); ws8.cell(row_i,3).border=B()
-        ws8.cell(row_i,4).value=reason; ws8.cell(row_i,4).font=Fn(sz=9); ws8.cell(row_i,4).fill=F(bg); ws8.cell(row_i,4).border=B()
+    for row_i,(score,feature,reason,action) in enumerate(rules_data,4):
+        row_bg = WHITE if row_i%2==0 else 'FAFBFC'
+        badge(ws8,row_i,2,score,PANEL_GREY,MID_BLUE,sz=9,bold=True)
+        for col,val in [(3,feature),(4,reason),(5,action)]:
+            c=ws8.cell(row_i,col); c.value=val; c.font=Fn(sz=9); c.fill=F(row_bg)
+            c.alignment=A(v='top',wrap=True); c.border=B(col=PANEL_BORDER)
+        set_row(ws8,row_i,20)
+
+    _bands_start = 4+len(rules_data)+1
+    set_row(ws8,_bands_start-1,8)
+    merge(ws8,f'B{_bands_start}:E{_bands_start}','COMPLEXITY BANDS',bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
+    set_row(ws8,_bands_start,20)
+    hdr(ws8,f'B{_bands_start+1}','F-Score Range',h='center'); hdr(ws8,f'C{_bands_start+1}','Band',h='center')
+    ws8.merge_cells(f'D{_bands_start+1}:E{_bands_start+1}')
+    ws8[f'D{_bands_start+1}'].value='Treatment'; ws8[f'D{_bands_start+1}'].font=Fn(bold=True,sz=10,col=WHITE)
+    ws8[f'D{_bands_start+1}'].fill=F(DARK_BLUE); ws8[f'D{_bands_start+1}'].alignment=A(h='left')
+    set_row(ws8,_bands_start+1,18)
+    _band_badge2={'Low':(OK_FILL,OK_TXT),'Moderate':(P3_FILL,P3_TXT),'High':(P2_FILL,P2_TXT),'Very High':(P1_FILL,P1_TXT)}
+    bands=[('0–3','Low','Ordinary complexity. Review through normal formula testing.'),
+           ('4–7','Moderate','Review for logic clarity, input linkage and copy-across consistency.'),
+           ('8–12','High','Inspect carefully. Consider simplification or helper rows.'),
+           ('13+','Very High','Needs detailed review. Consider simplifying or splitting into helper rows.')]
+    for i,(score_range,band,treatment) in enumerate(bands):
+        row_i=_bands_start+2+i
+        ws8.cell(row_i,2).value=score_range; ws8.cell(row_i,2).font=Fn(bold=True,sz=9,col=CHARCOAL)
+        ws8.cell(row_i,2).fill=F(WHITE); ws8.cell(row_i,2).alignment=A(h='center'); ws8.cell(row_i,2).border=B(col=PANEL_BORDER)
+        bf,bt=_band_badge2.get(band,(GREY_LIGHT,CHARCOAL))
+        badge(ws8,row_i,3,band,bf,bt,sz=9,bold=False)
+        ws8.merge_cells(f'D{row_i}:E{row_i}')
+        ws8[f'D{row_i}'].value=treatment; ws8[f'D{row_i}'].font=Fn(sz=9,col=CHARCOAL)
+        ws8[f'D{row_i}'].fill=F(WHITE); ws8[f'D{row_i}'].border=B(col=PANEL_BORDER)
         set_row(ws8,row_i,18)
 
-    set_row(ws8,18,8)
-    merge(ws8,'B19:D19','COMPLEXITY BANDS',bold=True,sz=11,col=WHITE,bg=MID_BLUE,v='center'); set_row(ws8,19,22)
-    hdr(ws8,'B20','F-Score Range',h='center'); hdr(ws8,'C20','Band',h='center'); hdr(ws8,'D20','Treatment'); set_row(ws8,20,18)
-    bands=[('0–3','Low',LIGHT_GREEN,'Ordinary complexity. Review through normal formula testing.'),
-           ('4–7','Moderate',LIGHT_YELL,'Review for logic clarity, input linkage and copy-across consistency.'),
-           ('8–12','High',LIGHT_AMBER,'Inspect carefully. Consider simplification or helper rows.'),
-           ('13+','Very High',LIGHT_AMBER,'Needs detailed review. Consider simplifying or splitting into helper rows.')]
-    for row_i,(score_range,band,bg,treatment) in enumerate(bands,21):
-        ws8.cell(row_i,2).value=score_range; ws8.cell(row_i,2).font=Fn(bold=True,sz=9); ws8.cell(row_i,2).fill=F(bg); ws8.cell(row_i,2).alignment=A(h='center'); ws8.cell(row_i,2).border=B()
-        ws8.cell(row_i,3).value=band; ws8.cell(row_i,3).font=Fn(bold=True,sz=9); ws8.cell(row_i,3).fill=F(bg); ws8.cell(row_i,3).alignment=A(h='center'); ws8.cell(row_i,3).border=B()
-        ws8.cell(row_i,4).value=treatment; ws8.cell(row_i,4).font=Fn(sz=9); ws8.cell(row_i,4).fill=F(bg); ws8.cell(row_i,4).border=B()
-        set_row(ws8,row_i,18)
 
-    # ════════════════════════════════════════════════════════════════════════
-    # TAB 9 — AUDIT LOG
-    # ════════════════════════════════════════════════════════════════════════
-    ws9=wb.create_sheet('Audit Log'); ws9.sheet_view.showGridLines=False; ws9.freeze_panes='A3'
-    for col,w in [(1,3),(2,18),(3,22),(4,40),(5,40),(6,12),(7,12),(8,30),(9,3)]: set_col(ws9,col,w)
+    ws9=wb.create_sheet('Pipeline Audit Trail'); ws9.sheet_view.showGridLines=False
+    log_headers=['','Timestamp','Step','Action','Artifact','Result','Duration','Notes','']
+    n_al_cols = len(log_headers)
+    for i,w in enumerate([3,12,16,36,28,12,10,34,3],1): set_col(ws9,i,w)
+    al_idx = {h.replace('\n',' '): i for i,h in enumerate(log_headers,1) if h}
+    AL_HEADER_ROW=6
 
-    merge(ws9,'B1:H1','AUDIT LOG — PIPELINE TRACE',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(ws9,1,2,1,8,DARK_BLUE); set_row(ws9,1,28)
-
-    log_headers=['','Timestamp','Step','Action','Artifact','Result','Duration (s)','Notes','']
-    for col,h in enumerate(log_headers,1):
-        c=ws9.cell(2,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
-        c.fill=F(DARK_BLUE); c.alignment=A(h='center' if col in [6,7] else 'left',v='center')
-    set_row(ws9,2,18)
+    merge(ws9,f'B1:{get_column_letter(n_al_cols-1)}1','PIPELINE AUDIT TRAIL',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(ws9,1,2,1,n_al_cols-1,DARK_BLUE); set_row(ws9,1,26)
+    merge(ws9,f'B2:{get_column_letter(n_al_cols-1)}2',
+          'Step-by-step record of this run — proves the review was actually performed, not just claimed.',
+          sz=8,col=GREY_TXT2,italic=True)
+    set_row(ws9,2,16)
 
     audit_log=d.get('auditLog',[])
-    result_colors={'✓ Completed':LIGHT_GREEN,'✓ Pass':LIGHT_GREEN,'⚠ Issues found':LIGHT_AMBER,'⚠ Issues':LIGHT_AMBER,'Not performed':GREY_LIGHT,'❌ Error':LIGHT_AMBER}
-    for row_i,entry in enumerate(audit_log,3):
-        result=entry.get('result','✓ Pass'); bg=result_colors.get(result,GREY_LIGHT)
-        vals=['',entry.get('timestamp',''),entry.get('step',''),entry.get('action',''),
-              entry.get('artifact',''),result,entry.get('duration',''),entry.get('notes',''),'']
-        for col,val in enumerate(vals,1):
+    # Sheet count is embedded as text in the Parse step's notes/action —
+    # extracted here rather than requiring a new payload field.
+    _sheets_parsed = 0
+    for entry in audit_log:
+        m = re.search(r'(\d+)\s*sheets', str(entry.get('notes','')) + ' ' + str(entry.get('action','')))
+        if m: _sheets_parsed = int(m.group(1)); break
+    _stats = t0.get('stats',{})
+
+    _al_cards=[('Sheets Parsed', _sheets_parsed, 2,3), ('Formula Cells Scanned', _stats.get('totalFormulaCells',0), 4,5),
+               ('Unique Formulas', _stats.get('uniqueFormulaCount',0), 6,6), ('Semantic Checks', len(checklist_rules), 7,7)]
+    for label,val,c1,c2 in _al_cards:
+        col_l1,col_l2=get_column_letter(c1),get_column_letter(c2)
+        if c2>c1: merge(ws9,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        else: cell(ws9,f'{col_l1}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        if c2>c1: merge(ws9,f'{col_l1}4:{col_l2}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        else: cell(ws9,f'{col_l1}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        ws9.cell(4,c1).number_format='#,##0'
+        for rr in (3,4):
+            for cc in range(c1,c2+1): ws9.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(ws9,3,14); set_row(ws9,4,24); set_row(ws9,5,8)
+
+    for col,h in enumerate(log_headers,1):
+        c=ws9.cell(AL_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c.fill=F(DARK_BLUE); c.alignment=A(h='center' if h in ('Timestamp','Result','Duration') else 'left',v='center'); c.border=B(col=WHITE)
+    set_row(ws9,AL_HEADER_ROW,20)
+    ws9.freeze_panes = f'B{AL_HEADER_ROW+1}'
+
+    def _result_class(r):
+        rs=str(r)
+        if '⚠' in rs or 'Issue' in rs: return 'Issues',(P2_FILL,P2_TXT)
+        if '❌' in rs or 'Error' in rs: return 'Error',(P1_FILL,P1_TXT)
+        if 'Not performed' in rs: return 'Not performed',(GREY_LIGHT,GREY_TXT2)
+        return 'Pass',(OK_FILL,OK_TXT)
+
+    for idx,entry in enumerate(audit_log):
+        row_i = AL_HEADER_ROW+1+idx
+        row_bg = WHITE if idx%2==0 else 'FAFBFC'
+        raw_dur = entry.get('duration','')
+        try: dur_display = f'{float(raw_dur):.1f}s'
+        except (TypeError,ValueError): dur_display = str(raw_dur) if raw_dur else '—'
+        result_label,_ = _result_class(entry.get('result','✓ Pass'))
+        row_values={'Timestamp':entry.get('timestamp',''),'Step':entry.get('step',''),'Action':entry.get('action',''),
+                    'Artifact':entry.get('artifact',''),'Result':result_label,'Duration':dur_display,'Notes':entry.get('notes','')}
+        for name,val in row_values.items():
+            col=al_idx[name]
             c=ws9.cell(row_i,col); c.value=val
-            c.font=Fn(sz=9,bold=(col==3))
-            c.fill=F(bg)
-            c.alignment=A(h='center' if col in [2,6,7] else 'left',v='top',wrap=(col in [4,5,8]))
-            c.border=B()
-        set_row(ws9,row_i,30)
+            c.font=Fn(sz=9,bold=(name=='Step'))
+            c.fill=F(row_bg)
+            c.alignment=A(h='center' if name in ('Timestamp','Result','Duration') else 'left', v='top', wrap=(name in ('Action','Artifact','Notes')))
+            c.border=B(col=PANEL_BORDER)
+        _,rescol = _result_class(entry.get('result','✓ Pass'))
+        badge(ws9,row_i,al_idx['Result'],result_label,rescol[0],rescol[1],sz=8,bold=False)
+        set_row(ws9,row_i,26)
+
 
     # ── Save ─────────────────────────────────────────────────────────────────
     # ── Workbook-wide polish — tab colours + print setup ──────────────────────
@@ -1705,7 +1807,7 @@ def build_report(data_path, output_path):
         'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
         'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID,
         'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
-        'F-Score Rules': GREY_MID, 'Audit Log': GREY_MID,
+        'F-Score Rules': GREY_MID, 'Pipeline Audit Trail': GREY_MID,
     }
     for _ws in wb.worksheets:
         if _ws.title in _tab_colors:
