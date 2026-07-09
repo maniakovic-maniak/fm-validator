@@ -12,7 +12,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
-from openpyxl.formatting.rule import CellIsRule, FormulaRule
+from openpyxl.formatting.rule import CellIsRule, FormulaRule, DataBarRule
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 DARK_BLUE   = '1F4E79'; MID_BLUE   = '2E75B6'; LIGHT_BLUE  = 'D6E4F0'; PALE_BLUE = 'EBF3FA'
@@ -962,12 +962,22 @@ def build_report(data_path, output_path):
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5B — VALIDATION MATRIX (B6) — every checklist rule with its outcome
     # ════════════════════════════════════════════════════════════════════════
-    wsm=wb.create_sheet('Validation Matrix'); wsm.sheet_view.showGridLines=False; wsm.freeze_panes='A4'
-    for col,w in [(1,3),(2,5),(3,12),(4,22),(5,46),(6,8),(7,11),(8,16),(9,11),(10,32),(11,24),(12,32),(13,10),(14,3)]:
-        set_col(wsm,col,w)
+    wsm=wb.create_sheet('Validation Matrix'); wsm.sheet_view.showGridLines=False
+    vm_headers=['','Rule ID','Test Area','Rule','Tier','Status','Confidence','Related Findings','Retest Required',
+                '#','Performed','Evidence Reviewed','Missing Evidence','']
+    n_vm_cols = len(vm_headers)
+    n_vm_visible = 9  # Rule ID..Retest Required
+    vm_widths=[3,12,20,42,8,14,12,22,12]+[16]*(n_vm_cols-1-n_vm_visible)
+    for i,w in enumerate(vm_widths,1): set_col(wsm,i,w)
+    vm_idx = {h.replace('\n',' '): i for i,h in enumerate(vm_headers,1) if h}
+    VM_HEADER_ROW=6
 
-    merge(wsm,'B1:M1','VALIDATION MATRIX — REVIEW PROCEDURES PERFORMED',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
-    fill_range(wsm,1,2,1,13,DARK_BLUE); set_row(wsm,1,28)
+    merge(wsm,f'B1:{get_column_letter(n_vm_cols-1)}1','VALIDATION MATRIX',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wsm,1,2,1,n_vm_cols-1,DARK_BLUE); set_row(wsm,1,26)
+    merge(wsm,f'B2:{get_column_letter(n_vm_cols-1)}2',
+          'Every rule in the checklist and its outcome — a procedure checklist, not a findings dump. See the Issue Log for the findings themselves.',
+          sz=8,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+    set_row(wsm,2,18)
 
     def _rmatch(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
 
@@ -979,47 +989,98 @@ def build_report(data_path, output_path):
         performed='Yes' if rres else 'No'
         issues=[r for r in rres if r.get('status') not in ('pass','uncertain')]
         unc=[r for r in rres if r.get('status')=='uncertain']
-        if not rres: status='Not performed'; n_np+=1
-        elif issues: status=f'Issues raised ({len(issues)})'; n_issue+=1
+        if not rres: status='Not Performed'; n_np+=1
+        elif issues: status='Raised Issue'; n_issue+=1
         elif unc: status='Uncertain'; n_unc+=1
         else: status='Pass'; n_pass+=1
         confs=[r.get('confidence') for r in rres if isinstance(r.get('confidence'),(int,float)) and r.get('confidence')]
-        conf=f'{max(confs)}%' if (confs and tier=='Tier 2') else '\u2014'
+        conf_num = (max(confs)/100.0) if (confs and tier=='Tier 2') else None
         sm=re.search(r'-S(\d+)-',rid)
-        if tier=='Tier 1': evidence='Full workbook \u2014 deterministic code check'
-        elif sm and int(sm.group(1)) in (5,6,7,10): evidence='Deep financial data subset \u2014 full AFS/IFS/Cons/Debt/Equity/D&T/Leases'
-        else: evidence='Standard data subset \u2014 all sheets, trimmed rows'
+        if tier=='Tier 1': evidence='Full workbook — deterministic code check'
+        elif sm and int(sm.group(1)) in (5,6,7,10): evidence='Deep financial data subset — full AFS/IFS/Cons/Debt/Equity/D&T/Leases'
+        else: evidence='Standard data subset — all sheets, trimmed rows'
         refs=[f.get('id','') for f in rfnd]
-        ref_txt=', '.join(refs[:4])+(f' +{len(refs)-4} more' if len(refs)>4 else '') if refs else '\u2014'
-        if status=='Not performed': missing='Rule not returned by the review \u2014 re-run validation or test manually'
-        elif status=='Uncertain': missing='Evidence insufficient for a conclusive test \u2014 see related finding'
-        else: missing='\u2014'
-        retest='Yes' if (issues or any(f.get('needs_retest') for f in rfnd)) else '\u2014'
-        m_rows.append((rid,rule.get('source_section','') or rule.get('section',''),rule.get('label',''),tier,performed,status,conf,evidence,ref_txt,missing,retest))
+        ref_txt=', '.join(refs[:4])+(f' +{len(refs)-4} more' if len(refs)>4 else '') if refs else '—'
+        if status=='Not Performed': missing='Rule not returned by the review — re-run validation or test manually'
+        elif status=='Uncertain': missing='Evidence insufficient for a conclusive test — see related finding'
+        else: missing='—'
+        retest='Yes' if (issues or any(f.get('needs_retest') for f in rfnd)) else 'No'
+        m_rows.append(dict(rid=rid, area=rule.get('source_section','') or rule.get('section',''),
+                            rule=rule.get('label',''), tier=tier, performed=performed, status=status,
+                            conf_num=conf_num, evidence=evidence, refs=ref_txt, missing=missing, retest=retest))
 
+    # ── Summary cards — Planned / Performed / Passed / Raised Issue / Uncertain / Not Run ──
     extras=len([f for f in findings if not any(_rmatch(r.get('id',''),f.get('id','')) for r in checklist_rules)])
-    summ=(f'{len(checklist_rules)} rules in checklist \u2014 Performed: {len(checklist_rules)-n_np} \u00b7 Pass: {n_pass} \u00b7 '
-          f'Issues raised: {n_issue} \u00b7 Uncertain: {n_unc} \u00b7 Not performed: {n_np}.'
-          +(f' {extras} additional finding(s) outside the checklist \u2014 see Issue Log.' if extras else ''))
-    merge(wsm,'B2:M2',summ,sz=9,col=GREY_DARK,bg=PALE_BLUE,italic=True,wrap=True); set_row(wsm,2,24)
+    _cards=[('Planned',len(checklist_rules),2,3),('Performed',len(checklist_rules)-n_np,4,4),
+            ('Passed',n_pass,5,5),('Raised Issue',n_issue,6,6),('Uncertain',n_unc,7,7),('Not Run',n_np,8,9)]
+    for label,val,c1,c2 in _cards:
+        col_l1,col_l2 = get_column_letter(c1), get_column_letter(c2)
+        if c2>c1: merge(wsm,f'{col_l1}3:{col_l2}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        else: cell(wsm,f'{col_l1}3',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        if c2>c1: merge(wsm,f'{col_l1}4:{col_l2}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        else: cell(wsm,f'{col_l1}4',val,bold=True,sz=16,col=CHARCOAL,bg=PANEL_GREY,h='center')
+        for rr in (3,4):
+            for cc in range(c1,c2+1): wsm.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wsm,3,14); set_row(wsm,4,24)
+    if extras:
+        merge(wsm,f'B{VM_HEADER_ROW-1}:{get_column_letter(n_vm_cols-1)}{VM_HEADER_ROW-1}',
+              f'{extras} additional finding(s) fall outside the checklist — see Issue Log for detail.',
+              sz=8,col=GREY_TXT2,italic=True)
+        set_row(wsm,VM_HEADER_ROW-1,14)
+    else:
+        set_row(wsm,VM_HEADER_ROW-1,4)
 
-    vm_headers=['','#','Rule ID','Test Area','Rule','Tier','Performed','Status','Confidence','Evidence Reviewed','Issue Reference(s)','Missing Evidence','Retest\nRequired','']
     for col,h in enumerate(vm_headers,1):
-        c=wsm.cell(3,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+        c=wsm.cell(VM_HEADER_ROW,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
         c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
-    set_row(wsm,3,30)
+    set_row(wsm,VM_HEADER_ROW,26)
 
-    st_bg={'Pass':LIGHT_GREEN,'Uncertain':LIGHT_YELL,'Not performed':GREY_LIGHT}
-    for row_i,(rid,area,label,tier,perf,status,conf,evidence,refs,missing,retest) in enumerate(m_rows,4):
-        vals=['',row_i-3,rid,area,label,tier,perf,status,conf,evidence,refs,missing,retest,'']
-        sbg=st_bg.get(status,LIGHT_AMBER if status.startswith('Issues') else WHITE)
-        for col,val in enumerate(vals,1):
+    # Freeze header row + first three columns (Rule ID, Test Area, Rule)
+    wsm.freeze_panes = f'{get_column_letter(vm_idx["Tier"])}{VM_HEADER_ROW+1}'
+
+    _status_badge={'Pass':(OK_FILL,OK_TXT),'Uncertain':(P2_FILL,P2_TXT),'Not Performed':(GREY_LIGHT,GREY_TXT2),'Raised Issue':(P1_FILL,P1_TXT)}
+    _centered3={'Tier','Status','Confidence','Retest Required','#','Performed'}
+    _wrapped3={'Rule','Related Findings','Evidence Reviewed','Missing Evidence'}
+    for idx,m in enumerate(m_rows):
+        row_i = VM_HEADER_ROW+1+idx
+        row_bg = WHITE if idx%2==0 else 'FAFBFC'
+        row_values={
+            'Rule ID': m['rid'], 'Test Area': m['area'], 'Rule': m['rule'][:120], 'Tier': m['tier'],
+            'Status': m['status'], 'Confidence': m['conf_num'] if m['conf_num'] is not None else '—',
+            'Related Findings': m['refs'], 'Retest Required': m['retest'],
+            '#': idx+1, 'Performed': m['performed'], 'Evidence Reviewed': m['evidence'], 'Missing Evidence': m['missing'],
+        }
+        for name,val in row_values.items():
+            col = vm_idx[name]
             c=wsm.cell(row_i,col); c.value=val
-            c.font=Fn(sz=9,bold=(col in [3,8]))
-            c.fill=F(sbg if col==8 else WHITE)
-            c.alignment=A(h='center' if col in [2,6,7,9,13] else 'left',v='top',wrap=(col in [4,5,10,11,12]))
-            c.border=B()
-        set_row(wsm,row_i,26)
+            c.font=Fn(sz=9,bold=(name=='Rule ID'))
+            c.fill=F(row_bg)
+            c.alignment=A(h='center' if name in _centered3 else 'left', v='top', wrap=(name in _wrapped3))
+            c.border=B(col=PANEL_BORDER)
+        if isinstance(row_values['Confidence'], float):
+            wsm.cell(row_i, vm_idx['Confidence']).number_format='0%'
+
+        pf,pt = _status_badge.get(m['status'],(GREY_LIGHT,CHARCOAL))
+        badge(wsm,row_i,vm_idx['Status'],m['status'],pf,pt,sz=8,bold=False)
+        set_row(wsm,row_i,22)
+
+    _vm_last_row = VM_HEADER_ROW+len(m_rows)
+
+    for col in range(n_vm_visible+1, n_vm_cols):
+        wsm.column_dimensions[get_column_letter(col)].hidden = True
+
+    if len(m_rows) > 0:
+        _vm_table = Table(displayName="ValidationMatrixTable", ref=f'B{VM_HEADER_ROW}:{get_column_letter(n_vm_cols-1)}{_vm_last_row}')
+        _vm_table.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False,
+                                                    showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        wsm.add_table(_vm_table)
+
+        # Confidence — real data bar, not just a formatted percentage
+        conf_l = get_column_letter(vm_idx['Confidence'])
+        conf_rng = f'{conf_l}{VM_HEADER_ROW+1}:{conf_l}{_vm_last_row}'
+        wsm.conditional_formatting.add(conf_rng,
+            DataBarRule(start_type='num', start_value=0, end_type='num', end_value=1,
+                        color=MID_BLUE, showValue=True, minLength=None, maxLength=None))
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5C — ASSUMPTION REGISTER (B7) — assumption provenance template
