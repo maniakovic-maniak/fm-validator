@@ -16,6 +16,8 @@
 // heavy OFFSET use, some reported cells may be consumed dynamically. Findings
 // are therefore framed as "not referenced by any static formula reference".
 
+const { findNearbyLabel } = require('./cell-label');
+
 const COL_RE = /^[A-Z]{1,3}$/;
 
 function colToNum(col) {
@@ -168,23 +170,9 @@ function detectRedundantInputs(workbook) {
           // purpose is "every listed input must be linked, removed or
           // relabelled"; silently dropping some past an arbitrary limit
           // would leave real findings invisible to the client.
-          // Nearby label — try left first (most common convention), then
-          // right (some models, including at least one real one we've
-          // seen, put the descriptive text to the right of a numbering
-          // column instead).
-          let label = '';
-          for (let lc = colNum - 1; lc >= Math.max(1, colNum - 8); lc--) {
-            const lv = row.getCell(lc).value;
-            const txt = lv == null ? '' : (typeof lv === 'object' ? (lv.richText ? lv.richText.map(t => t.text).join('') : (lv.text || '')) : String(lv));
-            if (txt && isNaN(Number(txt))) { label = txt.slice(0, 60); break; }
-          }
-          if (!label) {
-            for (let lc = colNum + 1; lc <= colNum + 8; lc++) {
-              const lv = row.getCell(lc).value;
-              const txt = lv == null ? '' : (typeof lv === 'object' ? (lv.richText ? lv.richText.map(t => t.text).join('') : (lv.text || '')) : String(lv));
-              if (txt && isNaN(Number(txt))) { label = txt.slice(0, 60); break; }
-            }
-          }
+          // Nearby label — see cell-label.js for the search order (left,
+          // then right) and why both directions matter.
+          const label = findNearbyLabel(row, colNum).slice(0, 60);
           redundant.push({ sheet: sheetName, cell: cell.address, value: v, label, _col: colNum, _row: rowNum });
         }
       });
@@ -198,24 +186,50 @@ function detectRedundantInputs(workbook) {
   // outright rather than merely flag with lower confidence. Verified
   // against a real client model where an unlabelled "1,2,3...11" list-index
   // column was otherwise flagged 33 times.
+  // Exclude row-index RUNS — a run of 3+ consecutive integers (0,1,2,...
+  // or 1,2,3,...) in CONSECUTIVE ROWS within one column is a human-readable
+  // list number, not a modeling assumption. Real assumptions (rates,
+  // prices, capacities) essentially never happen to form a perfect
+  // arithmetic sequence from a low starting point; this pattern is
+  // specific enough to exclude outright rather than merely flag with
+  // lower confidence.
+  //
+  // Detected per RUN, not per whole column: a single column can contain
+  // multiple separate lists that each restart at 1 (verified against a
+  // real client model — three sections in one column, each numbered
+  // 1-11 with gaps between them). Requiring the entire column to form one
+  // unbroken sequence missed this real case entirely; checking maximal
+  // contiguous sub-runs (adjacent rows AND value+1 each step) instead
+  // correctly excludes each list independently.
   const byColumn = new Map();
   for (const item of redundant) {
     const key = item.sheet + '\u0001' + item._col;
     if (!byColumn.has(key)) byColumn.set(key, []);
     byColumn.get(key).push(item);
   }
-  const indexColumnKeys = new Set();
-  for (const [key, items] of byColumn) {
-    if (items.length < 3) continue;
+  const indexItemKeys = new Set();
+  const itemKey = item => item.sheet + '\u0001' + item.cell;
+  let excludedRunCount = 0;
+  for (const items of byColumn.values()) {
     const sorted = [...items].sort((a, b) => a._row - b._row);
-    const isSequential = sorted.every((item, i) =>
-      i === 0 || item.value === sorted[i - 1].value + 1
-    );
-    const startsLow = sorted[0].value === 0 || sorted[0].value === 1;
-    if (isSequential && startsLow) indexColumnKeys.add(key);
+    let runStart = 0;
+    for (let i = 1; i <= sorted.length; i++) {
+      const breaks = i === sorted.length ||
+        sorted[i]._row !== sorted[i - 1]._row + 1 ||
+        sorted[i].value !== sorted[i - 1].value + 1;
+      if (breaks) {
+        const runLen = i - runStart;
+        const startsLow = sorted[runStart].value === 0 || sorted[runStart].value === 1;
+        if (runLen >= 3 && startsLow) {
+          for (let j = runStart; j < i; j++) indexItemKeys.add(itemKey(sorted[j]));
+          excludedRunCount++;
+        }
+        runStart = i;
+      }
+    }
   }
-  const excludedAsIndex = redundant.filter(item => indexColumnKeys.has(item.sheet + '\u0001' + item._col)).length;
-  const filtered = redundant.filter(item => !indexColumnKeys.has(item.sheet + '\u0001' + item._col));
+  const excludedAsIndex = redundant.filter(item => indexItemKeys.has(itemKey(item))).length;
+  const filtered = redundant.filter(item => !indexItemKeys.has(itemKey(item)));
   filtered.forEach(item => { delete item._col; delete item._row; });
 
   const redundantCount = filtered.length;
@@ -227,13 +241,13 @@ function detectRedundantInputs(workbook) {
     redundantCount,
     redundant: filtered,
     offsetIndirectFormulas: offsetIndirect,
-    excludedIndexColumns: indexColumnKeys.size,
+    excludedIndexRuns: excludedRunCount,
     note: [
       offsetIndirect > 0
         ? `Static reference analysis — ${offsetIndirect.toLocaleString()} OFFSET/INDIRECT formulas exist in this model; inputs consumed only through dynamic windows may appear here despite being used. Treat listed cells as review candidates.`
         : 'Static reference analysis including ranges, whole columns/rows and defined names.',
       excludedAsIndex > 0
-        ? `${excludedAsIndex} cell(s) across ${indexColumnKeys.size} column(s) were excluded as row-numbering lists (a sequential 1,2,3... run), not modelling assumptions.`
+        ? `${excludedAsIndex} cell(s) across ${excludedRunCount} list(s) were excluded as row-numbering (a sequential 1,2,3... run in consecutive rows), not modelling assumptions.`
         : null
     ].filter(Boolean).join(' ')
   };

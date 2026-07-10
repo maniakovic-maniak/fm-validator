@@ -27,12 +27,18 @@ const FIN_STATEMENT_KEYWORDS = [
 // Sheets that are legitimately standalone by design — their whole purpose
 // is not to feed forward, so absence from the reachable set is expected,
 // not a defect. Extended from an initial list against a real client model
-// (Legend, VBA, Disclaimer and (backup) sheets were all real false
-// positives there).
+// (Legend, VBA and Disclaimer were real false positives there).
+//
+// NOTE: "backup"/duplicate-named sheets are deliberately NOT excluded here
+// — they were originally, but that was wrong. A backup sheet being
+// unreachable isn't the interesting finding; a backup sheet EXISTING at
+// all is a control risk regardless of whether it's linked (stale numbers,
+// ambiguity over which sheet is official) — see detectDuplicateSheets
+// below, a distinct check from orphan-sheet reachability.
 const EXCLUDE_KEYWORDS = [
   'cover', 'read me', 'readme', 'toc', 'table of contents', 'instruction',
   'check', 'audit', 'control', 'version', 'change log', 'changelog',
-  'glossary', 'note', 'legend', 'vba', 'backup', 'disclaimer'
+  'glossary', 'note', 'legend', 'vba', 'disclaimer'
 ];
 
 function isFinStatementSheet(name) {
@@ -142,4 +148,39 @@ function detectOrphanSheets(dependencyMap, allSheetNames, inputSheetNames = []) 
   };
 }
 
-module.exports = { detectOrphanSheets, isFinStatementSheet, FIN_STATEMENT_KEYWORDS };
+module.exports = { detectOrphanSheets, isFinStatementSheet, FIN_STATEMENT_KEYWORDS, detectDuplicateSheets };
+
+// ── Duplicate/backup sheet detection — a model CONTROL risk, distinct
+//    from linkage. A backup sheet is a problem whether or not it's
+//    linked: stale numbers, ambiguity over which sheet is "official",
+//    risk that investment committee materials pick up the wrong one. ──
+const DUPLICATE_SUFFIX_RE = /[\s_]*[\(\[-]?\s*(backup|copy|duplicate|old|archive|v\d+)\s*[\)\]]?\s*$/i;
+
+function detectDuplicateSheets(allSheetNames) {
+  const flagged = [];
+  const nameSet = new Set(allSheetNames.map(n => n.toLowerCase()));
+
+  for (const name of allSheetNames) {
+    const m = DUPLICATE_SUFFIX_RE.exec(name);
+    if (!m) continue;
+    const baseName = name.slice(0, m.index).trim().replace(/[\s_-]+$/, '');
+    const liveCounterpart = baseName && nameSet.has(baseName.toLowerCase()) ? baseName : null;
+    flagged.push({
+      sheet: name,
+      suffix: m[1],
+      liveCounterpart,
+      note: liveCounterpart
+        ? `This appears to be a ${m[1].toLowerCase()} of the live sheet "${liveCounterpart}" — confirm which is the official source and archive or remove the other.`
+        : `Sheet name suggests a ${m[1].toLowerCase()}/duplicate, but no sheet named "${baseName}" exists to confirm which is live — review manually.`
+    });
+  }
+
+  return {
+    applicable: true,
+    flaggedCount: flagged.length,
+    flagged,
+    note: flagged.length > 0
+      ? 'Sheet naming suggests duplicate/backup content. This is a control risk regardless of whether the sheet is linked into the model — stale numbers and ambiguity over which sheet is official are the risk, not just disconnection.'
+      : 'No sheet names suggest duplicate or backup content.'
+  };
+}

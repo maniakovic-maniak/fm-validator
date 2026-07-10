@@ -17,6 +17,8 @@ const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
 const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
+const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
+const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill }                        = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
@@ -199,6 +201,16 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   // beyond the standard run. Off by default; set ENABLE_FORMULA_DEEPDIVE=true
   // (or pass formulaDeepDive:true in the request body, for server.js) to enable.
   const wantsDeepDive = process.env.ENABLE_FORMULA_DEEPDIVE === 'true' || (req.body && req.body.formulaDeepDive === true);
+  // Wave 1 reasonableness checks — deterministic, always on (unlike
+  // Formula Deep Dive these are cheap and don't need an opt-in gate).
+  const reasonableness = (() => { try { return {
+    waccOverride: checkWaccOverride(parsed._raw),
+    terminalValue: checkTerminalValueConcentration(parsed._raw),
+    outputs: checkOutputReasonableness(parsed._raw)
+  }; } catch (e) { console.error('   \u26a0\ufe0f  Reasonableness checks failed:', e.message);
+    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false} }; } })();
+  const duplicateSheets = (() => { try { return detectDuplicateSheets(parsed.sheetNames); }
+    catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
   const formulaDeepDive = wantsDeepDive
     ? await (async () => { try { return await runFormulaDeepDive(parsed, tier0, {}); }
         catch (e) { console.error('   \u26a0\ufe0f  Formula Deep Dive failed:', e.message); return { applicable:false, note:e.message, reviewed:0, findings:[] }; } })()
@@ -349,6 +361,62 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       urgency: 'Before next reliance', confidence: 85
     });
   }
+      if (reasonableness.waccOverride.applicable && reasonableness.waccOverride.mismatch) {
+        const w = reasonableness.waccOverride;
+        allFlagged.push({
+          id: 'T0-RSN-001', label: 'Calculated WACC differs from the applied discount rate',
+          severity: 'high', status: 'fail', sheet: w.calculatedLocation.split('!')[0], cell: w.calculatedLocation.split('!')[1],
+          category: 'Reasonableness', condition: w.note, reason: w.note,
+          corrective_action: 'Document the rationale for the override explicitly next to the applied rate, or confirm the override was unintentional.',
+          workstream: 'Valuation', issue_type: 'WACC override',
+          model_risk: 'A silent override can mislead a reader into thinking the valuation is based on the calculated cost of capital when it is not.',
+          key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Discount rate override not documented',
+          escalation_flag: false, urgency: 'Before external circulation', confidence: 90
+        });
+      }
+      if (reasonableness.terminalValue.applicable && reasonableness.terminalValue.flagged) {
+        const t = reasonableness.terminalValue;
+        allFlagged.push({
+          id: 'T0-RSN-002', label: `Terminal value represents ${(t.concentrationPct*100).toFixed(0)}% of total project NPV`,
+          severity: 'high', status: 'fail', sheet: t.terminalValueLocation.split('!')[0], cell: t.terminalValueLocation.split('!')[1],
+          category: 'Reasonableness', condition: t.note, reason: t.note,
+          corrective_action: 'Sensitise the valuation to exit multiple compression and delayed exit timing; show what proportion of return is operating performance versus assumed exit.',
+          workstream: 'Valuation', issue_type: 'Terminal value concentration',
+          model_risk: 'A high proportion of total return depending on an assumed future exit, rather than demonstrated operating performance, is a higher-risk return profile than the headline NPV alone conveys.',
+          key_output_impact: 'Yes', method: 'automated', needs_retest: false, root_cause: 'High reliance on terminal value',
+          escalation_flag: false, urgency: 'Before external circulation', confidence: 85
+        });
+      }
+      if (reasonableness.outputs.applicable && reasonableness.outputs.flaggedCount > 0) {
+        const flaggedMetrics = reasonableness.outputs.results.filter(r => r.flagged);
+        const summary = flaggedMetrics.map(r => `${r.metric} = ${r.unit==='percent' ? (r.value*100).toFixed(1)+'%' : r.value.toFixed(1)+'x'}`).join(', ');
+        allFlagged.push({
+          id: 'T0-RSN-003', label: `${flaggedMetrics.length} output metric(s) warrant explicit commercial-reasonableness challenge`,
+          severity: 'high', status: 'fail', sheet: flaggedMetrics[0].location.split('!')[0], cell: flaggedMetrics[0].location.split('!')[1],
+          category: 'Reasonableness',
+          condition: `${summary}. ${reasonableness.outputs.note}`,
+          reason: `Flagged: ${summary}`,
+          corrective_action: 'Benchmark each flagged metric against comparable businesses; document why the model output is defensible or revise the underlying assumption.',
+          workstream: 'Valuation', issue_type: 'Output reasonableness',
+          model_risk: 'A model can be perfectly wired and still produce commercially unrealistic outputs — these are not automatically wrong, but require named, specific challenge before reliance.',
+          key_output_impact: 'Yes', method: 'automated', needs_retest: false, root_cause: 'Aggressive underlying assumptions',
+          escalation_flag: false, urgency: 'Before external circulation', confidence: 75
+        });
+      }
+      if (duplicateSheets.applicable && duplicateSheets.flaggedCount > 0) {
+        const names = duplicateSheets.flagged.map(f => f.sheet).join(', ');
+        allFlagged.push({
+          id: 'T0-DUP-001', label: `${duplicateSheets.flaggedCount} duplicate/backup sheet(s) detected`,
+          severity: 'medium', status: 'fail', sheet: duplicateSheets.flagged[0].sheet, cell: 'A1',
+          category: 'Model Control', condition: `${names}. ${duplicateSheets.note}`,
+          reason: `Duplicate/backup sheet(s): ${names}`,
+          corrective_action: 'For each: confirm which sheet is official, then archive or remove the other rather than leaving both in the live model.',
+          workstream: 'Structure', issue_type: 'Duplicate sheet',
+          model_risk: 'Backup sheets can contain stale outputs; investment committee materials can easily pick up the wrong dashboard or summary by mistake.',
+          key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Duplicate sheet not archived',
+          escalation_flag: false, urgency: 'Before next reliance', confidence: 90
+        });
+      }
     if (formulaDeepDive.findings && formulaDeepDive.findings.length) allFlagged.push(...formulaDeepDive.findings);
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
@@ -406,7 +474,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       redundantInputs,
       orphanSheets,
       namedRangeAudit,
-      formulaDeepDive
+      formulaDeepDive,
+      reasonableness,
+      duplicateSheets
     });
 
     let driveResult = null;

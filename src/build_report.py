@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FM Validator — _VALIDATED.xlsx Report Builder
-15-tab transaction-grade audit report
+16-tab transaction-grade audit report
 """
 import sys, json, os, re
 from datetime import datetime
@@ -127,6 +127,8 @@ def build_report(data_path, output_path):
     redundantIn  = d.get('redundantInputs',{'applicable':False,'totalInputs':0,'redundantCount':0,'redundant':[],'inputSheets':[]})
     orphanIn     = d.get('orphanSheets',{'applicable':False,'orphanSheets':[],'financialStatementSheets':[],'reachableSheets':[],'totalSheets':0})
     namedRangeIn = d.get('namedRangeAudit',{'applicable':False,'unused':[],'poorlyNamed':[],'broken':[],'totalNamedRanges':0})
+    reasonIn    = d.get('reasonableness',{'waccOverride':{'applicable':False},'terminalValue':{'applicable':False},'outputs':{'applicable':False,'results':[],'flaggedCount':0}})
+    dupIn       = d.get('duplicateSheets',{'applicable':False,'flaggedCount':0,'flagged':[]})
     formulaDeepIn = d.get('formulaDeepDive',{'applicable':False,'reviewed':0,'findings':[]})
 
     # Checklist rules for the Validation Matrix — loaded from config
@@ -424,6 +426,14 @@ def build_report(data_path, output_path):
           else f"All {namedRangeIn.get('totalNamedRanges',0)} named ranges are used and resolve correctly"
           if namedRangeIn.get('applicable',False)
           else 'Not applicable — no named ranges defined in this model')),
+        ('Commercial reasonableness',
+         (reasonIn.get('waccOverride',{}).get('mismatch',False) or reasonIn.get('terminalValue',{}).get('flagged',False)
+          or reasonIn.get('outputs',{}).get('flaggedCount',0)>0 or dupIn.get('flaggedCount',0)>0),
+         (f"{reasonIn.get('outputs',{}).get('flaggedCount',0)} output metric(s) and {dupIn.get('flaggedCount',0)} duplicate sheet(s) flagged for commercial-reasonableness review — this checks whether results are believable, not whether the model is wired correctly. See the Reasonableness Review tab."
+          if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
+          else 'No output metrics or duplicate sheets were found to warrant flagging'
+          if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
+          else 'Not applicable — no labelled output metrics found to test in this model')),
     ]
     merge(ws1,f'B{r}:I{r}','Review Area Status',bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(ws1,r,2,r,9,DARK_BLUE); set_row(ws1,r,20); r+=1
@@ -439,6 +449,7 @@ def build_report(data_path, output_path):
         'Input linkage':'Redundant Inputs','Debt / funding logic':'Issue Log',
         'Financial statements':'Issue Log','Tax logic':'Issue Log',
         'Statement linkage':'Sheet Linkage','Named range audit':'Named Range Audit',
+        'Commercial reasonableness':'Reasonableness Review',
     }
     _blocked_areas = {'Debt / funding logic','Financial statements'} if p1_open>0 else set()
     for area,has_issue,summary in status_areas:
@@ -456,6 +467,8 @@ def build_report(data_path, output_path):
         elif area=='Statement linkage' and not orphanIn.get('applicable',False):
             status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
         elif area=='Named range audit' and not namedRangeIn.get('applicable',False):
+            status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
+        elif area=='Commercial reasonableness' and not (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False)):
             status_txt='Not Started'; sf,st=(GREY_LIGHT,GREY_TXT2)
         else:
             status_txt='Completed'; sf,st=(OK_FILL,OK_TXT)
@@ -510,7 +523,7 @@ def build_report(data_path, output_path):
     set_row(ws1,r,10); r+=1
 
     # ── Navigation row ───────────────────────────────────────────────────────
-    _nav=['Issue Log','Formula Risk Review','Redundant Inputs','Sheet Linkage','Named Range Audit','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
+    _nav=['Issue Log','Reasonableness Review','Formula Risk Review','Redundant Inputs','Sheet Linkage','Named Range Audit','Scope and Reliance','Validation Matrix','Remediation','Assumption Register']
     for i,tab in enumerate(_nav):
         col=2+(i%8)
         row_offset=i//8
@@ -649,6 +662,15 @@ def build_report(data_path, output_path):
     _fdd_performed = formulaDeepIn.get('applicable', False)
     _fdd_summary = (f"Individually reviewed the {formulaDeepIn.get('reviewed',0)} highest-complexity formulas in this model (Tier 0 F-score ranked), not sampled — a targeted, not exhaustive, set. {len(formulaDeepIn.get('findings',[]))} finding(s) resulted."
                      if _fdd_performed else 'Best-effort via Tier 0 only')
+    _reason_performed = reasonIn.get('outputs',{}).get('applicable',False) or reasonIn.get('waccOverride',{}).get('applicable',False)
+    _reason_flagged = (reasonIn.get('outputs',{}).get('flaggedCount',0)
+                        + (1 if reasonIn.get('waccOverride',{}).get('mismatch') else 0)
+                        + (1 if reasonIn.get('terminalValue',{}).get('flagged') else 0)
+                        + dupIn.get('flaggedCount',0))
+    _reason_summary = (
+        f"Tested WACC-vs-applied-rate consistency, terminal value concentration, {len(reasonIn.get('outputs',{}).get('results',[]))} output metric(s) against disclosed rule-of-thumb thresholds, and duplicate/backup sheet naming. {_reason_flagged} item(s) flagged for review. This tests whether stated results are plausible against documented triggers — it is not verified against live external market data, and does not test for missing line items (see Commercial omission testing below)."
+        if _reason_performed else 'No labelled output metrics (EBITDA margin, IRR, exit multiple etc.) were found in this model to test.'
+    )
     _exclusions=[
         ('Formula text inspection', 'Performed' if _fdd_performed else 'Partial',
          _fdd_summary,
@@ -658,7 +680,10 @@ def build_report(data_path, output_path):
          (f"The {formulaDeepIn.get('reviewed',0)} highest-risk formulas received individual review this run — not full coverage of every cell, but not merely pattern-based either."
           if _fdd_performed else 'Formula logic inspection requires formula text access'),
          'None for the reviewed set — engage a manual reviewer for full coverage beyond the targeted set' if _fdd_performed else 'Engage manual reviewer or provide formula export'),
-        ('Commercial omission testing','Not performed','Requires challenger model and commercial judgment','Commission a challenger-model review'),
+        ('Assumption and output reasonableness', 'Performed (targeted)' if _reason_performed else 'Not performed',
+         _reason_summary,
+         'None for the tested metrics — extend threshold coverage or add domain-specific benchmarks if deeper testing is wanted' if _reason_performed else 'Label key output metrics clearly in the model so they can be located and tested'),
+        ('Commercial omission testing','Not performed','Different question to output reasonableness above: this is about line items missing from the model entirely (a cost category, a risk, a required schedule) that a domain expert would expect to see — not whether the stated figures are plausible. Requires a challenger model and commercial judgment.','Commission a challenger-model review'),
         ('VBA and macro audit','Not performed','This review reads formula cells directly; it does not execute or trace VBA/macro code, so any calculation performed inside a macro is invisible to it, however well the macro itself is written.','Provide macro source for manual review'),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
@@ -1813,6 +1838,107 @@ def build_report(data_path, output_path):
 
 
     # ════════════════════════════════════════════════════════════════════════
+    # TAB — REASONABLENESS REVIEW (Wave 1)
+    # ════════════════════════════════════════════════════════════════════════
+    wrr=wb.create_sheet('Reasonableness Review'); wrr.sheet_view.showGridLines=False
+    for i,w in enumerate([3,24,18,18,18,34,3],1): set_col(wrr,i,w)
+    r_rr=1
+
+    merge(wrr,f'B{r_rr}:F{r_rr}','ASSUMPTIONS AND COMMERCIAL REASONABLENESS REVIEW',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+    fill_range(wrr,r_rr,2,r_rr,6,DARK_BLUE); set_row(wrr,r_rr,26); r_rr+=1
+    merge(wrr,f'B{r_rr}:F{r_rr}',
+          'Every other tab in this report answers "is the model wired correctly?" This tab asks a different question: are the results commercially believable? A model can be perfectly linked and still produce unrealistic outputs. Nothing here proves an assumption is wrong — each item is a specific, named reason to challenge it before relying on the result.',
+          sz=8,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+    set_row(wrr,r_rr,32); r_rr+=1
+    set_row(wrr,r_rr,8); r_rr+=1
+
+    _wacc = reasonIn.get('waccOverride',{'applicable':False})
+    _tv   = reasonIn.get('terminalValue',{'applicable':False})
+    _out  = reasonIn.get('outputs',{'applicable':False,'results':[]})
+    _dup  = dupIn
+
+    # ── Summary cards ─────────────────────────────────────────────────
+    _cards=[
+        ('WACC Override', 'Yes' if _wacc.get('mismatch') else 'No' if _wacc.get('applicable') else 'N/A', 2,2),
+        ('Terminal Value % of NPV', f"{_tv.get('concentrationPct',0)*100:.0f}%" if _tv.get('applicable') else 'N/A', 3,3),
+        ('Flagged Outputs', _out.get('flaggedCount',0) if _out.get('applicable') else 'N/A', 4,4),
+        ('Duplicate Sheets', _dup.get('flaggedCount',0) if _dup.get('applicable') else 'N/A', 5,5),
+    ]
+    for label,val,c1,c2 in _cards:
+        col_l=get_column_letter(c1)
+        merge(wrr,f'{col_l}{r_rr}:{get_column_letter(c2)}{r_rr}',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        merge(wrr,f'{col_l}{r_rr+1}:{get_column_letter(c2)}{r_rr+1}',val,bold=True,sz=16,
+              col=(P2_TXT if (val=='Yes' or (isinstance(val,int) and val>0)) else CHARCOAL),bg=PANEL_GREY,h='center')
+        for rr in (r_rr,r_rr+1):
+            for cc in range(c1,c2+1): wrr.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wrr,r_rr,14); set_row(wrr,r_rr+1,24); r_rr+=3
+
+    def section_header(row,title):
+        merge(wrr,f'B{row}:F{row}',title,bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
+        fill_range(wrr,row,2,row,6,DARK_BLUE); set_row(wrr,row,20)
+        return row+1
+
+    # ── WACC Override ─────────────────────────────────────────────────
+    r_rr = section_header(r_rr,'WACC OVERRIDE')
+    merge(wrr,f'B{r_rr}:F{r_rr}', _wacc.get('note','Not applicable — no calculated WACC cell was found.'),
+          sz=9,col=(P2_TXT if _wacc.get('mismatch') else CHARCOAL),bg=(P2_FILL if _wacc.get('mismatch') else WHITE),wrap=True)
+    for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wrr,r_rr,32); r_rr+=1
+    set_row(wrr,r_rr,10); r_rr+=1
+
+    # ── Terminal Value Concentration ────────────────────────────────────
+    r_rr = section_header(r_rr,'TERMINAL VALUE CONCENTRATION')
+    merge(wrr,f'B{r_rr}:F{r_rr}', _tv.get('note','Not applicable — could not locate both a Terminal Value and total NPV figure.'),
+          sz=9,col=(P2_TXT if _tv.get('flagged') else CHARCOAL),bg=(P2_FILL if _tv.get('flagged') else WHITE),wrap=True)
+    for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wrr,r_rr,32); r_rr+=1
+    set_row(wrr,r_rr,10); r_rr+=1
+
+    # ── Output Reasonableness ───────────────────────────────────────────
+    r_rr = section_header(r_rr,'OUTPUT REASONABLENESS')
+    if _out.get('applicable') and _out.get('results'):
+        for label,c1,c2 in [('Metric',2,2),('Value',3,3),('Review Trigger',4,4),('Status',5,5),('Rationale',6,6)]:
+            cell(wrr,f'{get_column_letter(c1)}{r_rr}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+        set_row(wrr,r_rr,16); r_rr+=1
+        for res in _out['results']:
+            _unit = res.get('unit','percent')
+            disp_val = f"{res['value']*100:.1f}%" if _unit=='percent' else f"{res['value']:.1f}x"
+            disp_thr = f"{res['threshold']*100:.0f}%" if _unit=='percent' else f"{res['threshold']:.1f}x"
+            wrr.cell(r_rr,2).value=res['metric']; wrr.cell(r_rr,2).font=Fn(sz=9,bold=True,col=CHARCOAL); wrr.cell(r_rr,2).fill=F(WHITE)
+            wrr.cell(r_rr,3).value=disp_val; wrr.cell(r_rr,3).font=Fn(sz=9,col=CHARCOAL); wrr.cell(r_rr,3).fill=F(WHITE); wrr.cell(r_rr,3).alignment=A(h='center')
+            wrr.cell(r_rr,4).value=f'>= {disp_thr}'; wrr.cell(r_rr,4).font=Fn(sz=9,col=GREY_TXT2); wrr.cell(r_rr,4).fill=F(WHITE); wrr.cell(r_rr,4).alignment=A(h='center')
+            badge(wrr,r_rr,5,'Review' if res['flagged'] else 'OK', P2_FILL if res['flagged'] else OK_FILL, P2_TXT if res['flagged'] else OK_TXT, sz=8, bold=False)
+            wrr.cell(r_rr,6).value=res['rationale']; wrr.cell(r_rr,6).font=Fn(sz=8,col=GREY_TXT2); wrr.cell(r_rr,6).fill=F(WHITE); wrr.cell(r_rr,6).alignment=A(wrap=True)
+            for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
+            set_row(wrr,r_rr,34); r_rr+=1
+        merge(wrr,f'B{r_rr}:F{r_rr}', _out.get('note',''), sz=8,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wrr,r_rr,26); r_rr+=1
+    else:
+        merge(wrr,f'B{r_rr}:F{r_rr}','Not applicable — no labelled output metrics were found to test.',sz=9,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wrr,r_rr,20); r_rr+=1
+    set_row(wrr,r_rr,10); r_rr+=1
+
+    # ── Duplicate / Backup Sheets ───────────────────────────────────────
+    r_rr = section_header(r_rr,'DUPLICATE / BACKUP SHEETS')
+    if _dup.get('applicable') and _dup.get('flagged'):
+        for label,c1,c2 in [('Sheet',2,3),('Likely Live Counterpart',4,4),('Note',5,6)]:
+            if c2>c1: merge(wrr,f'{get_column_letter(c1)}{r_rr}:{get_column_letter(c2)}{r_rr}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+            else: cell(wrr,f'{get_column_letter(c1)}{r_rr}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+        set_row(wrr,r_rr,16); r_rr+=1
+        for f in _dup['flagged']:
+            wrr.merge_cells(f'B{r_rr}:C{r_rr}')
+            wrr.cell(r_rr,2).value=f['sheet']; wrr.cell(r_rr,2).font=Fn(sz=9,bold=True,col=CHARCOAL); wrr.cell(r_rr,2).fill=F(WHITE)
+            wrr.cell(r_rr,4).value=f.get('liveCounterpart') or '—'; wrr.cell(r_rr,4).font=Fn(sz=9,col=GREY_TXT2); wrr.cell(r_rr,4).fill=F(WHITE); wrr.cell(r_rr,4).alignment=A(h='center')
+            wrr.merge_cells(f'E{r_rr}:F{r_rr}')
+            wrr.cell(r_rr,5).value=f['note']; wrr.cell(r_rr,5).font=Fn(sz=8,col=GREY_TXT2); wrr.cell(r_rr,5).fill=F(WHITE); wrr.cell(r_rr,5).alignment=A(wrap=True)
+            for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
+            set_row(wrr,r_rr,28); r_rr+=1
+    else:
+        merge(wrr,f'B{r_rr}:F{r_rr}','No duplicate or backup sheets detected by name.',sz=9,col=OK_TXT,bg=OK_FILL,wrap=True)
+        set_row(wrr,r_rr,20); r_rr+=1
+
+
+    # ════════════════════════════════════════════════════════════════════════
     ws7=wb.create_sheet('Sheet Dependency'); ws7.sheet_view.showGridLines=False
     sd_headers=['','Target Sheet','Precedent Sheet','Link Count','Direction','Dependency Risk',
                 'Reviewer Action','Reviewer Note','Priority Count','Avg F-Score','Max F-Score','']
@@ -2032,7 +2158,7 @@ def build_report(data_path, output_path):
         'Audit Output': DARK_BLUE, 'Read Me': '5B7C99', 'Scope and Reliance': '5B7C99',
         'Issue Log': AMBER, 'Remediation': AMBER,
         'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
-        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID, 'Named Range Audit': GREY_MID,
+        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID, 'Named Range Audit': GREY_MID, 'Reasonableness Review': AMBER,
         'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
         'F-Score Rules': GREY_MID, 'Pipeline Audit Trail': GREY_MID,
     }
@@ -2047,7 +2173,7 @@ def build_report(data_path, output_path):
     ws1.print_area = f'B1:I{_audit_output_last_row}'
 
     wb.save(output_path)
-    return {'status':'ok','tabs':15,'findings':len(findings)}
+    return {'status':'ok','tabs':16,'findings':len(findings)}
 
 if __name__=='__main__':
     if len(sys.argv)<3:
