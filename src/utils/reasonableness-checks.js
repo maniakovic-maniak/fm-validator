@@ -4,8 +4,8 @@
 // correctly?" (formula integrity, linkage integrity). These checks
 // answer a genuinely different question: "are the results commercially
 // believable?" A model can pass every wiring check and still tell an
-// investment committee a single-venue asset will produce a 53% EBITDA
-// margin — these checks exist to surface that, honestly and with
+// investment committee an implausible margin, IRR, or exit multiple is
+// achievable — these checks exist to surface that, honestly and with
 // disclosed limits, not to pretend to be a certified external benchmark.
 //
 // Every threshold used here is a documented, disclosed rule-of-thumb
@@ -107,13 +107,13 @@ function checkTerminalValueConcentration(workbook, threshold = 0.6) {
 //    so a reader can judge whether it's the right bar for this asset. ──
 const OUTPUT_CHECKS = [
   { terms: ['ebitda margin'], label: 'EBITDA margin', threshold: 0.40, direction: 'above', unit: 'percent',
-    rationale: 'a hospitality/venue-style business sustaining above 40% EBITDA margin is unusual and warrants explicit benchmark support' },
+    rationale: 'sustaining an EBITDA margin above 40% is high relative to typical operating businesses and warrants explicit benchmark support against comparable operations' },
   { terms: ['unlevered irr', 'project irr'], label: 'Unlevered IRR', threshold: 0.20, direction: 'above', unit: 'percent',
-    rationale: 'an unlevered IRR above 20% for a single-asset venue development is high and warrants challenge on the underlying assumptions driving it' },
+    rationale: 'an unlevered IRR above 20% is high and warrants challenge on the underlying assumptions driving it — growth, margin, and exit timing in particular' },
   { terms: ['equity irr'], label: 'Equity IRR', threshold: 0.25, direction: 'above', unit: 'percent',
     rationale: 'an equity IRR above 25% warrants explicit review of the leverage and operating assumptions producing it' },
   { terms: ['exit multiple'], label: 'Exit multiple', threshold: 6.0, direction: 'above', unit: 'multiple',
-    rationale: 'a single-asset, illiquid entertainment/venue business trading above 6.0x EBITDA at exit needs explicit comparable-transaction support, not just a stated assumption' },
+    rationale: 'an exit multiple above 6.0x EBITDA needs explicit comparable-transaction support, not just a stated assumption — a single-asset or illiquid position deserves particular scrutiny here' },
   // "Yield on cost" alone is ambiguous in this model between a stabilised
   // figure and an exit-year figure — prefer the exit-specific label
   // explicitly rather than let a bare match pick whichever is found first.
