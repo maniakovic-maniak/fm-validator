@@ -239,6 +239,42 @@ async function runVbaReview(filePath) {
     });
   }
 
+  // ── Calculation-integrity findings — VBA that manipulates or substitutes
+  // for Excel's own calculation engine (manual iterative solving, forced
+  // recalculation, calc-mode changes, copy-as-values freezing). Not caught
+  // by oletools' own scanner, which is tuned for malware triage, not
+  // model-calculation-integrity concerns — this is a custom category
+  // specific to this audit tool's actual mission. Confirmed real-world
+  // relevance via Hidden Gem's Master_Solve_Fast() macro, a manual
+  // iterative debt-sizing solver that no prior category could flag. ──
+  const calcIntegrityByModule = {};
+  for (const mod of extraction.modules) {
+    const calc = mod.findings.filter(f => f.category === 'CalcIntegrity');
+    if (calc.length > 0) calcIntegrityByModule[mod.name] = calc;
+  }
+  if (Object.keys(calcIntegrityByModule).length > 0) {
+    const summary = Object.entries(calcIntegrityByModule)
+      .map(([mod, items]) => `${mod}: ${[...new Set(items.map(i => i.keyword))].join(', ')}`)
+      .join(' | ');
+    findings.push({
+      id: 'T0-VBA-005',
+      label: "Macro source manipulates or substitutes for Excel's own calculation engine",
+      severity: 'high',
+      status: 'fail',
+      sheet: 'N/A',
+      cell: 'A1',
+      category: 'Governance',
+      condition: `VBA code that manipulates Excel's calculation behaviour was found: ${summary}. This may include changing calculation mode, forcing recalculation, configuring iterative-calculation settings, or manually copying values to freeze a result — techniques often used to work around circular references or control when and how the model recalculates.`,
+      reason: `Calculation-integrity pattern(s) found: ${summary}`,
+      corrective_action: "Confirm exactly what this macro does to the model's calculation — particularly whether values that look like live formula outputs are actually static, macro-pasted results, and whether the model calculates correctly if this macro is never run.",
+      workstream: 'Governance', issue_type: 'Calculation integrity',
+      model_risk: "A model whose real calculation depends on a macro, not just its formulas, can look complete and consistent while actually depending on manual, macro-driven steps a reader can't see just by opening the file — anyone who opens it without running the macro may be looking at stale or partially-calculated results.",
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Macro-driven calculation control or manual iterative solving present',
+      escalation_flag: true, urgency: 'Before next reliance', confidence: 90
+    });
+  }
+
   return {
     applicable: true,
     hasVbaProject: true,

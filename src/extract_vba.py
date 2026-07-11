@@ -32,7 +32,7 @@ Output JSON shape:
       "sourceCode": "...",            # full extracted source, boilerplate included
       "findings": [
         {
-          "category": "AutoExec" | "Suspicious" | "IOC" | "ObfuscatedString",
+          "category": "AutoExec" | "Suspicious" | "IOC" | "ObfuscatedString" | "CalcIntegrity",
           "keyword": "Shell",
           "description": "May run an executable file or a system command"
         }, ...
@@ -44,6 +44,7 @@ Output JSON shape:
     "suspiciousCount": int,
     "iocCount": int,
     "obfuscatedStringCount": int,
+    "calcIntegrityCount": int,
     "modulesWithFindings": int
   },
   "error": null | "human-readable message"
@@ -52,7 +53,91 @@ Output JSON shape:
 
 import sys
 import json
+import re
 import argparse
+
+# Patterns that manipulate or substitute for Excel's own calculation engine
+# — calculation-mode changes, forced recalculation, iterative-calc settings,
+# and the "copy value, paste as value" technique used to manually break
+# circular references. oletools' own VBA_Scanner has no concept of this
+# category at all — it's tuned for malware triage (Shell/CreateObject/
+# network calls), not model-calculation-integrity concerns, which is
+# squarely this audit tool's actual purpose. Confirmed real-world relevance:
+# found via Hidden Gem's Master_Solve_Fast() macro, a manual iterative
+# debt-sizing solver that Wave 2's original categories had no way to flag.
+#
+# Each pattern is reported once per module even if it matches many times —
+# this is a "worth a human look" signal, not a per-occurrence count, same
+# convention as every other category here.
+_CALC_INTEGRITY_PATTERNS = [
+    (re.compile(r'Application\.Calculation\s*=', re.IGNORECASE),
+     'Application.Calculation (mode change)',
+     "Explicitly sets Excel's calculation mode (e.g. to Manual) from VBA, meaning the "
+     "workbook may not recalculate the way a reader opening it normally would expect."),
+    (re.compile(r'Application\.Iteration\s*=\s*True', re.IGNORECASE),
+     'Application.Iteration = True',
+     "Enables Excel's native iterative calculation from VBA — usually a sign the model "
+     "has circular references being solved iteratively rather than avoided by design."),
+    (re.compile(r'Application\.(MaxIterations|MaxChange)\s*=', re.IGNORECASE),
+     'Application.MaxIterations / MaxChange',
+     "Configures the tolerance or iteration count for Excel's iterative calculation from "
+     "VBA — worth confirming these match what the model's formulas actually need to "
+     "converge correctly."),
+    (re.compile(r'Application\.CalculateFull(Rebuild)?\b', re.IGNORECASE),
+     'Application.CalculateFull(Rebuild)',
+     "Forces a full recalculation of the workbook from VBA — a heavier, more deliberate "
+     "operation than Excel's normal recalculation."),
+    (re.compile(r'\.Calculate\b', re.IGNORECASE),
+     'Explicit .Calculate call',
+     "Triggers recalculation of a specific sheet or range from VBA rather than relying "
+     "on Excel's normal automatic recalculation."),
+    (re.compile(r'\b\w[\w.]*\.Value2?\s*=\s*\w[\w.]*\.Value2?\b', re.IGNORECASE),
+     'Copy-as-values pattern',
+     "Copies a calculated value and pastes it back as a static value from VBA — a common "
+     "technique for manually breaking circular references or freezing a result, meaning "
+     "the destination cell no longer reflects a live formula."),
+]
+
+
+def _strip_line_comments(source_code):
+    """Strip VBA end-of-line comments (an unquoted ' to end of line) before
+    the calc-integrity regex scan, so commented-out code doesn't trigger a
+    false match — e.g. a disabled "' Application.Calculate" line describing
+    what *could* be uncommented shouldn't read the same as it actually
+    running. VBA strings use double quotes only (with "" as an escaped
+    quote, no single-quote string syntax), so any ' outside a "..." run is
+    unambiguously a comment start. Deliberately not applied to oletools'
+    own VBA_Scanner input above — that's already-tested behaviour and
+    changing what it sees is a separate, riskier change than tightening
+    this new scan alone."""
+    out_lines = []
+    for line in source_code.split('\n'):
+        in_string = False
+        cut = len(line)
+        for i, ch in enumerate(line):
+            if ch == '"':
+                in_string = not in_string
+            elif ch == "'" and not in_string:
+                cut = i
+                break
+        out_lines.append(line[:cut])
+    return '\n'.join(out_lines)
+
+
+def _scan_calc_integrity(source_code):
+    """Scan for VBA patterns that manipulate or substitute for Excel's
+    calculation engine. Independent of oletools' VBA_Scanner entirely —
+    this is a custom pattern set, not something oletools categorises."""
+    findings = []
+    code_no_comments = _strip_line_comments(source_code)
+    for pattern, keyword, description in _CALC_INTEGRITY_PATTERNS:
+        if pattern.search(code_no_comments):
+            findings.append({
+                'category': 'CalcIntegrity',
+                'keyword': keyword,
+                'description': description,
+            })
+    return findings
 
 # Map oletools' internal kw_type strings to our stable category names.
 # oletools has used a couple of different labels across versions for the
@@ -136,6 +221,12 @@ def _scan_module(source_code):
             'keyword': '',
             'description': f'VBA_Scanner could not fully analyse this module: {e}',
         })
+
+    # Calculation-integrity scan runs independently of oletools' own
+    # scanner (and independently of whether it succeeded above) — it's a
+    # separate, custom pattern set, not something oletools categorises.
+    findings.extend(_scan_calc_integrity(scannable_code))
+
     return findings
 
 
@@ -176,6 +267,7 @@ def extract_vba(file_path, include_attributes=False):
             'suspiciousCount': 0,
             'iocCount': 0,
             'obfuscatedStringCount': 0,
+            'calcIntegrityCount': 0,
             'modulesWithFindings': 0,
         },
         'error': None,
@@ -252,6 +344,8 @@ def extract_vba(file_path, include_attributes=False):
                     result['summary']['iocCount'] += 1
                 elif f['category'] == 'ObfuscatedString':
                     result['summary']['obfuscatedStringCount'] += 1
+                elif f['category'] == 'CalcIntegrity':
+                    result['summary']['calcIntegrityCount'] += 1
 
         result['moduleCount'] = len(result['modules'])
 
