@@ -118,11 +118,10 @@ def _scan_module(source_code):
     normalise the results into our finding shape. Isolated per-module so a
     scanner error on one module (e.g. a malformed obfuscation payload)
     doesn't take down the whole extraction."""
-    from oletools.olevba import VBA_Scanner
-
     findings = []
     scannable_code = _strip_boilerplate_attributes(source_code)
     try:
+        from oletools.olevba import VBA_Scanner
         scanner = VBA_Scanner(scannable_code)
         for kw_type, keyword, description in scanner.scan(include_decoded_strings=True):
             category = _CATEGORY_MAP.get(kw_type, kw_type)
@@ -166,8 +165,6 @@ def _is_encrypted(file_path):
 
 
 def extract_vba(file_path, include_attributes=False):
-    from oletools.olevba import VBA_Parser
-
     result = {
         'hasVbaProject': False,
         'encrypted': False,
@@ -183,6 +180,22 @@ def extract_vba(file_path, include_attributes=False):
         },
         'error': None,
     }
+
+    # Import here, inside a try/except, not at module scope or as an
+    # unguarded function-top import. A missing or broken oletools install
+    # (wrong Python environment, package genuinely absent, incompatible
+    # version) must degrade to a normal JSON error response like every
+    # other failure path in this script — not crash with an unhandled
+    # ImportError/ModuleNotFoundError and a raw traceback on stderr, which
+    # bypasses every bit of error handling below and defeats the entire
+    # "always emit valid JSON" contract this script exists to guarantee.
+    try:
+        from oletools.olevba import VBA_Parser
+    except Exception as e:
+        result['error'] = (f'Could not import oletools ({type(e).__name__}: {e}). '
+                            f'Is oletools installed for this Python interpreter? '
+                            f'Try: pip3 install oletools msoffcrypto-tool')
+        return result
 
     if _is_encrypted(file_path):
         result['encrypted'] = True
