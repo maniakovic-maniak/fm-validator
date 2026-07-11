@@ -17,6 +17,7 @@ const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
 const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
+const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
@@ -219,6 +220,30 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
   const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
   const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
+    // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
+    // Deep Dive) but genuinely async since it spawns a Python subprocess,
+    // so it needs its own await rather than fitting the synchronous IIFE
+    // pattern the checks above use. Uses the multer upload path directly
+    // (filePath), same file parseExcel() just read.
+    const vbaReview = await (async () => { try { return await runVbaReview(filePath); }
+      catch (e) { console.error('   \u26a0\ufe0f  VBA/macro review failed:', e.message); return { applicable:false, note:e.message, hasVbaProject:false, findings:[] }; } })();
+
+    // Encrypted workbook — stop here rather than continue into Familiarise/
+    // Tier 1/Tier 2 against a file we've already confirmed we can't fully
+    // see into for macro content. A report produced past this point would
+    // implicitly claim coverage it doesn't have.
+    if (vbaReview.blockValidation) {
+      console.log('   ❌ Workbook is password-encrypted — stopping validation');
+      logAuditEvent({ event: 'vba_encrypted_blocked', originalName, ip: clientIp, runLog: runLog.filename });
+      runLog.stop();
+      return res.json({
+        status: 'vba-encrypted',
+        message: 'This workbook is password-encrypted, so its VBA/macro content cannot be verified without the password. Please provide an unencrypted copy, or the password, to proceed with validation.',
+        modelType: null,
+        modelIndustry: null,
+        stats: { total: 0, autoFixed: 0, needsAttention: 0, score: 0 }
+      });
+    }
 
     // Check for potential formula caching issue — if many formulas but few errors
     // detected, warn that cached values may be missing
@@ -280,6 +305,14 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         allFlagged.push(f);
       }
     }
+    // Captured here, before any T0-* deterministic findings (redundant
+    // inputs, orphan sheets, named ranges, reasonableness, duplicate
+    // sheets, VBA review, etc.) get pushed below. Those checks aren't part
+    // of the 141-rule checklist, so they must not dilute the score/
+    // completion % computed against it later — allFlagged.length keeps
+    // growing below, but this snapshot stays fixed at the true
+    // checklist-rule count.
+    const checklistFindingCount = allFlagged.length;
   // Redundant-input finding (V11 §2) — deterministic; flows through the register.
   if (redundantInputs.applicable && redundantInputs.redundantCount > 0) {
     const _locs = redundantInputs.redundant.slice(0, 15).map(x => `${x.sheet}!${x.cell}`).join(', ');
@@ -418,6 +451,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         });
       }
     if (formulaDeepDive.findings && formulaDeepDive.findings.length) allFlagged.push(...formulaDeepDive.findings);
+    if (vbaReview.findings && vbaReview.findings.length) allFlagged.push(...vbaReview.findings);
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
     const ruleResults = [...t1Results, ...t2Results].map(r => ({
@@ -444,12 +478,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: '~' + Math.round(JSON.stringify(modelSummary).length/3) + ' tokens', result: '✓ Pass', duration: '', notes: `${modelType} · ${modelSummary.currency || ''} · ${modelSummary.periodicity || ''}` },
       { timestamp: new Date().toISOString().substr(11,8), step: 'Classify', action: 'Model type derived', artifact: domain.file + ' loaded', result: '✓ Pass', duration: '', notes: `Model type: ${modelType}` },
       { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Results.filter(r=>r.status==='pass').length} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: t1Failures.map(f=>f.id).join(', ') || 'All passed' },
-      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `Claude — 3 batches · 129 rules`, artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Results.filter(r=>r.status==='pass').length} pass · ${t2Failures.length} issues` }
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `Claude — 3 batches · 129 rules`, artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Results.filter(r=>r.status==='pass').length} pass · ${t2Failures.length} issues` },
+      { timestamp: new Date().toISOString().substr(11,8), step: 'VBA Review', action: 'Macro extraction + risk scan', artifact: vbaReview.hasVbaProject ? `${vbaReview.moduleCount} module(s)` : 'No VBA project', result: !vbaReview.applicable ? '⚠ Skipped' : (vbaReview.findings && vbaReview.findings.length ? '⚠ Issues' : '✓ Pass'), duration: '', notes: vbaReview.note || '' }
     ];
 
     // Extract overall assessment from Tier 2 meta
     const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
-    const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
+    const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - checklistFindingCount) / 141) * 100);
     const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
     const overallAssessment = 'audit_complete';
     const igReadiness = auditCompletion;
@@ -476,7 +511,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       namedRangeAudit,
       formulaDeepDive,
       reasonableness,
-      duplicateSheets
+      duplicateSheets,
+      vbaReview
     });
 
     let driveResult = null;
@@ -510,7 +546,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const totalChecked = c.tier1.length + c.tier2.length;
     const score        = totalChecked === 0
       ? 100
-      : Math.round(((totalChecked - allFlagged.length) / totalChecked) * 100);
+      : Math.round(((totalChecked - checklistFindingCount) / totalChecked) * 100);
     // KPMG risk rating
     const p1Count = allFlagged.filter(f => f.priority === 'P1' || f.severity === 'fatal' || f.severity === 'critical').length;
     const p2Count = allFlagged.filter(f => f.priority === 'P2' || f.severity === 'high').length;

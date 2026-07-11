@@ -4,6 +4,7 @@ const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
 const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
+const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
@@ -67,6 +68,23 @@ async function run() {
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
   const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
   const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
+  // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
+  // Deep Dive) but genuinely async since it spawns a Python subprocess, so
+  // it needs its own await rather than fitting the synchronous IIFE
+  // pattern the checks above use.
+  const vbaReview = await (async () => { try { return await runVbaReview(parsed._filePath); }
+    catch (e) { console.error('   \u26a0\ufe0f  VBA/macro review failed:', e.message); return { applicable:false, note:e.message, hasVbaProject:false, findings:[] }; } })();
+
+  // Encrypted workbook — stop here rather than continue into Familiarise/
+  // Tier 1/Tier 2 against a file we've already confirmed we can't fully
+  // see into for macro content.
+  if (vbaReview.blockValidation) {
+    console.log('❌ Workbook is password-encrypted — stopping validation');
+    console.log(`   ${vbaReview.note}`);
+    logAuditEvent({ event: 'vba_encrypted_blocked', originalName, source: 'cli' });
+    runLog.stop();
+    process.exit(1);
+  }
 
   // ── Step 2: Familiarise ────────────────────────────────────────────────────
   console.log('[1/6] Familiarising with the model...');
@@ -119,6 +137,13 @@ async function run() {
     const key = `${f.id}-${f.sheet || ""}`;
     if (!seenKeys.has(key)) { seenKeys.add(key); allFlagged.push(f); }
   }
+  // Captured here, before any T0-* deterministic findings (redundant inputs,
+  // orphan sheets, named ranges, reasonableness, duplicate sheets, VBA
+  // review, etc.) get pushed below. Those checks aren't part of the 141-rule
+  // checklist, so they must not dilute the score/completion % computed
+  // against it later — allFlagged.length keeps growing below, but this
+  // snapshot stays fixed at the true checklist-rule count.
+  const checklistFindingCount = allFlagged.length;
   // Redundant-input finding (V11 §2) — deterministic; flows through the register.
   if (redundantInputs.applicable && redundantInputs.redundantCount > 0) {
     const _locs = redundantInputs.redundant.slice(0, 15).map(x => `${x.sheet}!${x.cell}`).join(', ');
@@ -257,6 +282,7 @@ async function run() {
       });
     }
   if (formulaDeepDive.findings && formulaDeepDive.findings.length) allFlagged.push(...formulaDeepDive.findings);
+  if (vbaReview.findings && vbaReview.findings.length) allFlagged.push(...vbaReview.findings);
   console.log(`   ℹ️  ${allFlagged.length} items flagged`);
   // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
   const ruleResults = [...t1Results, ...t2Results].map(r => ({
@@ -282,10 +308,11 @@ async function run() {
     { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 0', action: 'Formula scan', artifact: 'All sheets', result: '✓ Pass', duration: tier0.elapsed || '', notes: `${tier0.stats.uniqueFormulaCount} unique formulas` },
     { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: originalName, result: '✓ Pass', duration: '', notes: modelType },
     { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Pass} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: '' },
-    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: '3 batches · 129 rules', artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` }
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: '3 batches · 129 rules', artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` },
+    { timestamp: new Date().toISOString().substr(11,8), step: 'VBA Review', action: 'Macro extraction + risk scan', artifact: vbaReview.hasVbaProject ? `${vbaReview.moduleCount} module(s)` : 'No VBA project', result: !vbaReview.applicable ? '⚠ Skipped' : (vbaReview.findings && vbaReview.findings.length ? '⚠ Issues' : '✓ Pass'), duration: '', notes: vbaReview.note || '' }
   ];
   const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
-  const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - allFlagged.length) / 141) * 100);
+  const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - checklistFindingCount) / 141) * 100);
   const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
   const overallAssessment = 'audit_complete';
   const igReadiness = auditCompletion;
@@ -312,7 +339,8 @@ async function run() {
     namedRangeAudit,
     formulaDeepDive,
     reasonableness,
-    duplicateSheets
+    duplicateSheets,
+    vbaReview
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────
