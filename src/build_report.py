@@ -130,6 +130,7 @@ def build_report(data_path, output_path):
     reasonIn    = d.get('reasonableness',{'waccOverride':{'applicable':False},'terminalValue':{'applicable':False},'outputs':{'applicable':False,'results':[],'flaggedCount':0}})
     dupIn       = d.get('duplicateSheets',{'applicable':False,'flaggedCount':0,'flagged':[]})
     formulaDeepIn = d.get('formulaDeepDive',{'applicable':False,'reviewed':0,'findings':[]})
+    vbaIn        = d.get('vbaReview',{'applicable':False,'hasVbaProject':False,'moduleCount':0,'note':'','findings':[]})
 
     # Checklist rules for the Validation Matrix — loaded from config
     checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
@@ -671,6 +672,25 @@ def build_report(data_path, output_path):
         f"Tested WACC-vs-applied-rate consistency, terminal value concentration, {len(reasonIn.get('outputs',{}).get('results',[]))} output metric(s) against disclosed rule-of-thumb thresholds, and duplicate/backup sheet naming. {_reason_flagged} item(s) flagged for review. This tests whether stated results are plausible against documented triggers — it is not verified against live external market data, and does not test for missing line items (see Commercial omission testing below)."
         if _reason_performed else 'No labelled output metrics (EBITDA margin, IRR, exit multiple etc.) were found in this model to test.'
     )
+    _vba_ran = vbaIn.get('applicable', False)
+    _vba_has_project = vbaIn.get('hasVbaProject', False)
+    _vba_module_count = vbaIn.get('moduleCount', 0)
+    _vba_finding_count = len(vbaIn.get('findings', []))
+    if not _vba_ran:
+        _vba_status = 'Not performed'
+        _vba_summary = (f"VBA/macro extraction did not complete for this run: {vbaIn.get('note','no reason recorded')}"
+                         if vbaIn.get('note') else
+                         'This review reads formula cells directly; it does not execute or trace VBA/macro code, so any calculation performed inside a macro is invisible to it, however well the macro itself is written.')
+        _vba_next = 'Re-run once the underlying issue is resolved, or provide macro source for manual review'
+    elif not _vba_has_project:
+        _vba_status = 'Performed'
+        _vba_summary = 'No VBA project was found in this workbook — there is no macro code for this limitation to apply to.'
+        _vba_next = 'None'
+    else:
+        _vba_status = 'Performed (targeted)'
+        _vba_summary = (f"Extracted and risk-scanned {_vba_module_count} VBA module(s); {_vba_finding_count} finding(s) raised (see Issue Log). "
+                         f"This reads and pattern-scans macro source — it does not execute the macros, so any behaviour that only manifests at runtime is still outside this review's scope.")
+        _vba_next = 'None for the scanned modules — engage a manual VBA code reviewer if runtime behaviour needs verification'
     _exclusions=[
         ('Formula text inspection', 'Performed' if _fdd_performed else 'Partial',
          _fdd_summary,
@@ -684,7 +704,7 @@ def build_report(data_path, output_path):
          _reason_summary,
          'None for the tested metrics — extend threshold coverage or add domain-specific benchmarks if deeper testing is wanted' if _reason_performed else 'Label key output metrics clearly in the model so they can be located and tested'),
         ('Commercial omission testing','Not performed','Different question to output reasonableness above: this is about line items missing from the model entirely (a cost category, a risk, a required schedule) that a domain expert would expect to see — not whether the stated figures are plausible. Requires a challenger model and commercial judgment.','Commission a challenger-model review'),
-        ('VBA and macro audit','Not performed','This review reads formula cells directly; it does not execute or trace VBA/macro code, so any calculation performed inside a macro is invisible to it, however well the macro itself is written.','Provide macro source for manual review'),
+        ('VBA and macro audit',_vba_status,_vba_summary,_vba_next),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
     _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT)}
