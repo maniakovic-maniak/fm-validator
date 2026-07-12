@@ -2,7 +2,7 @@
 // Builds a 9-tab _VALIDATED.xlsx using the Python report builder.
 // Passes all pipeline data as JSON to the Python script.
 
-const { execSync } = require('child_process');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
 
@@ -80,11 +80,33 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
   fs.writeFileSync(dataPath, JSON.stringify(payload, null, 2));
 
   try {
-    // Call Python report builder
-    const result = execSync(
-      `python3 "${PYTHON_SCRIPT}" "${dataPath}" "${reportPath}"`,
-      { timeout: 120000, encoding: 'utf8' }
-    );
+    // Call Python report builder. execFile (not execSync) so this doesn't
+    // block Node's event loop for the whole subprocess duration —
+    // execSync fully suspends the event loop until the child process
+    // exits, so no timer or cron callback can run in the meantime,
+    // however long the Python subprocess takes. Confirmed in production:
+    // a node-cron warning ("missed execution... possible blocking IO or
+    // high CPU") and six identical back-to-back retention-sweep re-fires
+    // immediately after a pipeline run completed, consistent with the
+    // event loop having been frozen for an extended stretch and every
+    // timer whose scheduled time had already passed firing in a burst
+    // the moment it was freed. execFile also passes arguments directly
+    // instead of building a shell command string, removing a latent
+    // shell-interpolation surface as a side benefit.
+    const result = await new Promise((resolve, reject) => {
+      execFile(
+        'python3',
+        [PYTHON_SCRIPT, dataPath, reportPath],
+        { timeout: 120000, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          if (err) {
+            if (stderr) err.message += `\nstderr: ${stderr}`;
+            return reject(err);
+          }
+          resolve(stdout);
+        }
+      );
+    });
     const parsed = JSON.parse(result.trim());
     console.log(`   ✅ Report file built: ${path.basename(reportPath)} (${parsed.tabs} tabs, ${parsed.findings} findings)`);
   } catch (err) {
