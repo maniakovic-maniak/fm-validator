@@ -122,6 +122,20 @@ async function familiariseModel(parsed) {
     finalPayload = { ...payload, sheets: trimmed };
   }
 
+  // max_tokens scales with sheet count. The response's sheet_map field
+  // requires one entry (up to 200 chars, per the prompt's own instructions)
+  // per sheet in the workbook, so a fixed cap eventually truncates on any
+  // large-enough model — a fixed 4000 was never touched by the July 2026
+  // fix that raised Tier 2's batches to 128,000, and was confirmed truncating
+  // on two real production runs: a 26-sheet file intermittently (succeeded
+  // on retry), a 31-sheet file on both attempts, falling through to the
+  // 'generic/unknown' fallback below — visible in the final client-facing
+  // report as "generic — unknown | unknown · unknown", and starving Tier 2
+  // of keySheets for the rest of that run.
+  const sheetCount = parsed.sheetNames.length;
+  const familiariserMaxTokens = Math.min(32000, Math.max(12000, 4000 + sheetCount * 250));
+  console.log(`   Familiarisation max_tokens: ${familiariserMaxTokens} (${sheetCount} sheets)`);
+
   // Familiarisation drives the domain-skill choice — a parse failure here
   // silently degrades the ENTIRE run (mining model reviewed with the generic
   // skill). So: one retry on failure (LLM output varies; retries usually
@@ -135,7 +149,7 @@ async function familiariseModel(parsed) {
       if (attempt > 1) console.log(`   Retrying familiarisation (attempt ${attempt}/${MAX_ATTEMPTS})...`);
       const response = await client.messages.create({
         model: 'claude-sonnet-5',
-        max_tokens: 4000,
+        max_tokens: familiariserMaxTokens,
         system: FAMILIARISER_PROMPT,
         messages: [{
           role: 'user',
