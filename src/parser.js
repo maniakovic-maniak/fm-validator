@@ -17,12 +17,15 @@ async function downloadFile(fileId) {
 
   const dest = fs.createWriteStream(destPath);
   await new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn) => (arg) => { if (!settled) { settled = true; fn(arg); } };
+    dest.on('error', settle(reject));
     drive.files.get(
       { fileId, alt: 'media' },
       { responseType: 'stream' },
       (err, res) => {
-        if (err) return reject(err);
-        res.data.on('end', resolve).on('error', reject).pipe(dest);
+        if (err) return settle(reject)(err);
+        res.data.on('end', settle(resolve)).on('error', settle(reject)).pipe(dest);
       }
     );
   });

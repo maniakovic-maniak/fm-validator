@@ -165,13 +165,24 @@ function detectDuplicateSheets(allSheetNames) {
     if (!m) continue;
     const baseName = name.slice(0, m.index).trim().replace(/[\s_-]+$/, '');
     const liveCounterpart = baseName && nameSet.has(baseName.toLowerCase()) ? baseName : null;
+    let note;
+    if (liveCounterpart) {
+      note = `This appears to be a ${m[1].toLowerCase()} of the live sheet "${liveCounterpart}" — confirm which is the official source and archive or remove the other.`;
+    } else if (!baseName) {
+      // The whole sheet name IS the suffix (e.g. a sheet literally named
+      // "Copy", "Backup", "Old") — there's no base name left to check
+      // against, so the generic "no sheet named ''" message read as a
+      // broken string rather than a real finding. Confirmed via a real
+      // production run (Hidden Gem) that this case occurs in practice.
+      note = `Sheet is named exactly "${name}" with no distinguishing base name, so it's not possible to identify which sheet it might be a copy of. Rename it to something descriptive (e.g. what it's a copy of, or its actual purpose) and confirm whether it's still needed.`;
+    } else {
+      note = `Sheet name suggests a ${m[1].toLowerCase()}/duplicate, but no sheet named "${baseName}" exists to confirm which is live — review manually.`;
+    }
     flagged.push({
       sheet: name,
       suffix: m[1],
       liveCounterpart,
-      note: liveCounterpart
-        ? `This appears to be a ${m[1].toLowerCase()} of the live sheet "${liveCounterpart}" — confirm which is the official source and archive or remove the other.`
-        : `Sheet name suggests a ${m[1].toLowerCase()}/duplicate, but no sheet named "${baseName}" exists to confirm which is live — review manually.`
+      note,
     });
   }
 

@@ -8,6 +8,30 @@
 //   - Risk indicators (IFERROR, OFFSET, external links, hardcodes, #REF!)
 
 // ── F-Score rules (KPMG) ─────────────────────────────────────────────────────
+
+// Safe keyword match for sheet-name classification — short/ambiguous
+// keywords need a word boundary or they false-match inside unrelated
+// longer names (confirmed: 'Cons' matching 'Construction Timeline' on a
+// real production file, the same bug found and fixed in
+// validator-tier2.js and utils/sheet-linkage.js this session — note the
+// threshold here is deliberately wider (<=6, not <=3) because 'Cons' is
+// 4 characters and was confirmed to still slip through a narrower
+// threshold. Word-boundary matching costs nothing in recall for genuine
+// matches, since real sheet names naturally have word/space boundaries
+// around abbreviations (e.g. 'Debt Dashboard' still matches 'Debt'
+// correctly) — there's no reason to keep the threshold narrow.
+function sheetNameMatchesKeyword(sheetName, keyword) {
+  const kwLower = keyword.toLowerCase();
+  if (kwLower.length <= 6) {
+    const re = new RegExp('(?<![a-z0-9])' + kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])', 'i');
+    return re.test(sheetName);
+  }
+  return sheetName.toLowerCase().includes(kwLower);
+}
+function sheetNameMatchesAny(sheetName, keywords) {
+  return keywords.some(kw => sheetNameMatchesKeyword(sheetName, kw));
+}
+
 function scoreFormula(formula) {
   if (!formula || typeof formula !== 'string') return 0;
   let score = 0;
@@ -361,12 +385,11 @@ async function runTier0(parsed) {
       let direction = 'Normal';
       // Output/dashboard sheets feeding into calculation sheets = forward reference risk
       const outputSheets = ['Dashboard', 'Operational Dashboard', 'Graphs', 'Summary', 'Overview'];
-      const calcSheets   = ['IFS', 'AFS', 'Cons', 'Ops', 'Debt', 'D&T', 'Leases'];
-      if (outputSheets.some(s => precedent.toLowerCase().includes(s.toLowerCase())) &&
-          calcSheets.some(s => target.toLowerCase().includes(s.toLowerCase()))) {
+      const calcSheets   = ['IFS', 'AFS', 'Cons', 'Ops', 'Debt', 'D&T', 'Leases',
+                             'Balance Sheet', 'P&L', 'Cashflow', 'Cash Flow', 'Income Statement', 'Equity'];
+      if (sheetNameMatchesAny(precedent, outputSheets) && sheetNameMatchesAny(target, calcSheets)) {
         direction = 'Backward';
-      } else if (calcSheets.some(s => precedent.toLowerCase().includes(s.toLowerCase())) &&
-                 outputSheets.some(s => target.toLowerCase().includes(s.toLowerCase()))) {
+      } else if (sheetNameMatchesAny(precedent, calcSheets) && sheetNameMatchesAny(target, outputSheets)) {
         direction = 'Normal';
       }
 

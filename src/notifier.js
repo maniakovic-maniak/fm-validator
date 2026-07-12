@@ -18,7 +18,6 @@ async function sendNotification(outcome) {
     outputName,
     webViewLink,
     totalIssues,
-    autoFixed,
     needsAttention
   } = outcome;
 
@@ -28,9 +27,15 @@ async function sendNotification(outcome) {
     ? `✅ Validated — no issues: ${escHtml(originalName)}`
     : `⚠️  Validated — ${needsAttention} item${needsAttention > 1 ? 's' : ''} need attention: ${escHtml(originalName)}`;
 
+  // Wording matters here: this product never modifies the client's file —
+  // it only flags, attributes root causes, and proposes actions. Earlier
+  // copy said "auto-fixed", left over from a pre-v4 architecture that was
+  // deliberately abandoned. Client-facing text claiming automatic fixes
+  // that never actually happen is a real accuracy problem, not just stale
+  // wording — fixed to describe what the product actually does.
   const attentionBlock = needsAttention > 0
-    ? `<p style="color:#B45309"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} could not be auto-fixed and need your review.</strong><br>Open the Validation Report tab in the file for exact cell locations.</p>`
-    : `<p style="color:#27500A"><strong>✅ All issues were auto-fixed. No action required.</strong></p>`;
+    ? `<p style="color:#B45309"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} flagged for your review — nothing in your file has been changed.</strong><br>Open the Validation Report tab in the file for exact cell locations and suggested actions.</p>`
+    : `<p style="color:#27500A"><strong>✅ No issues were flagged. Your file has not been modified.</strong></p>`;
 
   let downloadUrl = webViewLink;
   const fileIdMatch = webViewLink && webViewLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
