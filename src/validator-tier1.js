@@ -2,6 +2,25 @@ const checklist = require('../config/checklist.json');
 const { resolveSheetName, resolveAny } = require('./utils/sheet-resolver');
 const { scanFormulaErrors } = require('./parser');
 
+// Safe keyword match for sheet-name checks — short/ambiguous keywords need
+// a word boundary or they false-match inside unrelated longer names.
+// Confirmed real: 'Cons' (from T1-002's sheets_known list) matching
+// 'Construction Timeline' on a real production file — the same bug found
+// and fixed in validator-tier0.js, validator-tier2.js, classifier.js, and
+// utils/sheet-linkage.js this session. This instance is more consequential
+// than the others: T1-002 is a fatal gate (minimum sheet structure
+// present), so a false match here could in principle let a genuinely
+// malformed or wrong file pass a check specifically designed to catch it,
+// rather than just contributing noise to one finding.
+function sheetNameMatchesKeyword(sheetName, keyword) {
+  const kwLower = keyword.toLowerCase();
+  if (kwLower.length <= 6) {
+    const re = new RegExp('(?<![a-z0-9])' + kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])', 'i');
+    return re.test(sheetName);
+  }
+  return sheetName.toLowerCase().includes(kwLower) || kwLower.includes(sheetName.toLowerCase());
+}
+
 function runTier1(parsed) {
   const results = [];
 
@@ -12,10 +31,7 @@ function runTier1(parsed) {
       const sheetNamesClean = parsed.sheetNames.map(n => n.trim());
       const known = rule.sheets_known || [];
       const matched = sheetNamesClean.filter(name =>
-        known.some(k =>
-          name.toLowerCase().includes(k.toLowerCase()) ||
-          k.toLowerCase().includes(name.toLowerCase())
-        )
+        known.some(k => sheetNameMatchesKeyword(name, k))
       );
       const minCount = rule.sheets_minimum_count || 2;
       const passed = matched.length >= minCount;
