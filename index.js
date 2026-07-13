@@ -229,6 +229,35 @@ async function run() {
       urgency: 'Before next reliance', confidence: 85
     });
   }
+  // ── Opaque/dynamic reference finding (A1, adapted from audit-xls) ────────
+  // INDIRECT() constructs a cell/sheet reference from a string at
+  // calculation time, so the actual target cannot be confirmed just by
+  // reading the formula — the closest deterministic, buildable proxy for
+  // audit-xls's own concern: "flag any cells where the formula references
+  // a different sheet without a sheet name." Split out from the combined
+  // OFFSET/INDIRECT complexity scoring in validator-tier0.js specifically
+  // so this can be its own named finding rather than silent noise inside
+  // a general "OFFSET" count. Confirmed real on a genuine production file
+  // (15 INDIRECT calls found on the Sunrise/KPMG model, previously
+  // invisible under a combined OFFSET count of 34).
+  if (tier0.stats && tier0.stats.totalIndirectCount > 0) {
+    const cells = (tier0.riskIndicators.indirectCells || []).slice(0, 8)
+      .map(c => `${c.sheet}!${c.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-INDIRECT-001',
+      label: `${tier0.stats.totalIndirectCount} formula cell(s) use INDIRECT() to construct a reference from a string`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${tier0.stats.totalIndirectCount} formula cell(s) use INDIRECT(), including: ${cells}${tier0.stats.totalIndirectCount > 8 ? ' and others' : ''}. Because the reference is built from a string at calculation time, the actual target cell or sheet cannot be confirmed just by reading the formula — this is a materially more opaque pattern than a normal cell reference for anyone tracing the model's logic.`,
+      reason: `${tier0.stats.totalIndirectCount} cell(s) use INDIRECT()`,
+      corrective_action: 'Confirm what each INDIRECT() call actually resolves to at runtime, and consider replacing it with a direct cell reference where the target does not genuinely need to be computed dynamically.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Opaque dynamic reference',
+      model_risk: 'A reference built from a string cannot be verified by reading the formula alone — if the string is ever wrong or the target is renamed/moved, the formula can silently point somewhere unintended without producing a visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'INDIRECT() used to construct a dynamic reference',
+      escalation_flag: false, urgency: 'Before next reliance', confidence: 100
+    });
+  }
     if (reasonableness.waccOverride.applicable && reasonableness.waccOverride.mismatch) {
       const w = reasonableness.waccOverride;
       allFlagged.push({

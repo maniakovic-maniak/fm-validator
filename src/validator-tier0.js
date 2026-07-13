@@ -231,6 +231,16 @@ async function runTier0(parsed) {
   const iferrorCells      = [];
   const offsetCells       = [];
   const refInFormulaCells = [];
+  // Split out from the combined OFFSET/INDIRECT tracking below: INDIRECT
+  // constructs a cell/sheet reference from a string at calculation time,
+  // meaning the actual target can't be confirmed by reading the formula —
+  // a materially different, more opaque risk than OFFSET (whose base
+  // reference is normally visible even though the offset is computed).
+  // Named explicitly in Anthropic's audit-xls skill: "flag any cells where
+  // the formula references a different sheet without a sheet name" — this
+  // is the closest deterministic, buildable proxy for that concern.
+  let totalIndirectCount = 0;
+  const indirectCells = [];
 
   // F-score distribution
   const fscoreDist = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
@@ -278,6 +288,13 @@ async function runTier0(parsed) {
             totalOffsetCount++;
             if (offsetCells.length < 20) {
               offsetCells.push({ sheet: sheetName, cell: cell.address });
+            }
+          }
+
+          if (/\bINDIRECT\s*\(/i.test(formula)) {
+            totalIndirectCount++;
+            if (indirectCells.length < 20) {
+              indirectCells.push({ sheet: sheetName, cell: cell.address, formula: formula.substring(0, 100) });
             }
           }
 
@@ -425,7 +442,7 @@ async function runTier0(parsed) {
 
   console.log(`   Tier 0 complete in ${elapsed}s:`);
   console.log(`   Formula cells: ${totalFormulaCells.toLocaleString()} | Unique formulas: ${uniqueFormulas.length}`);
-  console.log(`   IFERROR: ${totalIferrorCount.toLocaleString()} | OFFSET: ${totalOffsetCount.toLocaleString()} | External links: ${totalExternalLinks}`);
+  console.log(`   IFERROR: ${totalIferrorCount.toLocaleString()} | OFFSET: ${totalOffsetCount.toLocaleString()} | INDIRECT: ${totalIndirectCount.toLocaleString()} | External links: ${totalExternalLinks}`);
   console.log(`   F-score: ${fscoreDist.Low} Low · ${fscoreDist.Moderate} Moderate · ${fscoreDist.High} High · ${fscoreDist.Critical} Critical`);
   if (highCritCount > 0) {
     console.log(`   ⚠️  ${highCritCount} High/Critical complexity formula(s) found`);
@@ -443,6 +460,7 @@ async function runTier0(parsed) {
       totalValueCells,
       totalIferrorCount,
       totalOffsetCount,
+      totalIndirectCount,
       totalRefInFormula,
       totalExternalLinks,
       totalHardcodes,
@@ -463,6 +481,7 @@ async function runTier0(parsed) {
       externalLinkCells,
       iferrorCells,
       offsetCells,
+      indirectCells,
       refInFormulaCells
     },
     elapsed
@@ -474,7 +493,7 @@ function buildEmptyResult() {
     cellScoreIndex: {},
     stats: {
       totalFormulaCells: 0, totalValueCells: 0,
-      totalIferrorCount: 0, totalOffsetCount: 0,
+      totalIferrorCount: 0, totalOffsetCount: 0, totalIndirectCount: 0,
       totalRefInFormula: 0, totalExternalLinks: 0,
       totalHardcodes: 0, uniqueFormulaCount: 0,
       sheetCount: 0,
@@ -488,6 +507,7 @@ function buildEmptyResult() {
       externalLinkCells: [],
       iferrorCells: [],
       offsetCells: [],
+      indirectCells: [],
       refInFormulaCells: []
     },
     elapsed: '0.0'
