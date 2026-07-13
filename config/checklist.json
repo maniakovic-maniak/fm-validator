@@ -1206,5 +1206,89 @@
       "manual_only": false, "fixable": false,
       "fix_instruction": "Check for personal file paths, broken external links, missing source files, unsupported add-ins, and unexplained warnings. The model must open and run cleanly on any machine without the original author present."
     }
-  ]
+  {
+    "id": "T2-S10-090",
+    "section": "10.90",
+    "label": "Revenue on consolidated statements is linked to production volumes, not calculated independently",
+    "source_id": "skill-mining.md",
+    "source_section": "Common mining model failure patterns #1 (revenue not linked to Ops)",
+    "test": "revenue_linked_to_production",
+    "severity": "high",
+    "manual_only": false,
+    "fixable": false,
+    "fix_instruction": "Link the revenue calculation on the consolidated/financial statement sheet directly to the production volume and price assumptions on the operations sheet, so a change to either flows through automatically."
+  },
+  {
+    "id": "T2-S10-091",
+    "section": "10.91",
+    "label": "Capex reduces to a sustaining-only level after commissioning, rather than continuing at development-phase levels",
+    "source_id": "skill-mining.md",
+    "source_section": "Common mining model failure patterns #2 (capex after commissioning)",
+    "test": "capex_ceases_post_commissioning",
+    "severity": "medium",
+    "manual_only": false,
+    "fixable": false,
+    "fix_instruction": "Confirm capex drops to a lower, clearly-labelled sustaining-capex level once the project moves from development/construction into steady-state operations, rather than continuing at development-phase magnitude."
+  },
+  {
+    "id": "T2-S10-092",
+    "section": "10.92",
+    "label": "Depreciation reduces taxable income (tax shield modelled), rather than tax being calculated independently of depreciation",
+    "source_id": "skill-mining.md",
+    "source_section": "Common mining model failure patterns #3 (tax shield not modelled)",
+    "test": "tax_shield_modelled",
+    "severity": "high",
+    "manual_only": false,
+    "fixable": false,
+    "fix_instruction": "Confirm the tax expense calculation deducts depreciation/amortisation from taxable income before applying the tax rate, rather than being calculated from a pre-depreciation profit figure."
+  },
+  {
+    "id": "T2-S10-093",
+    "section": "10.93",
+    "label": "Debt repayments are sculpted to a target DSCR/cover ratio, or the use of equal instalments instead is explicitly justified",
+    "source_id": "skill-mining.md",
+    "source_section": "Common mining model failure patterns #4 (debt sculpting not applied)",
+    "test": "debt_sculpted_to_dscr",
+    "severity": "medium",
+    "manual_only": false,
+    "fixable": false,
+    "fix_instruction": "If debt repayments are equal instalments rather than sculpted to a target DSCR, confirm this is a deliberate, disclosed choice rather than an oversight — equal instalments are not automatically wrong, but understate early-period equity returns relative to a sculpted profile and should be a stated assumption, not a default."
+  },
+  {
+    "id": "T2-S10-094",
+    "section": "10.94",
+    "label": "A mine rehabilitation/closure cost provision exists and accrues over the mine life",
+    "source_id": "skill-mining.md",
+    "source_section": "Common mining model failure patterns #5 (closure costs missing)",
+    "test": "rehabilitation_provision_funded",
+    "severity": "high",
+    "manual_only": false,
+    "fixable": false,
+    "fix_instruction": "Add a rehabilitation/closure cost provision that accrues over the mine life and is reflected in cash flow and the balance sheet, rather than being omitted or appearing only as an unfunded lump sum in the final year."
+  },
+  {
+    "id": "T2-S10-095",
+    "section": "10.95",
+    "label": "Royalties are classified as an operating cost, not embedded in the tax line",
+    "source_id": "skill-mining.md",
+    "source_section": "Common mining model failure patterns #6 (royalties in wrong line)",
+    "test": "royalties_correct_treatment",
+    "severity": "medium",
+    "manual_only": false,
+    "fixable": false,
+    "fix_instruction": "Move royalty expense to operating costs (above EBITDA) if it is currently combined with the income tax line — royalties and income tax are calculated on different bases and distort both EBITDA and the effective tax rate if merged."
+  },
+  {
+    "id": "T2-S10-096",
+    "section": "10.96",
+    "label": "FX conversion is applied consistently to all USD/AUD (or equivalent) line items, not selectively",
+    "source_id": "skill-mining.md",
+    "source_section": "Common mining model failure patterns #7 (FX applied inconsistently)",
+    "test": "fx_applied_consistently",
+    "severity": "high",
+    "manual_only": false,
+    "fixable": false,
+    "fix_instruction": "Confirm every revenue and cost line stated in a foreign currency has FX conversion applied via the same referenced FX rate — a mix of converted and unconverted lines in the same currency-mixed model materially distorts EBITDA and downstream metrics."
+  }
+]
 }

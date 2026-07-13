@@ -257,3 +257,85 @@ Mining models are typically large and complex. Specific checks:
 - No personal file paths to geological data or resource estimates
 - Wash plant circuit assumptions documented (not locked in a black-box macro)
 - Reserve schedule tab present and linked to production plan
+
+---
+
+## Domain-specific graded tests (T2-S10-090 to T2-S10-096)
+
+These formalise the "Common mining model failure patterns" documented
+above into the same mandatory pass/fail/uncertain discipline every other
+rule in the checklist carries — previously these were prose guidance you
+might apply; they are now graded tests that must return a result like any
+other rule in this batch. Use the evidence-sufficiency framework in
+skill-generic.md ("Evidence pack assessment") to calibrate confidence: value-
+level correlation (e.g. production volumes and revenue both changing
+together across periods) supports a real but lower-confidence result;
+seeing the actual formula reference (via Formula Deep Dive or Tier 0's
+workbookStats-flagged risky formulas, where available) supports a
+higher-confidence one.
+
+### test: revenue_linked_to_production
+Check whether revenue on the consolidated/financial statement sheet moves
+in line with production volumes on the operations sheet across periods —
+if production ramps up or down in a given period but revenue doesn't
+change proportionally (after accounting for price assumption changes),
+that's evidence revenue may be calculated independently rather than
+linked. If you can see the actual revenue formula (via Formula Deep Dive)
+referencing an Ops-sheet volume cell, that's direct, high-confidence
+evidence either way. If only period-value correlation is visible, treat
+as directional evidence and calibrate confidence accordingly — do not
+treat a single period's coincidental match or mismatch as conclusive.
+
+### test: capex_ceases_post_commissioning
+Identify the commissioning/steady-state transition point (from the Timing
+sheet or equivalent). Compare capex levels in the periods immediately
+before and after. A capex level in steady-state operations that matches
+or nearly matches the development-phase level, with no clearly-labelled
+"sustaining capex" distinction, is the failure pattern. A genuine step-
+down (even if sustaining capex is still substantial) is expected and
+should pass.
+
+### test: tax_shield_modelled
+Check whether the tax expense calculation appears to deduct depreciation/
+amortisation before applying the tax rate — compare taxable income (if
+visible) against pre-tax accounting profit, or check whether the D&T
+sheet's depreciation figure is referenced in the tax calculation at all.
+If depreciation exists on D&T but tax appears calculated directly from
+EBIT/pre-depreciation profit with no visible link, flag it — this
+overstates tax and understates NPAT/cash flow.
+
+### test: debt_sculpted_to_dscr
+Check whether debt repayments vary period to period (sculpted, typically
+targeting a stated minimum DSCR) or are equal instalments throughout
+(an annuity-style repayment). Equal instalments are not automatically
+wrong — but if repayments are flat and there is no stated rationale
+(e.g. a covenant or lender requirement for equal instalments specifically),
+flag this as an undocumented assumption rather than a confirmed error:
+the commercial effect (understating early equity returns relative to a
+sculpted profile) is real regardless of whether the choice was
+deliberate.
+
+### test: rehabilitation_provision_funded
+Look for a rehabilitation or mine closure provision on the balance sheet
+(AFS) and confirm it accrues over the mine life rather than appearing
+only as a lump sum in the final year with no build-up. A provision that
+is zero or immaterial across a mine life of 10+ years, given the
+project has material physical assets, is the failure pattern per Mining
+Pattern 6.
+
+### test: royalties_correct_treatment
+Locate the royalty expense line and confirm it sits within operating
+costs (feeding into EBITDA), not combined with or embedded in the income
+tax line. Royalties calculated as a percentage of revenue but classified
+as a tax-line item (rather than an operating cost) is the specific
+failure pattern — this distorts both EBITDA and the effective tax rate
+reconciliation.
+
+### test: fx_applied_consistently
+Where the model states more than one currency is involved (e.g. USD
+pricing, AUD costs), check whether FX conversion is applied to ALL
+foreign-currency line items via a consistent, referenced FX rate — not
+just some of them. A model with some lines correctly converted and others
+left in their original currency without conversion is the failure
+pattern, and is often hard to spot because both currencies use the same
+number formatting.
