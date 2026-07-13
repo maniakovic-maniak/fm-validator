@@ -1205,7 +1205,7 @@
       "test": "handover_ready", "severity": "critical",
       "manual_only": false, "fixable": false,
       "fix_instruction": "Check for personal file paths, broken external links, missing source files, unsupported add-ins, and unexplained warnings. The model must open and run cleanly on any machine without the original author present."
-    }
+    },
   {
     "id": "T2-S10-090",
     "section": "10.90",
