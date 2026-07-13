@@ -105,8 +105,18 @@ function runTier1(parsed) {
 
     // ── No negative values (e.g. PP&E, Cash) ────────────────────────────────
     if (rule.type === 'no_negative_values') {
-      const resolvedNegSheet = resolveSheetName(rule.sheet, parsed.sheetNames);
-      const sheetName = resolvedNegSheet || rule.sheet;
+      // rule.sheet may be a single string (legacy) or an array of
+      // candidate aliases, tried in order — same reasoning as
+      // sheet_exists_flexible and the deep-accounting fix in
+      // validator-tier2.js: a single hardcoded name like 'AFS' doesn't
+      // generalise beyond mining-style models.
+      const sheetCandidates = Array.isArray(rule.sheet) ? rule.sheet : [rule.sheet];
+      let resolvedNegSheet = null;
+      for (const candidate of sheetCandidates) {
+        resolvedNegSheet = resolveSheetName(candidate, parsed.sheetNames);
+        if (resolvedNegSheet) break;
+      }
+      const sheetName = resolvedNegSheet || sheetCandidates[0];
       const keyword = (rule.keyword || '').toLowerCase();
       const ws = parsed._raw && parsed._type === 'exceljs' && resolvedNegSheet
         ? parsed._raw.getWorksheet(resolvedNegSheet)
@@ -114,10 +124,12 @@ function runTier1(parsed) {
 
       if (ws) {
         let found = false;
+        let anyRowMatchedKeyword = false;
         ws.eachRow({ includeEmpty: false }, (row) => {
           const firstCell = row.getCell(1);
           const label = firstCell.text ? firstCell.text.toLowerCase() : '';
           if (keyword && !label.includes(keyword)) return;
+          anyRowMatchedKeyword = true;
           row.eachCell({ includeEmpty: false }, (cell, colNum) => {
             if (colNum === 1) return;
             const val = typeof cell.value === 'number' ? cell.value
@@ -137,20 +149,41 @@ function runTier1(parsed) {
             }
           });
         });
-        if (!found) {
+        if (!found && anyRowMatchedKeyword) {
           results.push({
             id: rule.id, label: rule.label, severity: rule.severity || 'high',
             status: 'pass', fixable: false,
             fix_instruction: rule.fix_instruction, reason: null
           });
+        } else if (!found && !anyRowMatchedKeyword) {
+          // The sheet resolved, but no row's first-column label contained
+          // the target keyword — this check found nothing to evaluate,
+          // which is a materially different (and much weaker) outcome
+          // than "checked every matching row and found no negative
+          // values". Reporting 'pass' here has exactly the same
+          // false-assurance problem as the unresolved-sheet case above.
+          results.push({
+            id: rule.id, label: rule.label, severity: rule.severity || 'high',
+            status: 'uncertain', fixable: false,
+            fix_instruction: rule.fix_instruction,
+            reason: `Found "${sheetName}" but no row labelled with "${rule.keyword}" in column A — this check requires manual verification.`
+          });
         }
       } else {
-        // Sheet not found — pass silently (not all models have AFS)
+        // None of the candidate sheet names could be found — this check
+        // genuinely could not run, and that is a materially different
+        // outcome from "checked, found nothing negative". Reporting
+        // 'pass' here would tell a reader this fatal-severity gate was
+        // verified clean when in fact zero verification occurred —
+        // confirmed as a live, false-assurance issue on a real report.
+        // 'uncertain' preserves the original intent (don't hard-reject a
+        // valid model just because it uses different sheet naming)
+        // without fabricating a check that never happened.
         results.push({
           id: rule.id, label: rule.label, severity: rule.severity || 'high',
-          status: 'pass', fixable: false,
+          status: 'uncertain', fixable: false,
           fix_instruction: rule.fix_instruction,
-          reason: null
+          reason: `Could not locate a sheet matching any of: ${sheetCandidates.join(', ')}. This check requires manual verification that no negative ${rule.keyword || 'value'} exists anywhere it should not.`
         });
       }
     }
