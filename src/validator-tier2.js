@@ -2,7 +2,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const fs = require('fs');
 const path = require('path');
 const checklist = require('../config/checklist.json');
-const { resolveAny } = require('./utils/sheet-resolver');
+const { resolveSheetName } = require('./utils/sheet-resolver');
 const { extractJson } = require('./utils/json-extract');
 const { dumpFailedResponse } = require('./utils/dump-failed-response');
 
@@ -132,7 +132,18 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     rules: batchRules,
     data: dataSubset,
     workbookStats: tier0Context.stats || {},
-    riskSummary: tier0Context.risks || {}
+    riskSummary: tier0Context.risks || {},
+    // Wave 1 (named-range audit) and Wave 2 (VBA/macro review) both run
+    // deterministically before Tier 2 and already answer several test
+    // questions skill.md's own test instructions previously described as
+    // permanently unanswerable from Mode A data (no_circular_references,
+    // calculation_settings, macros_documented, named_ranges_current,
+    // no_hardcodes) — this data existed but was never threaded into the
+    // Tier 2 payload. Kept deliberately compact (counts and names, not
+    // full finding objects) to stay within the conciseness budget the
+    // rest of this payload already follows.
+    namedRangeSummary: tier0Context.namedRangeSummary || null,
+    vbaSummary: tier0Context.vbaSummary || null
   };
 
   const estimatedTokens = Math.round(JSON.stringify(payload).length / 3);
@@ -210,42 +221,10 @@ function splitIntoBatches(rules) {
   return { batch1, batch2, batch3 };
 }
 
-async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null } = {}) {
-  // Fallback key-sheet categories used when the caller doesn't supply
-  // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
-  // itself failed to complete for this run. Previously a flat, mining-style
-  // abbreviation list matched via raw exact-key lookup (parsed.sheets[name])
-  // with NO fuzzy resolution at all, so it silently matched almost nothing
-  // on a non-mining model — confirmed on a real production file where only
-  // 'Inputs' and 'Debt' resolved out of seven targets, leaving Batches 1
-  // and 3 running with most of the intended sample missing. Same
-  // category/alias structure and resolveAny() upgrade as the deep
-  // accounting subset below, for the same reason.
-  const KEY_SHEET_CATEGORIES = {
-    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
-    'Income Statement': ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
-    'Balance Sheet':    ['Balance Sheet', 'Statement of Financial Position', 'AFS', 'SOFP', 'BS'],
-    'Inputs':           ['Inputs', 'Assumptions', 'Key Inputs'],
-    'Debt':             ['Debt Schedule', 'Debt Dashboard', 'Debt'],
-    'Operations':       ['Operations', 'Ops', 'Operating Assumptions'],
-    'Equity':           ['Equity Schedule', 'Equity Dashboard', 'Equity'],
-  };
-
-  let sheetsToCheck;
-  if (keySheets && keySheets.length > 0) {
-    sheetsToCheck = keySheets;
-  } else {
-    sheetsToCheck = [];
-    const unresolvedKeyCategories = [];
-    for (const [category, aliases] of Object.entries(KEY_SHEET_CATEGORIES)) {
-      const resolved = resolveAny(aliases, parsed.sheetNames);
-      if (resolved) sheetsToCheck.push(resolved);
-      else unresolvedKeyCategories.push(category);
-    }
-    if (unresolvedKeyCategories.length > 0) {
-      console.log(`   ⚠️  Key-sheet fallback (Batches 1 & 3): no matching sheet for ${unresolvedKeyCategories.length} categor${unresolvedKeyCategories.length === 1 ? 'y' : 'ies'} — ${unresolvedKeyCategories.join(', ')}. This normally means Familiarisation did not supply keySheets for this run — check for an earlier Familiarisation error above.`);
-    }
-  }
+async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null } = {}) {
+  const sheetsToCheck = keySheets && keySheets.length > 0
+    ? keySheets
+    : ['Cons', 'IFS', 'AFS', 'Inputs', 'Debt', 'Ops', 'Equity'];
 
   const dataSubset = {};
   for (const name of sheetsToCheck) {
@@ -268,44 +247,14 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   // data — not the generic key_sheets sample. This gives Claude enough
   // evidence to actually test balance sheet roll-forwards, debt schedules,
   // and tax reconciliation rather than returning uncertain due to thin data.
-  //
-  // Each category is a list of aliases, tried in order via resolveAny() —
-  // safer, fuller-word aliases first, short accounting abbreviations last.
-  // This matters because sheet-resolver's fuzzy Level 4 match (normalized
-  // starts-with/contains) is unsafe for short 3-4 letter tokens: a real
-  // production run confirmed 'Cons' silently matching an unrelated sheet
-  // named 'Construction Timeline' (normalize('Construction Timeline')
-  // starts with normalize('Cons')) — meaning the deep batch was fed a
-  // construction schedule in place of a cash flow statement, while the
-  // genuine Balance Sheet/P&L/Cashflow sheets (present in the workbook
-  // under those exact names) were never matched at all because the old
-  // list only ever tried the mining-style abbreviations 'AFS'/'IFS'/'Cons'.
-  // Trying full names first means an exact/near-exact match resolves
-  // before the risky short-abbreviation fallback is ever reached, for any
-  // model — mining-style or otherwise — while still preserving support for
-  // files that genuinely do use the short abbreviations as sheet names.
-  const DEEP_ACCOUNTING_CATEGORIES = {
-    'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS'],
-    'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
-    'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
-    'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
-    'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity'],
-    'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T'],
-    'Leases':             ['Lease Schedule', 'Leases', 'Lease'],
-  };
+  const deepAccountingSheets = ['AFS', 'IFS', 'Cons', 'Debt', 'Equity', 'D&T', 'Leases'];
   const deepDataSubset = {};
-  const unresolvedCategories = [];
-  for (const [category, aliases] of Object.entries(DEEP_ACCOUNTING_CATEGORIES)) {
-    const resolved = resolveAny(aliases, parsed.sheetNames);
+  for (const name of deepAccountingSheets) {
+    const resolved = resolveSheetName(name, parsed.sheetNames);
     if (resolved && parsed.sheets[resolved]) {
       // Use a higher row cap (40) and wider extraction for the deep batch
       deepDataSubset[resolved] = extractMeaningfulRows(parsed.sheets[resolved], 40);
-    } else {
-      unresolvedCategories.push(category);
     }
-  }
-  if (unresolvedCategories.length > 0) {
-    console.log(`   ⚠️  Deep accounting subset: no matching sheet found for ${unresolvedCategories.length} categor${unresolvedCategories.length === 1 ? 'y' : 'ies'} — ${unresolvedCategories.join(', ')}. Batch 2 will run without this data; expect "uncertain" results on checks that depend on it. If this workbook has an equivalent sheet under a different name, add it as an alias to DEEP_ACCOUNTING_CATEGORIES in validator-tier2.js.`);
   }
   const deepTokens = Math.round(JSON.stringify(deepDataSubset).length / 3);
   console.log(`   Deep accounting data subset: ~${deepTokens} tokens across ${Object.keys(deepDataSubset).length} sheets`);
@@ -321,12 +270,30 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   const allResults = [];
   let topLevelMeta = {};
 
+  // Compact Wave 1 (named-range audit) and Wave 2 (VBA review) summaries —
+  // built once here, from data Wave 1/2 already computed deterministically
+  // before Tier 2 runs, and threaded into every batch via tier0Context
+  // below. See the payload comment in runBatch() for why this exists.
+  const namedRangeSummaryForPrompt = (namedRangeAudit && namedRangeAudit.applicable) ? {
+    totalNamedRanges: namedRangeAudit.totalNamedRanges,
+    brokenCount: (namedRangeAudit.broken || []).length,
+    brokenNames: (namedRangeAudit.broken || []).map(b => b.name),
+    unusedCount: (namedRangeAudit.unused || []).length,
+  } : { note: 'Named range audit did not complete for this run — treat named_ranges_current as manual_only.' };
+
+  const vbaSummaryForPrompt = (vbaReview && vbaReview.applicable) ? {
+    hasVbaProject: vbaReview.hasVbaProject,
+    moduleCount: vbaReview.moduleCount || 0,
+    findingSummary: (vbaReview.findings || []).map(f => `${f.id}: ${f.label}`),
+  } : { note: 'VBA review did not complete for this run — treat macros_documented and any VBA-dependent test as manual_only.' };
+
   // Reusable batch runner with consistent error handling
   async function runOneBatch(rules, data, label, errorIdPrefix) {
     if (rules.length === 0) return;
     try {
       const { results, meta } = await runBatch(
-        rules, data, parsed.sheetNames, systemPrompt, label, { stats: tier0Stats, risks: tier0Risks }
+        rules, data, parsed.sheetNames, systemPrompt, label,
+        { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt }
       );
       allResults.push(...results);
       if (meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined) &&

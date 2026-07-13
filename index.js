@@ -121,7 +121,11 @@ async function run() {
   const t2Results  = await runTier2(parsed, {
     domain:      domain.content,
     modelContext,
-    keySheets:   modelSummary.key_sheets
+    keySheets:   modelSummary.key_sheets,
+    tier0Stats:  tier0.stats,
+    tier0Risks:  tier0.riskIndicators,
+    namedRangeAudit,
+    vbaReview
   });
   const t2Pass     = t2Results.filter(r => r.status === 'pass').length;
   const t2Failures = t2Results.filter(r => r.status !== 'pass');

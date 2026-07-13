@@ -270,12 +270,29 @@ All business assumptions must be on Input or Assumption sheets only.
 
 ### test: no_hardcodes
 Business assumptions must not be hard-coded in formula areas.
-This is a manual_only test — formula text is required.
-- Return uncertain with confidence 30
-- State: "Formula text inspection required. Direct cell inspection
-  needed to confirm no business assumptions are hard-coded in
-  calculation or output sheets."
-- Do not infer from row values alone
+
+Check `workbookStats.totalHardcodes` in the payload — a workbook-wide
+count of formula cells containing hardcoded numeric literals, computed
+directly from formula text (Tier 0). This is a real, aggregate signal,
+not an estimate — use it.
+
+- If `totalHardcodes` is 0 or very low relative to `totalFormulaCells`:
+  pass, confidence 70-85. State the ratio as evidence.
+- If `totalHardcodes` is high relative to `totalFormulaCells` (a rough
+  guide, not a hard threshold — judge against the model's own scale):
+  fail or flag, confidence 70-85, citing the aggregate count as evidence
+  of widespread hardcoding. State the count.
+- You still cannot identify WHICH specific cells are hardcoded, or
+  whether each individual instance is a genuine assumption embedded in
+  a formula (a real issue) versus a legitimate fixed constant (a unit
+  conversion, a statutory rate — not an issue). Do not name a specific
+  cell as the finding location unless you can see it directly in the
+  row data provided; cite the sheet/cell you can see plus the aggregate
+  count as corroborating context, or use "A1" with the aggregate
+  reasoning in `condition` if no single cell is visible.
+- If `workbookStats` is empty or `totalHardcodes` is absent: fall back
+  to manual_only, uncertain, confidence 30, stating formula text
+  inspection is required — the same as before.
 
 ### test: no_duplicated_logic
 No calculation should appear in more than one sheet.
@@ -356,11 +373,30 @@ State: "Formula consistency per row cannot be verified from summary
 data values. Requires direct cell inspection in Excel."
 
 ### test: no_circular_references
-Circular references cannot be detected from row data.
-This is a manual_only test.
-Return uncertain with confidence 30.
-State: "Circular reference detection requires Excel iterative
-calculation check or VBA scan."
+Native Excel circular references (iterative calculation) cannot be
+detected from row data alone — that part remains manual_only.
+
+But check `vbaSummary` in the payload first. If `vbaSummary.hasVbaProject`
+is true and `vbaSummary.findingSummary` contains an entry starting with
+`T0-VBA-005` (calculation-integrity — VBA that manipulates Excel's
+calculation engine, forces recalculation, or performs manual iterative
+solving), this is direct, real evidence the model works around
+circularity via a macro rather than Excel's native iterative
+calculation:
+- Report this as a finding (not manual_only/uncertain) — confidence
+  70-85, citing the specific `T0-VBA-005` finding text as evidence.
+  State that the model's calculation may depend on this macro being run
+  correctly, and that its convergence logic cannot be verified from
+  cell values alone.
+- This does NOT mean native Excel circularity is absent — a model can
+  have both. Note this distinction explicitly rather than treating the
+  VBA finding as a complete answer to the test.
+
+If `vbaSummary` shows no VBA project, or no `T0-VBA-005` finding, or
+`vbaSummary` itself is absent: fall back to manual_only, uncertain,
+confidence 30, stating "Circular reference detection requires Excel
+iterative calculation check" — the VBA-scan half of the original
+reasoning is now covered by the check above, so don't repeat it here.
 
 ### test: unit_consistency
 Unit conversion errors (monthly vs annual rates, MW vs kW) require
@@ -980,20 +1016,66 @@ If entries describe specific formula, assumption, or structural changes: pass.
 If entries are generic ("updated model") or absent: flag as uncertain.
 
 ### test: calculation_settings
-This test requires Excel workbook property access — cannot be verified from cell values alone.
-Return uncertain: "Calculation mode and iterative settings require workbook property inspection."
+Excel's own calculation-mode setting (manual vs automatic) itself still
+requires workbook property access and cannot be verified from cell
+values alone for models with no VBA.
+
+But check `vbaSummary` first, the same way as `no_circular_references`
+above. If `vbaSummary.findingSummary` contains a `T0-VBA-005` entry
+(calculation-integrity), this is direct evidence the model's VBA
+manipulates calculation mode, forces recalculation, or performs manual
+iterative solving — report as a finding, not manual_only, confidence
+70-85, citing the specific finding text. State plainly that a reader
+opening this file without running the macro may see different values
+than one who does.
+
+If no such VBA finding exists (with or without a VBA project at all):
+fall back to uncertain, confidence 30: "Calculation mode and iterative
+settings require workbook property inspection."
 
 ### test: macros_documented
-Look for a macros or VBA section on the cover sheet or README tab.
-If present and listing all macros with purpose: pass. If model appears to use VBA but no documentation: flag as uncertain.
+Check `vbaSummary.hasVbaProject` first — this tells you definitively
+whether the workbook contains a VBA project, closing the gap the old
+version of this test couldn't resolve on its own ("if model appears to
+use VBA" was previously something you had no reliable way to know).
+
+- If `hasVbaProject` is false or `vbaSummary` is absent: this test does
+  not apply — pass, confidence 90, state no VBA project was detected.
+- If `hasVbaProject` is true: look for a macros or VBA section on the
+  cover sheet or README tab in the row data you were given.
+  - If present and it names all `vbaSummary.moduleCount` modules with
+    their purpose: pass, confidence 80.
+  - If absent, or documents fewer modules than `moduleCount` actually
+    present: fail (not uncertain — you now have a definitive fact to
+    report), confidence 80. State the module count found by the VBA
+    scan versus what is documented.
 
 ### test: protection_allows_review
 This test requires workbook access — cannot be fully verified from cell values alone.
 Return uncertain: "Sheet protection status requires direct workbook inspection."
 
 ### test: named_ranges_current
-This test requires Name Manager access — cannot be verified from cell values alone.
-Return uncertain: "Named ranges require Name Manager inspection to verify currency."
+Check `namedRangeSummary` in the payload first — Wave 1's named-range
+audit already computed this deterministically (broken and unused named
+ranges, counted directly from the workbook's defined names), and it's
+included in this same payload. Use it rather than treating this as
+unanswerable.
+
+- If `namedRangeSummary.brokenCount` is 0 and `unusedCount` is 0 (or
+  low relative to `totalNamedRanges`): pass, confidence 85-95. Cite the
+  counts as evidence.
+- If `brokenCount` > 0: fail, confidence 90+. Name the broken ranges
+  from `brokenNames`. A broken named range is a definitive, structural
+  fact, not something requiring further inspection.
+- If `unusedCount` is high relative to `totalNamedRanges`: flag,
+  confidence 70-85, citing the ratio. Note: a named range used only by
+  VBA (check `vbaSummary`) would incorrectly appear here as unused,
+  since the audit only traces worksheet formula references — if
+  `vbaSummary.hasVbaProject` is true, mention this as a caveat rather
+  than treating the unused count as fully reliable.
+- If `namedRangeSummary` is absent or shows a `note` field instead of
+  counts: fall back to uncertain, confidence 30: "Named ranges require
+  Name Manager inspection to verify currency" — the same as before.
 
 ### test: instructions_complete
 Look for an Instructions tab or instructions section on the cover sheet.
