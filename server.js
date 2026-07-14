@@ -16,6 +16,8 @@ const { parseExcel, scanFormulaErrors }                             = require('.
 const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
 const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
+const { checkTotalRanges } = require('./src/utils/total-range-check');
+const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
@@ -398,6 +400,73 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       urgency: 'Before next reliance', confidence: 85
     });
   }
+
+  // ── A1 — INDIRECT() opaque dynamic reference finding ────────────────────
+  // Was only ever wired into index.js, never here — server.js (the actual
+  // web/API path) never fired this finding at all until now.
+  if (tier0.stats && tier0.stats.totalIndirectCount > 0) {
+    const indirectCells = (tier0.riskIndicators.indirectCells || []).slice(0, 8)
+      .map(c => `${c.sheet}!${c.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-INDIRECT-001',
+      label: `${tier0.stats.totalIndirectCount} formula cell(s) use INDIRECT() to construct a reference from a string`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${tier0.stats.totalIndirectCount} formula cell(s) use INDIRECT(), including: ${indirectCells}${tier0.stats.totalIndirectCount > 8 ? ' and others' : ''}. Because the reference is built from a string at calculation time, the actual target cell or sheet cannot be confirmed just by reading the formula — this is a materially more opaque pattern than a normal cell reference for anyone tracing the model's logic.`,
+      reason: `${tier0.stats.totalIndirectCount} cell(s) use INDIRECT()`,
+      corrective_action: 'Confirm what each INDIRECT() call actually resolves to at runtime, and consider replacing it with a direct cell reference where the target does not genuinely need to be computed dynamically.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Opaque dynamic reference',
+      model_risk: 'A reference built from a string cannot be verified by reading the formula alone — if the string is ever wrong or the target is renamed/moved, the formula can silently point somewhere unintended without producing a visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'INDIRECT() used to construct a dynamic reference',
+      escalation_flag: false, urgency: 'Before next reliance', confidence: 100
+    });
+  }
+
+  // ── A2 — SUM() ranges that exclude real data at either end ─────────────
+  const totalRangeCheck = (() => { try { return checkTotalRanges(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Total-range check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (totalRangeCheck.applicable && totalRangeCheck.findings.length > 0) {
+    totalRangeCheck.findings.forEach((f, i) => {
+      allFlagged.push({
+        id: `T0-TOTALRANGE-${String(i + 1).padStart(3, '0')}`,
+        label: `${f.sheet}!${f.cell} sums a range that excludes ${f.excludedCount} adjacent numeric row(s)`,
+        severity: 'medium', status: 'fail',
+        sheet: f.sheet, cell: f.cell, category: 'Structure',
+        condition: f.note,
+        reason: `SUM range (${f.sumRange}) does not match the real contiguous data block (${f.actualBlockRange})`,
+        corrective_action: 'Confirm whether the excluded row(s) genuinely belong in this total. If so, extend the SUM range to include them — this is the classic symptom of a row inserted after the range was set.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Truncated SUM range',
+        model_risk: 'A total that silently excludes real adjacent data understates whatever it feeds into, without producing any visible error.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: 'SUM range does not cover the full contiguous data block', escalation_flag: false,
+        urgency: 'Before next reliance', confidence: 85
+      });
+    });
+  }
+
+  // ── A3 — Sign-convention inconsistency for the same line item ──────────
+  const signConventionCheck = (() => { try { return checkSignConventions(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Sign-convention check failed:', e.message); return { applicable:false, flaggedCount:0, results:[] }; } })();
+  if (signConventionCheck.applicable && signConventionCheck.results.length > 0) {
+    signConventionCheck.results.forEach((r, i) => {
+      allFlagged.push({
+        id: `T0-SIGNCONV-${String(i + 1).padStart(3, '0')}`,
+        label: `"${r.label}" appears with inconsistent sign across the workbook`,
+        severity: 'medium', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: r.note,
+        reason: `${r.positiveCount} positive and ${r.negativeCount} negative instance(s) found for the same labelled line item`,
+        corrective_action: 'Confirm the model\'s own sign convention for this line item and correct whichever instance(s) don\'t follow it — or confirm the difference is a deliberate, disclosed convention change between sheets.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Sign convention inconsistency',
+        model_risk: 'A silently inconsistent sign convention can cause a value to be added where it should be subtracted (or vice versa) wherever it is later referenced.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: 'Same labelled line item has inconsistent sign across the workbook', escalation_flag: false,
+        urgency: 'Before next reliance', confidence: 75
+      });
+    });
+  }
+
       if (reasonableness.waccOverride.applicable && reasonableness.waccOverride.mismatch) {
         const w = reasonableness.waccOverride;
         allFlagged.push({
