@@ -36,7 +36,33 @@ function checkSignConventions(workbook) {
     // Ignore zero values — a zero has no sign to be inconsistent about,
     // and including it would understate genuine agreement between the
     // real nonzero candidates.
-    const nonzero = candidates.filter(c => c.value !== 0);
+    //
+    // Also ignore values with |value| < 1 — a genuine dollar-value line
+    // item (capex, opex, distributions, interest expense) should never be
+    // a fraction in a real financial model, while a percentage/rate
+    // assumption always is. Confirmed real on a production file: a
+    // "% of Capex" unit descriptor correctly matched the word "capex",
+    // then correctly found the nearest number to its right — but that
+    // number was a contingency rate (0.1), not a capex dollar figure.
+    //
+    // KNOWN, DISCLOSED LIMITATION — a magnitude-clustering approach (keep
+    // only the single largest order-of-magnitude cluster) was also tried
+    // and made things WORSE on this same file: a sensitivity table using
+    // "Capex +10%"/"Capex +20%" as scenario labels (not capex figures)
+    // produced enough small-magnitude matches that the "dominant" cluster
+    // by count became the noise, not the real multi-million-dollar capex
+    // line items. Count-based dominance is not the same as semantic
+    // correctness, and reverting to the simpler, unambiguous |value| >= 1
+    // floor was the more honest choice — it provably removes the
+    // percentage-rate contamination without risking flipping the result
+    // in the wrong direction. A small residual (sensitivity-delta values
+    // that happen to be >= 1) can still get through for a broadly-reused
+    // label like "Capex" that appears in many unrelated contexts
+    // throughout a real model. Fully solving this would need real
+    // semantic understanding of what each candidate actually represents,
+    // not another mechanical filter layered on top of label-substring
+    // matching.
+    const nonzero = candidates.filter(c => c.value !== 0 && Math.abs(c.value) >= 1);
     if (nonzero.length < 2) continue; // need at least 2 real values to compare
 
     const positives = nonzero.filter(c => c.value > 0);
