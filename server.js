@@ -21,7 +21,7 @@ const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
-const { loadDomainSkill }                        = require('./src/classifier');
+const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
 const { runTier1 }                               = require('./src/validator-tier1');
 const { runTier0 }                               = require('./src/validator-tier0');
@@ -263,6 +263,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     const domain = loadDomainSkill(modelType);
     console.log(`   Domain skill loaded: ${domain.file}`);
+
+    // Opportunistic, non-blocking: if this model type has no dedicated
+    // skill yet, queue a draft for future review. Never awaited.
+    maybeQueueDomainDraft(modelType, modelSummary, parsed.sheetNames, domain);
 
     // ── Step 4: Pre-validation gate ────────────────────────────────────
     console.log('[4/6] Pre-validation gate...');

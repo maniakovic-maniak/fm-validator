@@ -148,9 +148,26 @@ async function draftDomainSkill(modelType, modelSummary, sheetNames, options = {
   const draftPath = path.join(draftsDir, `skill-${modelType}.draft.md`);
   fs.writeFileSync(draftPath, draftContent);
 
+  // Metadata sidecar — review-domains.js runs in a separate CLI
+  // invocation, potentially long after this drafting call completed, and
+  // needs weightingGuidance/structuralExampleDomain to actually re-run
+  // eval-domain-skill.js's checks against this draft. Without this file,
+  // that information only ever existed in this function's return value
+  // and in-memory local variables — genuinely lost the moment this
+  // process exits.
+  const metaPath = path.join(draftsDir, `skill-${modelType}.draft.meta.json`);
+  fs.writeFileSync(metaPath, JSON.stringify({
+    modelType,
+    structuralExampleDomain,
+    weightingGuidance,
+    draftedAt: new Date().toISOString(),
+    sourceModelSummary: modelSummary,
+    sourceSheetNames: sheetNames,
+  }, null, 2));
+
   console.log(`   Draft domain skill written: ${draftPath} (${draftContent.length} chars) — NOT live, requires review before use.`);
 
-  return { draftPath, draftContent, weightingGuidanceUsed: weightingGuidance };
+  return { draftPath, metaPath, draftContent, weightingGuidanceUsed: weightingGuidance };
 }
 
 module.exports = { draftDomainSkill, extractWeightingGuidance };

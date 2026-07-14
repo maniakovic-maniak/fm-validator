@@ -135,4 +135,64 @@ function loadDomainSkill(modelType) {
   return { content: '', file: 'none' };
 }
 
-module.exports = { classifyModel, loadDomainSkill };
+// Maps a classifier-produced modelType string to the label used in
+// skill-generic.md's own "Model type weighting rules" section, where one
+// already exists — a prior decision already made in this codebase about
+// what matters for that domain, which the draft should align with rather
+// than reinvent. Deliberately small and only covers domains with an
+// existing weighting entry; anything else drafts without this guidance
+// rather than guessing at a label that doesn't exist.
+const WEIGHTING_LABEL_MAP = {
+  property: 'Real estate', 'real estate': 'Real estate', development: 'Real estate',
+  saas: 'SaaS', technology: 'SaaS',
+  infrastructure: 'Project finance', 'project finance': 'Project finance',
+  lending: 'Lending', credit: 'Lending',
+  fund: 'Fund', 'private equity': 'Fund',
+  valuation: 'Valuation', dcf: 'Valuation',
+  corporate: 'Corporate',
+};
+function guessWeightingLabel(modelType) {
+  return WEIGHTING_LABEL_MAP[(modelType || '').toLowerCase().trim()] || null;
+}
+
+/**
+ * Opportunistically queue a new domain skill draft when a model is
+ * classified as a type with no dedicated skill file yet (loadDomainSkill
+ * fell back to skill-generic.md). This is a pure side effect for FUTURE
+ * runs — it never blocks, slows, or risks the CURRENT pipeline run, which
+ * already has what it needs (skill-generic.md, loaded synchronously by
+ * loadDomainSkill before this is ever called).
+ *
+ * Fire-and-forget by design: the actual drafting call (an LLM request)
+ * is deliberately not awaited by the caller. Any failure here is caught
+ * and logged, never allowed to propagate to or affect the current run.
+ *
+ * @param {string} modelType
+ * @param {object} modelSummary - the real Familiarisation summary
+ * @param {string[]} sheetNames - the real sheet names
+ * @param {object} domainSkillResult - loadDomainSkill()'s own return value
+ */
+function maybeQueueDomainDraft(modelType, modelSummary, sheetNames, domainSkillResult) {
+  if (!modelType || modelType === 'generic' || domainSkillResult.file !== 'skill-generic.md') {
+    return { queued: false, reason: 'not applicable — model type unknown, or a dedicated skill already exists' };
+  }
+
+  const configDir = path.join(__dirname, '../config');
+  const draftPath = path.join(configDir, 'domains', `skill-${modelType}.draft.md`);
+  if (fs.existsSync(draftPath)) {
+    return { queued: false, reason: 'draft already pending review' };
+  }
+
+  const { draftDomainSkill } = require('./domain-synthesiser');
+  draftDomainSkill(modelType, modelSummary, sheetNames, {
+    weightingDomainLabel: guessWeightingLabel(modelType),
+  }).then(() => {
+    console.log(`   ℹ️  New domain "${modelType}" drafted for future review: config/domains/skill-${modelType}.draft.md (run tools/review-domains.js)`);
+  }).catch(e => {
+    console.error(`   ⚠️  Domain skill drafting failed for "${modelType}" (non-blocking, this run is unaffected):`, e.message);
+  });
+
+  return { queued: true };
+}
+
+module.exports = { classifyModel, loadDomainSkill, maybeQueueDomainDraft };

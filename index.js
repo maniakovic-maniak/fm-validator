@@ -8,7 +8,7 @@ const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
-const { loadDomainSkill }                          = require('./src/classifier');
+const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier');
 const { preValidate }                              = require('./src/pre-validator');
 const { runTier1 }                                 = require('./src/validator-tier1');
 const { runTier0 }                                 = require('./src/validator-tier0');
@@ -99,6 +99,13 @@ async function run() {
 
   const domain = loadDomainSkill(modelType);
   console.log(`   Domain skill loaded: ${domain.file}`);
+
+  // Opportunistic, non-blocking: if this model type has no dedicated
+  // skill yet (domain.file === 'skill-generic.md'), queue a draft for
+  // future review. Never awaited — this run already has what it needs
+  // and must not be slowed down or put at risk by a new, less-tested
+  // code path making its own LLM call.
+  maybeQueueDomainDraft(modelType, modelSummary, parsed.sheetNames, domain);
 
   // ── Step 4: Pre-validation gate ────────────────────────────────────────────
   console.log('\n[3/6] Running pre-validation gate...');
