@@ -1,0 +1,21 @@
+#!/bin/sh
+# .githooks/pre-push — OPTIONAL. Not installed automatically.
+#
+# Runs the D3 pre-deploy gate (pre-deploy-check.js) before every push,
+# blocking the push if it fails. This is entirely opt-in — the gate works
+# perfectly well run manually (node scripts/pre-deploy-check.js) without
+# ever installing this hook.
+#
+# To opt in, run once from the repo root:
+#   git config core.hooksPath .githooks
+#   chmod +x .githooks/pre-push
+#
+# To opt back out:
+#   git config --unset core.hooksPath
+#
+# A genuine emergency push past a failing gate:
+#   git push --no-verify
+# (bypasses ALL hooks, not just this one — use deliberately, not as a habit)
+
+node scripts/pre-deploy-check.js
+exit $?
