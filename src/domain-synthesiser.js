@@ -83,11 +83,21 @@ commentary, no code fences.`;
  * guidance rather than failing.
  */
 function extractWeightingGuidance(genericSkillContent, domainLabel) {
-  // Matches a bold heading line (the domain label) followed by its
-  // "Higher weight on: ..." sentence, stopping at the next blank line.
+  // Stops at the first sentence-ending period after "Higher weight on:",
+  // not at the next blank line or bold heading — 4 of 7 domain categories
+  // in skill-generic.md have a second, unrelated sentence immediately
+  // following in the same paragraph (e.g. "...scenario engine. Gate
+  // failures are a P1 or P2 finding..."), which an earlier version of
+  // this regex swallowed into the captured guidance, corrupting the
+  // focus-area list with garbled non-terms. Confirmed on a real
+  // production draft (skill-corporate.draft.md) — the first genuinely
+  // live use of this function, not caught by earlier testing since that
+  // only exercised two domain categories (Real estate, SaaS) that happen
+  // not to have this second-sentence pattern. The 's' flag lets '.' match
+  // across the line-wrapped markdown source.
   const re = new RegExp(
-    `\\*\\*[^*]*${domainLabel}[^*]*\\*\\*\\s*\\n(Higher weight on:[^\\n]*(?:\\n[^\\n*][^\\n]*)*)`,
-    'i'
+    `\\*\\*[^*]*${domainLabel}[^*]*\\*\\*\\s*\\n(Higher weight on:.*?\\.)(?:\\s|$)`,
+    'is'
   );
   const m = re.exec(genericSkillContent);
   return m ? m[1].trim().replace(/\s+/g, ' ') : null;

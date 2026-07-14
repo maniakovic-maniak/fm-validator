@@ -1,7 +1,7 @@
 {
   "modelType": "corporate",
   "structuralExampleDomain": "mining",
-  "weightingGuidance": "Higher weight on: three-statement integration, working capital, tax reconciliation, margin plausibility, scenario engine. Gate failures are a P1 or P2 finding depending on the scope of impact.",
+  "weightingGuidance": "Higher weight on: three-statement integration, working capital, tax reconciliation, margin plausibility, scenario engine.",
   "draftedAt": "2026-07-14T08:55:35.549Z",
   "sourceModelSummary": {
     "model_purpose": "A development and operating financial model for a proposed live music venue (The Bend Live House) in Melbourne, used to forecast construction funding, operations, debt service and investor equity returns.",
