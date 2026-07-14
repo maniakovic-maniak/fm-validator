@@ -2,7 +2,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const fs = require('fs');
 const path = require('path');
 const checklist = require('../config/checklist.json');
-const { resolveSheetName } = require('./utils/sheet-resolver');
+const { resolveAny } = require('./utils/sheet-resolver');
 const { extractJson } = require('./utils/json-extract');
 const { dumpFailedResponse } = require('./utils/dump-failed-response');
 
@@ -222,9 +222,38 @@ function splitIntoBatches(rules) {
 }
 
 async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null } = {}) {
-  const sheetsToCheck = keySheets && keySheets.length > 0
-    ? keySheets
-    : ['Cons', 'IFS', 'AFS', 'Inputs', 'Debt', 'Ops', 'Equity'];
+  // Fallback key-sheet categories used when the caller doesn't supply
+  // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
+  // itself failed to complete for this run. A flat, mining-style
+  // abbreviation list matched via raw exact-key lookup (parsed.sheets[name])
+  // with NO fuzzy resolution at all silently matches almost nothing on a
+  // non-mining model — confirmed on a real production file where only
+  // 'Inputs' and 'Debt' resolved out of seven targets.
+  const KEY_SHEET_CATEGORIES = {
+    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
+    'Income Statement': ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
+    'Balance Sheet':    ['Balance Sheet', 'Statement of Financial Position', 'AFS', 'SOFP', 'BS'],
+    'Inputs':           ['Inputs', 'Assumptions', 'Key Inputs'],
+    'Debt':             ['Debt Schedule', 'Debt Dashboard', 'Debt'],
+    'Operations':       ['Operations', 'Ops', 'Operating Assumptions'],
+    'Equity':           ['Equity Schedule', 'Equity Dashboard', 'Equity'],
+  };
+
+  let sheetsToCheck;
+  if (keySheets && keySheets.length > 0) {
+    sheetsToCheck = keySheets;
+  } else {
+    sheetsToCheck = [];
+    const unresolvedKeyCategories = [];
+    for (const [category, aliases] of Object.entries(KEY_SHEET_CATEGORIES)) {
+      const resolved = resolveAny(aliases, parsed.sheetNames);
+      if (resolved) sheetsToCheck.push(resolved);
+      else unresolvedKeyCategories.push(category);
+    }
+    if (unresolvedKeyCategories.length > 0) {
+      console.log(`   ⚠️  Key-sheet fallback (Batches 1 & 3): no matching sheet for ${unresolvedKeyCategories.length} categor${unresolvedKeyCategories.length === 1 ? 'y' : 'ies'} — ${unresolvedKeyCategories.join(', ')}. This normally means Familiarisation did not supply keySheets for this run — check for an earlier Familiarisation error above.`);
+    }
+  }
 
   const dataSubset = {};
   for (const name of sheetsToCheck) {
@@ -247,14 +276,36 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   // data — not the generic key_sheets sample. This gives Claude enough
   // evidence to actually test balance sheet roll-forwards, debt schedules,
   // and tax reconciliation rather than returning uncertain due to thin data.
-  const deepAccountingSheets = ['AFS', 'IFS', 'Cons', 'Debt', 'Equity', 'D&T', 'Leases'];
+  //
+  // Each category is a list of aliases, tried in order via resolveAny() —
+  // safer, fuller-word aliases first, short accounting abbreviations last.
+  // A short abbreviation like 'Cons' is unsafe as a sole target: confirmed
+  // on a real production file, 'Cons' silently matched an unrelated sheet
+  // named 'Construction Timeline', feeding a construction schedule into
+  // the accounting batch in place of a real cash flow statement, while the
+  // genuine Balance Sheet/P&L/Cashflow sheets were never matched at all.
+  const DEEP_ACCOUNTING_CATEGORIES = {
+    'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS'],
+    'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
+    'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
+    'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
+    'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity'],
+    'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T'],
+    'Leases':             ['Lease Schedule', 'Leases', 'Lease'],
+  };
   const deepDataSubset = {};
-  for (const name of deepAccountingSheets) {
-    const resolved = resolveSheetName(name, parsed.sheetNames);
+  const unresolvedCategories = [];
+  for (const [category, aliases] of Object.entries(DEEP_ACCOUNTING_CATEGORIES)) {
+    const resolved = resolveAny(aliases, parsed.sheetNames);
     if (resolved && parsed.sheets[resolved]) {
       // Use a higher row cap (40) and wider extraction for the deep batch
       deepDataSubset[resolved] = extractMeaningfulRows(parsed.sheets[resolved], 40);
+    } else {
+      unresolvedCategories.push(category);
     }
+  }
+  if (unresolvedCategories.length > 0) {
+    console.log(`   ⚠️  Deep accounting subset: no matching sheet found for ${unresolvedCategories.length} categor${unresolvedCategories.length === 1 ? 'y' : 'ies'} — ${unresolvedCategories.join(', ')}. Batch 2 will run without this data; expect "uncertain" results on checks that depend on it. If this workbook has an equivalent sheet under a different name, add it as an alias to DEEP_ACCOUNTING_CATEGORIES in validator-tier2.js.`);
   }
   const deepTokens = Math.round(JSON.stringify(deepDataSubset).length / 3);
   console.log(`   Deep accounting data subset: ~${deepTokens} tokens across ${Object.keys(deepDataSubset).length} sheets`);
