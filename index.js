@@ -5,6 +5,7 @@ const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
+const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
@@ -313,6 +314,48 @@ async function run() {
         key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
         root_cause: 'Same labelled line item has inconsistent sign across the workbook', escalation_flag: false,
         urgency: 'Before next reliance', confidence: 75
+      });
+    });
+  }
+
+  // ── A4 — Key-output dependency-chain tracing ────────────────────────────
+  // Extends the existing sheet-level Sheet Dependency tab to actual
+  // cell-level chain verification for key output cells specifically (not
+  // every formula cell — key outputs are what a reader actually relies
+  // on, and tracing all of them would be slow and mostly redundant given
+  // how much real chains overlap). Deliberately worded as worth
+  // confirming, not broken: a chain reaching a blank cell can mean a
+  // genuinely missing input, but confirmed real on a production file that
+  // it can just as easily be a benign, unpopulated future-period column —
+  // this needs a human to judge, not an automatic fail.
+  const keyOutputChainCheck = (() => { try { return checkKeyOutputChains(parsed._raw, tier0.cellScoreIndex, parsed.sheetNames); }
+    catch (e) { console.error('   \u26a0\ufe0f  Key-output chain check failed:', e.message); return { applicable:false, flaggedCount:0, results:[] }; } })();
+  if (keyOutputChainCheck.applicable && keyOutputChainCheck.results.length > 0) {
+    keyOutputChainCheck.results.forEach((r, i) => {
+      const affectedList = r.affectedOutputs.map(o => `${o.labelText} (${o.sheet}!${o.cell})`).join(', ');
+      const isError = r.type === 'error_propagation';
+      allFlagged.push({
+        id: `T0-CHAIN-${String(i + 1).padStart(3, '0')}`,
+        label: isError
+          ? `${r.sheet}!${r.cell} holds a cached error (${r.value}) that ${r.affectedOutputs.length} key output(s) trace back through`
+          : `${r.sheet}!${r.cell} is blank, and ${r.affectedOutputs.length} key output(s) trace back through it`,
+        severity: 'medium', status: 'fail',
+        sheet: r.sheet, cell: r.cell, category: 'Structure',
+        condition: isError
+          ? `Tracing the formula chain behind these key outputs back through their precedents reaches ${r.sheet}!${r.cell}, which holds a cached error value (${r.value}). Affected: ${affectedList}.`
+          : `Tracing the formula chain behind these key outputs back through their precedents reaches ${r.sheet}!${r.cell}, which is blank — no formula and no value. Affected: ${affectedList}. This may be a genuinely missing input, or a template column for a period not yet populated — confirm which before treating this as an error.`,
+        reason: isError ? `Cached error propagating to ${r.affectedOutputs.length} key output(s)` : `Blank cell reached by ${r.affectedOutputs.length} key output(s)`,
+        corrective_action: isError
+          ? 'Investigate and resolve the underlying error at its source rather than the symptom in each affected output.'
+          : 'Confirm whether this cell is expected to be blank (e.g. a future period not yet reached) or is a genuinely missing input feeding these outputs.',
+        workstream: 'Structure', category: 'Structure', issue_type: isError ? 'Error propagation to key output' : 'Key output chain reaches blank cell',
+        model_risk: isError
+          ? 'A cached error at the root of a chain means every key output depending on it is unreliable until the error is resolved.'
+          : 'If genuinely missing rather than an expected placeholder, every key output depending on this cell is currently understating or misstating its true value.',
+        key_output_impact: affectedList,
+        method: 'automated', needs_retest: true,
+        root_cause: isError ? 'Cached formula error at a shared precedent cell' : 'Shared precedent cell is blank',
+        escalation_flag: false, urgency: 'Before next reliance', confidence: 70
       });
     });
   }
