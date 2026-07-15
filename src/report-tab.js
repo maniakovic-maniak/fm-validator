@@ -12,7 +12,8 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
   const {
     originalName, modelType, modelIndustry, modelPurpose,
     modelSummary, tier0, auditLog, overallAssessment,
-    igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets, namedRangeAudit, formulaDeepDive, reasonableness, duplicateSheets, vbaReview
+    igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets, namedRangeAudit, formulaDeepDive, reasonableness, duplicateSheets, vbaReview,
+    deepAccountingResolvedSheets
   } = meta;
 
   // Enrich findings with F-score using the cell-level index built by Tier 0.
@@ -72,6 +73,13 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     reasonableness: reasonableness || { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false} },
     duplicateSheets: duplicateSheets || { applicable:false, flaggedCount:0, flagged:[] },
     vbaReview:       vbaReview || { applicable:false, hasVbaProject:false, moduleCount:0, note:'', findings:[] },
+    // Real resolved sheet names for the deep-accounting subset (Batch 2) —
+    // used by the "Evidence Reviewed" column in the Validation Matrix,
+    // replacing a static string that always said "AFS/IFS/Cons/Debt/
+    // Equity/D&T/Leases" regardless of what sheets a given run actually
+    // used. Falls back to an empty resolution if not supplied, so older
+    // callers that don't pass this yet don't break.
+    deepAccountingResolvedSheets: deepAccountingResolvedSheets || { resolvedMap: {}, unresolvedCategories: [] },
     auditLog:        auditLog || []
   };
 
