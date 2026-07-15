@@ -115,10 +115,52 @@ async function classifyModel(parsed) {
   }
 }
 
+// Domain label normalization — maps a classifier-produced modelType
+// string to one canonical domain name, so the same underlying file
+// doesn't spawn a different skill (or a duplicate draft) depending on
+// which exact wording Familiarisation happened to produce on a given
+// run. Confirmed real and recurring on a genuine production file:
+// classified as "property", then "corporate", then "property" again
+// across three separate runs of the identical model — each time either
+// missing the skill that already existed under a different name, or
+// spawning a second, redundant draft.
+//
+// Matching is word-boundary-safe (not raw substring) for the same reason
+// established earlier this session for sheet-name matching: a short,
+// ambiguous alias term can otherwise false-match inside an unrelated
+// longer word. Searches WITHIN the modelType string rather than requiring
+// an exact whole-string match, so this works correctly whether modelType
+// is a short category ("property") or a longer descriptive phrase
+// ("property — entertainment venue development and operations").
+const DOMAIN_ALIASES = {
+  property: ['property', 'real estate', 'development', 'hospitality', 'entertainment venue', 'venue development', 'mixed-use', 'mixed use', 'corporate'],
+  mining: ['mining', 'coal', 'resources', 'minerals'],
+  // Add further canonical domains here as they're identified. 'corporate'
+  // is deliberately mapped to 'property' rather than kept as its own
+  // canonical domain — confirmed on real evidence that the two labels
+  // described the exact same underlying file, and skill-property.md (the
+  // merged file) already covers both the property/development and
+  // corporate/operating angles.
+};
+
+function normalizeDomainLabel(modelType) {
+  if (!modelType) return modelType;
+  const lower = String(modelType).toLowerCase();
+  for (const [canonical, aliases] of Object.entries(DOMAIN_ALIASES)) {
+    for (const alias of aliases) {
+      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i');
+      if (re.test(lower)) return canonical;
+    }
+  }
+  return modelType; // no known alias — leave as-is; a genuinely new domain still works correctly, it just won't be normalized to anything yet
+}
+
 function loadDomainSkill(modelType) {
+  const normalized = normalizeDomainLabel(modelType);
   const skillDir = path.join(__dirname, '../config');
   const candidates = [
-    `skill-${modelType}.md`,
+    `skill-${normalized}.md`,
     'skill-generic.md'
   ];
 
@@ -177,22 +219,29 @@ function maybeQueueDomainDraft(modelType, modelSummary, sheetNames, domainSkillR
     return { queued: false, reason: 'not applicable — model type unknown, or a dedicated skill already exists' };
   }
 
+  // Normalize before checking/drafting — otherwise "property" and
+  // "corporate" (confirmed, on a real file, to be the same underlying
+  // model classified two different ways across separate runs) would each
+  // check for and potentially create their OWN separate draft, rather
+  // than sharing one.
+  const normalized = normalizeDomainLabel(modelType);
+
   const configDir = path.join(__dirname, '../config');
-  const draftPath = path.join(configDir, 'domains', `skill-${modelType}.draft.md`);
+  const draftPath = path.join(configDir, 'domains', `skill-${normalized}.draft.md`);
   if (fs.existsSync(draftPath)) {
     return { queued: false, reason: 'draft already pending review' };
   }
 
   const { draftDomainSkill } = require('./domain-synthesiser');
-  draftDomainSkill(modelType, modelSummary, sheetNames, {
-    weightingDomainLabel: guessWeightingLabel(modelType),
+  draftDomainSkill(normalized, modelSummary, sheetNames, {
+    weightingDomainLabel: guessWeightingLabel(normalized),
   }).then(() => {
-    console.log(`   ℹ️  New domain "${modelType}" drafted for future review: config/domains/skill-${modelType}.draft.md (run tools/review-domains.js)`);
+    console.log(`   ℹ️  New domain "${normalized}" drafted for future review: config/domains/skill-${normalized}.draft.md (run tools/review-domains.js)`);
   }).catch(e => {
-    console.error(`   ⚠️  Domain skill drafting failed for "${modelType}" (non-blocking, this run is unaffected):`, e.message);
+    console.error(`   ⚠️  Domain skill drafting failed for "${normalized}" (non-blocking, this run is unaffected):`, e.message);
   });
 
   return { queued: true };
 }
 
-module.exports = { classifyModel, loadDomainSkill, maybeQueueDomainDraft };
+module.exports = { classifyModel, loadDomainSkill, maybeQueueDomainDraft, normalizeDomainLabel };

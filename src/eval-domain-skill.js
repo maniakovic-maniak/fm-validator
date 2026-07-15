@@ -60,16 +60,26 @@ function checkFocusAreaCoverage(draftContent, weightingGuidance) {
   // contingency adequacy, lifecycle phases."
   const listPart = weightingGuidance.replace(/^Higher weight on:\s*/i, '').replace(/\.$/, '');
   const focusAreas = listPart.split(',').map(s => s.trim()).filter(Boolean);
-  const lowerContent = draftContent.toLowerCase();
+  // Collapse all whitespace (including newlines) to single spaces before
+  // matching — markdown content is routinely soft-wrapped across lines,
+  // and a multi-word focus area term can straddle a line break (e.g.
+  // "...cash timing (tax\n   reconciliation)." from normal ~75-character
+  // line wrapping). A literal substring match against un-normalized
+  // content would then fail even though the phrase reads correctly to a
+  // human, or to anything markdown-rendering the text. Confirmed real on
+  // a genuine draft: "tax reconciliation" and "margin plausibility" both
+  // genuinely appeared in the content but were each split by a line
+  // break, and failed this check before this fix.
+  const lowerContent = draftContent.toLowerCase().replace(/\s+/g, ' ');
   return focusAreas.map(area => {
     // Use just the first few significant words of a multi-word area for
     // matching — "GDV reconciliation" should match "GDV" appearing
     // anywhere near reconciliation-related text, not require the exact
     // phrase verbatim.
-    const keyTerm = area.split(' ').slice(0, 2).join(' ').toLowerCase();
+    const keyTerm = area.split(' ').slice(0, 2).join(' ').toLowerCase().replace(/\s+/g, ' ');
     return {
       check: `Mentions expected focus area: "${area}"`,
-      passed: lowerContent.includes(keyTerm) || lowerContent.includes(area.toLowerCase()),
+      passed: lowerContent.includes(keyTerm) || lowerContent.includes(area.toLowerCase().replace(/\s+/g, ' ')),
     };
   });
 }
