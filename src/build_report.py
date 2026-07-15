@@ -130,6 +130,7 @@ def build_report(data_path, output_path):
     reasonIn    = d.get('reasonableness',{'waccOverride':{'applicable':False},'terminalValue':{'applicable':False},'outputs':{'applicable':False,'results':[],'flaggedCount':0}})
     dupIn       = d.get('duplicateSheets',{'applicable':False,'flaggedCount':0,'flagged':[]})
     formulaDeepIn = d.get('formulaDeepDive',{'applicable':False,'reviewed':0,'findings':[]})
+    deepAcctSheets = d.get('deepAccountingResolvedSheets',{'resolvedMap':{},'unresolvedCategories':[]})
     vbaIn        = d.get('vbaReview',{'applicable':False,'hasVbaProject':False,'moduleCount':0,'note':'','findings':[]})
 
     # Checklist rules for the Validation Matrix — loaded from config
@@ -145,7 +146,7 @@ def build_report(data_path, output_path):
     def priority(f):
         sev = (f.get('severity') or '').lower()
         if sev in ('fatal','critical'): return 'P1'
-        if sev == 'high': return 'P2'
+        if sev in ('high','medium'): return 'P2'
         return 'P3'
 
     p1 = [f for f in findings if priority(f)=='P1']
@@ -663,6 +664,18 @@ def build_report(data_path, output_path):
     _fdd_performed = formulaDeepIn.get('applicable', False)
     _fdd_summary = (f"Individually reviewed the {formulaDeepIn.get('reviewed',0)} highest-complexity formulas in this model (Tier 0 F-score ranked), not sampled — a targeted, not exhaustive, set. {len(formulaDeepIn.get('findings',[]))} finding(s) resulted."
                      if _fdd_performed else 'Best-effort via Tier 0 only')
+    # A4 — cell-level dependency-chain tracing for key output cells (EBITDA,
+    # IRR, DSCR, MOIC and similar), checking whether the formula chain
+    # behind each one dead-ends at a blank cell or propagates a cached
+    # error, rather than only the sheet-level linkage the Sheet Dependency
+    # tab already covers. This runs deterministically alongside the other
+    # T0-* checks — its absence of findings means a clean result, not that
+    # it didn't run, so this is described unconditionally rather than
+    # gated on findings being present.
+    _chain_findings = [f for f in findings if str(f.get('id','')).startswith('T0-CHAIN')]
+    _chain_summary = (f" Cell-level dependency chains behind key output cells were also traced back through their formula precedents — "
+                       + (f"{len(_chain_findings)} root cause(s) found where a chain reaches a blank cell or a cached error (see Issue Log)."
+                          if _chain_findings else "no chain reached a blank cell or a cached error for the key outputs checked."))
     _reason_performed = reasonIn.get('outputs',{}).get('applicable',False) or reasonIn.get('waccOverride',{}).get('applicable',False)
     _reason_flagged = (reasonIn.get('outputs',{}).get('flaggedCount',0)
                         + (1 if reasonIn.get('waccOverride',{}).get('mismatch') else 0)
@@ -691,6 +704,16 @@ def build_report(data_path, output_path):
         _vba_summary = (f"Extracted and risk-scanned {_vba_module_count} VBA module(s); {_vba_finding_count} finding(s) raised (see Issue Log). "
                          f"This reads and pattern-scans macro source — it does not execute the macros, so any behaviour that only manifests at runtime is still outside this review's scope.")
         _vba_next = 'None for the scanned modules — engage a manual VBA code reviewer if runtime behaviour needs verification'
+    # B1 — 7 mining-specific commercial omission patterns (revenue-to-Ops
+    # linkage, capex post-commissioning, tax shield, debt sculpting,
+    # rehabilitation provision, royalty treatment, FX consistency) were
+    # converted from prose guidance into graded, mandatory checklist rules
+    # (T2-S10-090 to 096). This is domain-specific — only present for
+    # models using skill-mining.md — so the status below is conditional on
+    # whether those rules actually exist in this run's checklist, not a
+    # claim of universal omission-testing coverage.
+    _omission_rule_ids = {f'T2-S10-{n}' for n in range(90, 97)}
+    _omission_rules_present = [r for r in checklist_rules if r.get('id') in _omission_rule_ids]
     _exclusions=[
         ('Formula text inspection', 'Performed' if _fdd_performed else 'Partial',
          _fdd_summary,
@@ -698,12 +721,17 @@ def build_report(data_path, output_path):
         ('Source document review','Not performed','This review has no access to contracts, invoices, bank statements or other source records — only the Excel file itself. An assumption can look internally consistent without being independently verified against reality.','Provide source documents for Mode C review'),
         ('Cell-by-cell audit', 'Performed (targeted)' if _fdd_performed else 'Not performed',
          (f"The {formulaDeepIn.get('reviewed',0)} highest-risk formulas received individual review this run — not full coverage of every cell, but not merely pattern-based either."
-          if _fdd_performed else 'Formula logic inspection requires formula text access'),
+          if _fdd_performed else 'Formula logic inspection requires formula text access') + _chain_summary,
          'None for the reviewed set — engage a manual reviewer for full coverage beyond the targeted set' if _fdd_performed else 'Engage manual reviewer or provide formula export'),
         ('Assumption and output reasonableness', 'Performed (targeted)' if _reason_performed else 'Not performed',
          _reason_summary,
          'None for the tested metrics — extend threshold coverage or add domain-specific benchmarks if deeper testing is wanted' if _reason_performed else 'Label key output metrics clearly in the model so they can be located and tested'),
-        ('Commercial omission testing','Not performed','Different question to output reasonableness above: this is about line items missing from the model entirely (a cost category, a risk, a required schedule) that a domain expert would expect to see — not whether the stated figures are plausible. Requires a challenger model and commercial judgment.','Commission a challenger-model review'),
+        ('Commercial omission testing',
+         'Performed (targeted, mining-specific)' if _omission_rules_present else 'Not performed',
+         (f"{len(_omission_rules_present)} mining-specific omission pattern(s) (revenue-to-operations linkage, capex phasing post-commissioning, tax shield modelling, debt sculpting, rehabilitation provision, royalty treatment, FX consistency) are graded, mandatory checklist rules for this model — see the T2-S10-09x rows in the Validation Matrix. This is domain-specific: only models using the mining domain skill get this coverage today, and it does not extend to other missing line items (a cost category, a risk, a required schedule) a domain expert might separately expect to see."
+          if _omission_rules_present else
+          'Different question to output reasonableness above: this is about line items missing from the model entirely (a cost category, a risk, a required schedule) that a domain expert would expect to see — not whether the stated figures are plausible. Requires a challenger model and commercial judgment.'),
+         'None for the 7 graded patterns — extend to other domains or add further patterns as they are identified' if _omission_rules_present else 'Commission a challenger-model review'),
         ('VBA and macro audit',_vba_status,_vba_summary,_vba_next),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
@@ -1093,7 +1121,15 @@ def build_report(data_path, output_path):
         conf_num = (max(confs)/100.0) if (confs and tier=='Tier 2') else None
         sm=re.search(r'-S(\d+)-',rid)
         if tier=='Tier 1': evidence='Full workbook — deterministic code check'
-        elif sm and int(sm.group(1)) in (5,6,7,10): evidence='Deep financial data subset — full AFS/IFS/Cons/Debt/Equity/D&T/Leases'
+        elif sm and int(sm.group(1)) in (5,6,7,10):
+            _resolved = deepAcctSheets.get('resolvedMap',{})
+            if _resolved:
+                _sheet_list = ', '.join(cat if cat==name else f'{cat} ({name})' for cat,name in _resolved.items())
+                _unresolved = deepAcctSheets.get('unresolvedCategories',[])
+                _unresolved_note = f' — {", ".join(_unresolved)} not found in this workbook' if _unresolved else ''
+                evidence = f'Deep financial data subset — {_sheet_list}{_unresolved_note}'
+            else:
+                evidence = 'Deep financial data subset — full AFS/IFS/Cons/Debt/Equity/D&T/Leases'
         else: evidence='Standard data subset — all sheets, trimmed rows'
         refs=[f.get('id','') for f in rfnd]
         ref_txt=', '.join(refs[:4])+(f' +{len(refs)-4} more' if len(refs)>4 else '') if refs else '—'
