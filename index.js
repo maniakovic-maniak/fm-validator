@@ -15,7 +15,7 @@ const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier')
 const { preValidate }                              = require('./src/pre-validator');
 const { runTier1 }                                 = require('./src/validator-tier1');
 const { runTier0 }                                 = require('./src/validator-tier0');
-const { runTier2 }                                 = require('./src/validator-tier2');
+const { runTier2, resolveDeepAccountingSheets }    = require('./src/validator-tier2');
 const { buildReportFile }                          = require('./src/report-tab');
 const { uploadBothFiles }                          = require('./src/writer');
 const { sendNotification }                         = require('./src/notifier');
@@ -453,6 +453,11 @@ async function run() {
   const igReadiness = auditCompletion;
   const igCommentary = auditCommentary;
 
+  // Real resolved sheet names for the "Evidence Reviewed" column — cheap,
+  // no LLM call, safe to compute again here independently of whatever
+  // runTier2 itself did internally.
+  const deepAccountingResolvedSheets = resolveDeepAccountingSheets(parsed.sheetNames);
+
   await buildReportFile(reportPath, allFlagged, allFixes, {
     originalName,
     modelType,
@@ -475,7 +480,8 @@ async function run() {
     formulaDeepDive,
     reasonableness,
     duplicateSheets,
-    vbaReview
+    vbaReview,
+    deepAccountingResolvedSheets
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────

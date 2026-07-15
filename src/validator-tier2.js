@@ -221,6 +221,55 @@ function splitIntoBatches(rules) {
   return { batch1, batch2, batch3 };
 }
 
+// Category/alias definitions for the deep-accounting data subset, plus a
+// standalone resolver function — kept at module level (not inside
+// runTier2) so index.js/server.js can call this same resolution
+// independently (cheap, no LLM calls involved) to get the REAL resolved
+// sheet names for the report's "Evidence Reviewed" text, without needing
+// runTier2 itself to change its existing return shape (a plain array of
+// findings, not an object — changing that would be a breaking change for
+// every existing caller).
+//
+// Each category is a list of aliases, tried in order via resolveAny() —
+// safer, fuller-word aliases first, short accounting abbreviations last.
+// A short abbreviation like 'Cons' is unsafe as a sole target: confirmed
+// on a real production file, 'Cons' silently matched an unrelated sheet
+// named 'Construction Timeline', feeding a construction schedule into
+// the accounting batch in place of a real cash flow statement, while the
+// genuine Balance Sheet/P&L/Cashflow sheets were never matched at all.
+const DEEP_ACCOUNTING_CATEGORIES = {
+  'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS'],
+  'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
+  'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
+  'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
+  'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity'],
+  'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T'],
+  'Leases':             ['Lease Schedule', 'Leases', 'Lease'],
+};
+
+/**
+ * Resolve the deep-accounting categories against a workbook's real sheet
+ * names. Returns which real sheet name was matched for each category (or
+ * absent if none), plus the list of categories that didn't resolve at
+ * all — this is the real data the "Evidence Reviewed" column should
+ * describe, replacing a static string in build_report.py that always
+ * said "AFS/IFS/Cons/Debt/Equity/D&T/Leases" regardless of what sheets
+ * were actually used for a given run.
+ */
+function resolveDeepAccountingSheets(sheetNames) {
+  const resolvedMap = {};
+  const unresolvedCategories = [];
+  for (const [category, aliases] of Object.entries(DEEP_ACCOUNTING_CATEGORIES)) {
+    const resolved = resolveAny(aliases, sheetNames);
+    if (resolved) {
+      resolvedMap[category] = resolved;
+    } else {
+      unresolvedCategories.push(category);
+    }
+  }
+  return { resolvedMap, unresolvedCategories };
+}
+
 async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
@@ -276,32 +325,15 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   // data — not the generic key_sheets sample. This gives Claude enough
   // evidence to actually test balance sheet roll-forwards, debt schedules,
   // and tax reconciliation rather than returning uncertain due to thin data.
-  //
-  // Each category is a list of aliases, tried in order via resolveAny() —
-  // safer, fuller-word aliases first, short accounting abbreviations last.
-  // A short abbreviation like 'Cons' is unsafe as a sole target: confirmed
-  // on a real production file, 'Cons' silently matched an unrelated sheet
-  // named 'Construction Timeline', feeding a construction schedule into
-  // the accounting batch in place of a real cash flow statement, while the
-  // genuine Balance Sheet/P&L/Cashflow sheets were never matched at all.
-  const DEEP_ACCOUNTING_CATEGORIES = {
-    'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS'],
-    'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
-    'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
-    'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
-    'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity'],
-    'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T'],
-    'Leases':             ['Lease Schedule', 'Leases', 'Lease'],
-  };
+  // Uses the module-level resolveDeepAccountingSheets() (defined above,
+  // before this function) so index.js/server.js can call the exact same
+  // resolution independently to get real sheet names for the report.
+  const { resolvedMap, unresolvedCategories } = resolveDeepAccountingSheets(parsed.sheetNames);
   const deepDataSubset = {};
-  const unresolvedCategories = [];
-  for (const [category, aliases] of Object.entries(DEEP_ACCOUNTING_CATEGORIES)) {
-    const resolved = resolveAny(aliases, parsed.sheetNames);
-    if (resolved && parsed.sheets[resolved]) {
+  for (const [category, sheetName] of Object.entries(resolvedMap)) {
+    if (parsed.sheets[sheetName]) {
       // Use a higher row cap (40) and wider extraction for the deep batch
-      deepDataSubset[resolved] = extractMeaningfulRows(parsed.sheets[resolved], 40);
-    } else {
-      unresolvedCategories.push(category);
+      deepDataSubset[sheetName] = extractMeaningfulRows(parsed.sheets[sheetName], 40);
     }
   }
   if (unresolvedCategories.length > 0) {
@@ -432,4 +464,4 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   }
 }
 
-module.exports = { runTier2, parseResponse };
+module.exports = { runTier2, parseResponse, resolveDeepAccountingSheets };

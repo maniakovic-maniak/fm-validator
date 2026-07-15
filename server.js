@@ -28,7 +28,7 @@ const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
 const { runTier1 }                               = require('./src/validator-tier1');
 const { runTier0 }                               = require('./src/validator-tier0');
-const { runTier2 } = require('./src/validator-tier2');
+const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
 const { sendNotification }                       = require('./src/notifier');
@@ -597,6 +597,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const igReadiness = auditCompletion;
     const igCommentary = auditCommentary;
 
+    const deepAccountingResolvedSheets = resolveDeepAccountingSheets(parsed.sheetNames);
+
     await buildReportFile(reportPath, allFlagged, [], {
       originalName,
       modelType,
@@ -619,7 +621,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       formulaDeepDive,
       reasonableness,
       duplicateSheets,
-      vbaReview
+      vbaReview,
+      deepAccountingResolvedSheets
     });
 
     let driveResult = null;
