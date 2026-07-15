@@ -1,282 +1,259 @@
-# Property Development & Operations — Domain Context
+# Real Estate and Property Development — Domain Context
 
-This file provides property development and operations-specific context to help
-you understand the model. The ranges below are context for your judgment —
-they are NOT pass/fail thresholds. Always assess plausibility against the
-model's own history and stated assumptions, not against fixed numbers.
+This file provides property development context for Tier 2 validation.
+The ranges below are context for your judgment — they are NOT pass/fail
+thresholds. Always assess plausibility against the model's own history and
+stated assumptions first.
 
 ## Model type
 
-A property development and operations model — used where a physical asset is
-built (development/construction phase) and then held and operated (rather than
-sold on completion) to generate ongoing cashflow, with returns measured through
-both a construction-phase funding lens (debt/equity sources and uses) and an
-operating-phase lens (P&L, debt serviceability, terminal valuation).
+A real estate or property development financial model. Used for residential
+and commercial development, built-to-rent, land subdivision, mixed-use
+projects, and property trusts.
 
-This differs from a pure "build-to-sell" property model (which resolves to a
-single GDV/settlement event) in that value realisation here comes from two
-places: (1) an implied development margin — the gap between total project
-cost and the value the completed asset supports — and (2) an ongoing
-operating business valued on an EBITDA multiple / DCF basis at exit. Both
-lenses must be checked; a model that only shows one is incomplete.
+A less common but real variant: a single model that both develops the asset
+AND continues to operate it afterwards (rather than selling at completion),
+common in hospitality, entertainment venue, and mixed-use projects. This
+variant resolves value through TWO lenses rather than one — the usual
+development margin (cost vs. value on completion) AND an ongoing operating
+business valued on an EBITDA multiple or DCF basis at eventual exit. Where
+you identify this variant, apply the core checks below AND the additional
+operating-phase guidance flagged throughout this file — both apply, not
+one instead of the other.
 
-Sector variants seen in this model type include hospitality, entertainment
-venues, mixed-use and commercial developments where the asset is developed
-and then operated by the same vehicle rather than divested at completion.
-Revenue in the operating phase is frequently activity-driven rather than
-simple occupancy — e.g. an entertainment venue built up from event days by
-type, capacity and sell-through %, plus secondary streams such as premium
-ticketing, food & beverage, and sponsorship/naming-rights value-in-kind.
-Treat this operating layer with the same rigor as the construction layer —
-these models are often built with heavy presentation/governance scaffolding
-(teaser decks, programme/Gantt charts, audit registers) around a
-comparatively thin operating core, and the presentation layer should not be
-mistaken for validated calculation.
+Some models explicitly compare a hold case against a sell case as a
+decision the model itself is testing (rather than assuming one path) —
+where you see both a completed-asset sale value AND a hold/operate
+valuation modelled side by side, check both cases individually rather
+than assuming only one is relevant. Confirm which lifecycle phases the
+model actually flags (planning/design, construction, completion,
+operations, exit) — a model missing an explicit phase flag for one of
+these is a structural gap, not just a documentation one.
 
-## Project / model characteristics
+## Project characteristics
 
-- Currency: check the Inputs / master assumptions sheet — do not assume AUD,
-  but GST at 10% (if present) is a strong signal of an Australian project
-- Periodicity: construction phase is often tracked at monthly/period level
-  for capex drawdown accuracy; operating phase typically reverts to annual
-  (FY) reporting once the asset is trading
-- Lifecycle phases: planning/design → construction → practical completion /
-  commissioning → stabilised operations → exit (sale or refinance). Each
-  phase has a distinct cost and revenue profile and the model should
-  explicitly flag which phase each period belongs to (a "construction/ops
-  flag" on the P&L or Cashflow is a common mechanism)
-- Funding stack: typically a mix of senior bank debt, sponsor/founder
-  equity, and other equity-like tranches (private equity, partnership
-  deposits, naming rights/sponsorship prepayments) — the classification of
-  each tranche as debt vs equity materially affects gearing, DSCR and
-  equity IRR, and is a frequent source of inconsistency
-- Exit mechanism: either a GDV/settlement-style sale of the completed asset,
-  or (as in an operating venue) a terminal value calculated as trading
-  EBITDA × an exit multiple, discounted back via WACC — confirm which
-  mechanism the model actually uses before applying sale-based checks, and
-  use the model's own stated terms (its own rate, its own multiple) as the
-  anchor for sense-checking rather than an external market benchmark
+- Two distinct model types: development feasibility (land and development
+  costs weighed against sale or rental value) and income-producing asset
+  — plus a third, combined variant where a single model develops the
+  asset and then operates it in the same vehicle rather than divesting at
+  completion (see Model type above). Confirm which of the three you are
+  looking at before applying the checks below.
+- Periodicity: usually monthly — covering pre-development, construction, and
+  sales/operations. In the combined variant, construction phase is often
+  tracked monthly for drawdown accuracy while the operating phase reverts to
+  annual (FY) reporting once the asset is trading.
+- Currency: AUD typically — check the Inputs sheet to confirm
+- Lifecycle: typically 2 to 7 years for development, ongoing for
+  income-producing. In the combined variant, expect explicit lifecycle
+  phase flags (planning/design → construction → practical completion →
+  stabilised operations → exit) rather than a single completion date.
 
 ## Sheet map — what each sheet contains
 
-| Sheet | Contents | Key items to find |
+| Sheet | Contents | Key rows to find |
 |---|---|---|
-| Readme / General Information / Disclaimer | Navigation and narrative only | Confirm genuinely non-calculating |
-| Equity Dashboard | Investor-facing outputs | IRR, MOIC, NPV sensitivity to WACC/exit multiple, funding deployment |
-| Debt Dashboard | Lender-facing metrics | Revenue, EBITDA, closing cash, total debt, DSCR, ICR by year |
-| Dashboard (backup) | Archived snapshot of dashboard values | Compare against live dashboard for drift/discrepancy |
-| Cashflow | Consolidated cash waterfall | Equity/debt drawdowns, opening/closing cash reconciliation |
-| P&L | Profit and loss | Revenue by category, construction/ops phase flags |
-| Balance Sheet | Balance sheet | Cash, restricted reserve accounts, receivables, inventory, lease deposits |
-| Valuation | DCF / terminal value | WACC, cost of equity/debt, tax rate, exit multiple, project IRR/NPV |
-| Inputs / Inputs for Dashboard | Master assumptions | Project timing, lease terms, rates feeding dashboards |
-| Revenue Assumptions | Pricing build-up | Rate cards by revenue category/tier, capacity assumptions |
-| Expense Assumptions | Cost build-up | Staffing, on-costs, mobilisation/pre-opening costs |
-| Construction Timeline | Capex by category | Design/consultants, structure, civil, fit-out, services, finance costs |
-| Scenarios | Scenario toggles | Revenue/cost/capex/inflation multipliers, delay assumptions |
-| Financial Summary (+ backup) | Consolidated P&L/BS summary | Compare live vs backup for reconciliation |
-| Debt | Debt schedule | Facility terms, drawdown/repayment, start/end flags, any tranche reclassification notes |
-| GST Calculation | Tax on revenue/costs | GST rate, timing of GST cash flows into/out of Cashflow |
-| Calendar Assumptions | Activity/utilisation calendar | Operating days/events per year by category, capacity, sell-through % |
-| Partnership Assumptions | Non-standard funding/revenue | Sponsorship, naming rights, value-in-kind, equity waterfall terms |
-| Timing / Legend | Should be the authoritative master timeline | Check it is actually populated — if empty, other sheets referencing it are unverifiable, and the "true" values may be hardcoded elsewhere instead |
-| Original Capex | Sources of pre-operational funding | Founder/sponsor, third-party equity, bank debt, deposits, by period |
-| For Deck / For Teaser Deck | Presentation extracts | Headline IRR, MOIC, DSCR, LTV/LTC, stress tests — reconcile to live sheets, non-authoritative |
-| GANTT | Construction programme | Explicitly presentation-only in some models — confirm authoritative source elsewhere |
-| Assumption Register | Unsupported/external-reliance items | DSRA sizing, exit multiple support, statutory items — check status, not just presence |
-| Model Checks | Live validation gates | Formula error checks, key switch/rate tracking |
-| Audit QA / Validation Closure / Change Log | Governance/remediation history | Confirm items marked "closed" are genuinely resolved, not just logged |
-| Accounting & COA Map | Forecast-to-accounting mapping notes | Confirm it is described as a mapping only, not a formal COA |
+| Summary / Dashboard | Key metrics | GDV, development margin, IRR, equity return, peak debt |
+| Inputs / Assumptions | All hard-coded assumptions | Land cost, construction cost, sales price, cap rate, rates, dates |
+| Development Cost | Cost schedule | Land, construction, consultants, finance costs, contingency, GST |
+| Revenue / Sales | Revenue schedule | Sales programme by stage, lot type, settlement timing |
+| Cash Flow | Development cash flow | Drawdowns, sales receipts, net position by period |
+| Funding | Funding structure | Equity, construction finance, residual debt, LVR |
+| Valuation | Asset valuation | Cap rate or DCF valuation of completed asset |
+| Sensitivity | Sensitivity analysis | Price, cost, timing, interest rate sensitivities |
+
+**Additional sheets seen in the combined develop-and-operate variant** —
+these won't appear in a pure build-to-sell model, and their absence is not
+itself a problem unless the model has already been identified as this variant:
+
+| Sheet | Contents | Key rows to find |
+|---|---|---|
+| Equity Dashboard | Investor-facing outputs for the ongoing business | IRR, MOIC, NPV sensitivity to WACC/exit multiple |
+| Debt Dashboard | Lender-facing metrics for the ongoing business | DSCR, ICR, total debt, closing cash by year |
+| P&L (operating) | Ongoing profit and loss once trading | Revenue by category, construction/ops phase flag |
+| Calendar / Activity Assumptions | Operating-phase revenue drivers | Event days/occupancy/activity by type, capacity, sell-through % |
+| Backup / archived tabs | Snapshot copies of dashboards or summaries | Compare against the live version for drift — often diverge |
 
 ## Typical ranges — for context only, not thresholds
 
-Use these only to orient your judgment. A value outside these ranges is not
-automatically a fail — always compare first against the model's own stated
-assumptions and history. Flag genuine outliers as uncertain for human
-review, not as automatic failures.
-
 | Metric | Typical context range | How to assess |
 |---|---|---|
-| Development margin (value on completion vs. total cost) | Often around 15%–25% for a viable development | Compare against the model's own contingency and cost assumptions, not a fixed hurdle |
-| Contingency as % of construction capex | Often 5%–10% depending on project maturity/complexity | A design-stage project with near-zero contingency is a flag worth raising |
-| GST rate (Australia) | 10% on taxable supplies | Check GST is applied consistently to both revenue and cost lines, not just one side |
-| Senior debt interest rate | Compare to the facility terms actually stated in the Debt sheet | Do not assume a "market" rate — use the model's own disclosed terms as the baseline |
-| DSCR (debt service coverage) | Lenders often look for a minimum in the 1.20x–1.50x range | A DSCR below 1.00x in any period is a technical default and should not be waved through as a range issue |
-| LTC / LTV at financial close | Often 60%–75% for development financing | Compare against the debt sizing and equity contribution actually modelled |
-| Exit EBITDA multiple (operating venue/hospitality assets) | Wide range, commonly single-digit multiples (roughly 5x–9x) | Check whether the multiple used is supported by comparable transaction evidence, or simply asserted — this is frequently an unsupported assumption |
-| WACC / discount rate | Often 8%–14% depending on risk profile and gearing | Cross-check against the cost of debt and cost of equity actually built up in the Valuation sheet, not just an asserted headline number |
-| Stabilised EBITDA margin | Varies materially by sector and event/activity mix | Compare year-on-year once stabilised — a margin that keeps expanding indefinitely with no stated driver is suspect |
+| Development margin (profit on cost) | 15% to 25% residential, 20% to 30% commercial | Below 12% is unviable, compare to project risk |
+| Project IRR | 15% to 35% | Varies significantly by risk and leverage |
+| Equity multiple | 1.5x to 3.0x | Over a typical 2 to 5 year project |
+| Cap rate | 4% to 7% Australian commercial | Varies by asset class, location, quality |
+| LVR on construction finance | 65% to 75% of TDC | Check against facility documents |
+| Contingency | 5% to 10% of hard construction costs | Below 5% is a concern |
+| GST margin scheme | Apply where land was purchased without GST | Check tax advice reference |
+| Exit EBITDA multiple *(combined variant only)* | Wide range, commonly single-digit (roughly 5x–9x) for operating venue/hospitality assets | Check whether supported by comparable transaction evidence, or simply asserted |
+| DSCR *(combined variant only)* | Lenders often look for a minimum in the 1.20x–1.50x range | A DSCR below 1.00x in any period is a technical default, not a range issue |
 
 When a value falls outside these ranges, ask: does the model contain an
-assumption or characteristic that explains it? If yes, treat as pass. If you
-cannot explain it from the data, return uncertain — do not fail on the range
-alone.
+assumption or characteristic that explains it? If yes, pass. If you cannot
+explain it from the data, return uncertain.
 
-## Common failure patterns specific to this domain
+## Property-specific checks
 
-1. **Debt/equity tranche reclassification not carried through consistently.**
-   A funding tranche (e.g. a PE tranche) relabelled from debt to equity on
-   the Debt sheet, but the Cashflow, Balance Sheet and DSCR/gearing
-   calculations still treat it under its original classification — check
-   that interest, repayment obligations, and equity return waterfalls are
-   consistent with the *stated* classification, not the legacy formula
-   references.
+### Development cost reconciliation
+Total development cost = land + construction + consultants + finance costs
++ contingency + GST. Any unaccounted residual is a critical error. Check
+that development cost phasing is consistent with the construction
+programme (an S-curve, not a lump sum) — see Cash flow timing below.
 
-2. **Lender-facing coverage metrics presented without the reserve mechanism
-   that supports them.** A Debt Service Reserve Account (DSRA) toggled off
-   in the assumptions while DSCR/ICR are still shown on lender-facing
-   dashboards/teaser materials as if a reserve buffer exists — check whether
-   the coverage ratios or their narrative framing implicitly assume reserve
-   support that isn't actually funded.
+Finance costs specifically require two checks: that debt drawdown is
+consistent with the phased cost schedule (drawing ahead of or behind the
+actual spend profile is a flag), and that interest during construction is
+capitalised into total development cost rather than expensed through a
+P&L that shouldn't exist yet at this stage — interest capitalisation
+excluded from TDC is one of the more common ways all-in cost is
+understated (see failure pattern 2 below).
 
-3. **Live vs backup sheet divergence (three-statement integration).**
-   "Backup" or archived snapshot tabs (dashboard backups, financial summary
-   backups) showing materially different EBITDA, cash, or debt figures than
-   the live/authoritative version for the same period is a direct signal
-   that either the backup is stale or the live tab has since changed
-   without the backup being refreshed — either way, the three statements
-   are not currently reconciled to a single source of truth. Confirm which
-   version is authoritative before relying on any output.
+### GDV and development margin
+GDV = sum of all sale proceeds (for a sale exit, driven by sales/rent
+assumptions on the Revenue/Sales sheet) or capitalised value of rental
+income (for a hold exit) — confirm which basis the model actually uses
+before checking the arithmetic. GDV reconciliation means confirming this
+total ties explicitly back to the sales/rent assumptions feeding it, not
+just appearing as a standalone output figure.
+Development margin = profit divided by total development cost.
+Check the arithmetic for both. Where a model presents hold/sell cases
+side by side (see Model type above), reconcile the development costs and
+margin arithmetic separately for each case.
 
-4. **Activity/utilisation assumptions not driving revenue.** Calendar or
-   scheduling assumptions (event days, occupancy days, capacity,
-   sell-through %) that exist on their own sheet but don't visibly flow
-   into the pricing/revenue build — check that a change in operating days
-   or capacity actually moves the revenue line, not just that both exist
-   in the workbook.
+### Cash flow timing
+Construction drawdowns should follow the S-curve — slow start, fast middle,
+slow finish. Sales proceeds should follow the sales programme.
+Finance costs must be consistent with the drawn balance and interest rate.
 
-5. **Construction timing inconsistency across sheets that all claim
-   authority.** Multiple sheets (Timing, Construction Timeline, GANTT,
-   P&L construction/ops flags) each implying a construction start/completion
-   date, with no single sheet clearly driving the others — worse if one of
-   the "authoritative" sources (e.g. Timing) is actually empty, meaning
-   downstream formulas referencing it are unverifiable or silently broken
-   and may be returning zero/blank rather than erroring visibly.
+### GST/VAT treatment
+GST on sales must be included in gross proceeds and netted out.
+GST on costs must be recovered via BAS.
+The model must be consistent — either all inclusive or all exclusive.
+Flag any mixing of GST-inclusive and GST-exclusive amounts. For a
+non-Australian project, apply the same GST/VAT treatment consistency
+check to whatever the local equivalent tax is (VAT in many other
+jurisdictions) — confirm which one actually applies from the Inputs
+sheet rather than assuming GST.
 
-6. **GST treatment applied inconsistently to cash timing (tax
-   reconciliation).** GST calculated on revenue and/or costs but not
-   consistently reflected in the cashflow timing (e.g. GST collected/paid
-   in the period of accrual vs. the period of actual BAS remittance) —
-   check whether GST cash timing assumptions (lodgement frequency) are
-   actually specified anywhere, or simply assumed to net to zero. A mixed
-   inclusive/exclusive treatment across sheets distorts both margin and
-   cash reconciliation without being obvious from the totals alone.
+### Settlement risk
+Check that settlement assumptions are realistic — not 100% settlement
+in the first month of completion. Flag if settlement timing appears
+optimistic relative to market conditions.
 
-7. **Contingency and cost escalation not reconciled to the funding stack.**
-   Construction capex broken out by category (consultants, structure,
-   civil, fit-out, services) with a contingency line that doesn't scale
-   with project delay/cost-escalation scenario toggles — check whether a
-   "pessimistic" scenario multiplier actually increases contingency draw,
-   or leaves it static while other cost lines inflate.
+### Operating-phase checks (combined develop-and-operate variant only)
+Only apply these where the model both develops AND operates the asset —
+see Model type above. They sit alongside, not instead of, the checks above.
 
-8. **Exit valuation asserted rather than derived.** An exit EBITDA multiple
-   (or capitalisation rate, for a sale-based exit) entered as a hard input
-   with no supporting comparable transaction evidence anywhere in the model
-   — if the Assumption Register or equivalent flags this as unconfirmed,
-   treat the resulting IRR/NPV as sensitive to an unsupported number, not as
-   validated output.
+**Dual exit-mechanism reconciliation.** Confirm the model reconciles total
+development cost against BOTH value lenses where relevant: the completed-
+asset value (GDV-style, for the development-margin check above) and the
+terminal value of the ongoing operating business (EBITDA multiple or DCF).
+A model that only shows one lens when it genuinely operates the asset
+afterwards is incomplete.
 
-9. **Broken date/period arithmetic in sensitivity tables.** Sensitivity
-   grids (IRR/NPV by scenario, typically on the Equity Dashboard) showing
-   nonsensical year values (e.g. a five-digit year) indicate a date-serial
-   arithmetic error, most often from a drag-filled date formula referencing
-   the wrong anchor cell. This corrupts the entire sensitivity grid, not
-   just its display — trace what else keys off that same date cell.
+**Lifecycle phase integrity.** Confirm every period is unambiguously
+flagged construction-phase or operating-phase (or transition), and that
+revenue, opex, and capex behave consistently with that flag — no operating
+revenue during a period flagged construction, and no construction-scale
+capex continuing indefinitely into stabilised operations.
 
-10. **Scenario multipliers applied inconsistently across the model
-    (scenario engine).** A scenario toggle for revenue, cost, capex,
-    inflation, or delay needs to actually propagate through every
-    assumption sheet it should affect (revenue assumptions, expense
-    assumptions, construction timeline, calendar/activity assumptions)
-    independently. A common failure is a scenario that visibly changes
-    revenue in the P&L but leaves capex or opex at base-case levels,
-    silently overstating downside-case profitability or understating
-    downside-case leverage.
+**Working capital linked to operating drivers.** Once trading, balance
+sheet receivables, inventory, and deposits should move with the P&L lines
+they relate to, not sit as a flat balance or a fixed % disconnected from
+the revenue build.
 
-11. **Working capital not linked to operational drivers.** Balance sheet
-    receivables, inventory, and lease/reserve deposits should move with
-    the P&L revenue/cost lines they relate to (e.g. inventory tied to
-    F&B-style revenue and its cost of sales, receivables tied to billing
-    timing for the relevant revenue stream). A working capital balance
-    that is flat, a fixed % assumption disconnected from the revenue
-    build, or a plug to force the balance sheet to balance, is the
-    failure pattern to check for.
+**Scenario propagation across both phases.** A scenario toggle (revenue,
+cost, capex, delay) needs to propagate through both the construction-phase
+assumptions and the operating-phase assumptions consistently — a common
+failure is a scenario that changes operating revenue but leaves
+construction capex at base case, or vice versa.
 
-12. **Construction-to-operations transition leakage (margin
-    plausibility).** Check that capex does not continue at
-    development-phase levels once the construction/ops flag switches to
-    operating, and that revenue/EBITDA margins in the first stabilised
-    period are plausible relative to the activity/capacity/sell-through
-    build feeding revenue — rather than jumping straight to a mature-year
-    margin with no visible ramp-up.
+## Common property model failure patterns
 
-## Dependency chain
+1. Development margin calculated on GDV not TDC — overstates margin
+   by using the wrong denominator
+
+2. Finance costs not in TDC — construction loan interest excluded from
+   total development cost, understating true all-in cost
+
+3. GST not netted correctly — GST on sales included in profit calculation,
+   overstating returns by the GST component
+
+4. Contingency adequacy below market — 3% or less of hard costs with no
+   rationale, inadequate buffer for cost overruns
+
+5. Settlement assumed at practical completion — 100% settlement modelled
+   immediately on completion with no lag for buyer settlement periods
+
+6. Land cost timing wrong — land cost modelled as a lump sum at start
+   rather than following the actual purchase, deposit, and settlement dates
+
+7. Capex and opex mixed — construction costs and ongoing maintenance
+   costs not separated, distorting both development margin and yield
+
+**Additional patterns specific to the combined develop-and-operate variant**
+(only apply where the model both develops AND operates the asset):
+
+8. Broken date/period arithmetic in sensitivity tables — a sensitivity
+   grid (IRR/NPV by scenario, typically on an Equity Dashboard) showing a
+   nonsensical year value indicates a date-serial arithmetic error,
+   usually a drag-filled date formula referencing the wrong anchor cell.
+   This corrupts the whole grid, not just its display — trace what else
+   keys off that date cell.
+
+9. Debt/equity tranche misclassification not carried through — a funding
+   tranche relabelled from debt to equity (or vice versa) on the Debt
+   sheet, while downstream DSCR/gearing/equity-waterfall calculations
+   still use the original classification.
+
+10. Live vs backup sheet divergence — archived/backup dashboard or summary
+    tabs showing materially different EBITDA, cash, or debt figures than
+    the live version for the same period, indicating either a stale
+    backup or an unreconciled manual override.
+
+11. Activity/utilisation assumptions not driving operating revenue —
+    calendar or scheduling assumptions (occupancy days, event days,
+    capacity, sell-through %) that exist on their own sheet but don't
+    visibly flow into the operating-phase revenue build.
+
+12. Construction-to-operations margin implausibility — capex continuing
+    at development-phase levels after the ops flag switches on, or
+    stabilised-period EBITDA margins that jump straight to a mature-year
+    level with no visible ramp-up from the activity/capacity build.
+
+## Dependency chain for property models
 
 ```
-Calendar Assumptions (operating days/capacity/sell-through)
-        → Revenue Assumptions (rate card by category)
-        → P&L revenue lines
-        → EBITDA (P&L / Financial Summary)
-
-Construction Timeline (capex by category)
-        → Original Capex (funding sources: sponsor equity, PE tranche, bank debt, deposits)
-        → Cashflow (drawdowns, opening/closing cash)
-        → Balance Sheet (PP&E, cash, reserves)
-
-Debt sheet (facility terms, drawdown/repayment schedule)
-        → Cashflow (debt service)
-        → Debt Dashboard (DSCR, ICR)
-        → Equity Dashboard (residual cash to equity, IRR, MOIC)
-
-GST Calculation (typically 10% on revenue/costs)
-        → Cashflow (GST cash timing)
-
-EBITDA + Valuation assumptions (WACC, cost of debt/equity, tax rate, exit multiple)
-        → Terminal value (Valuation)
-        → Project IRR / NPV
-        → Equity IRR / MOIC (Equity Dashboard)
-
-Scenarios (revenue/cost/capex/delay/inflation multipliers)
-        → re-runs the entire chain above under Base/Optimistic/Pessimistic cases
-        → Financial Summary / Dashboards reflect active scenario only
-
-Financial Summary & Dashboard sheets
-        → For Deck / For Teaser Deck (presentation extracts — must reconcile back to source)
+Inputs (land, construction, cap rate, sales price) → Cost schedule
+Construction programme → Cost timing (S-curve drawdowns)
+Sales programme → Revenue timing (settlements)
+Revenue - TDC → Development profit
+Development profit / TDC → Development margin
+Equity + Construction finance → Funding waterfall
+Drawdowns - Repayments → Net debt position
+Cash position → LVR tests → Covenant compliance
+Completed asset value → Cap rate → Yield on cost
+IRR → From investor equity cash flows (in, out)
 ```
 
-## Property/venue-specific accounting and governance checks
+**Additional chain for the combined develop-and-operate variant** — runs
+alongside the chain above rather than replacing it; both apply once the
+model transitions from construction into operations:
 
-**Development margin reconciliation (GDV reconciliation)**
-Check that total project cost (all capex categories + contingency + finance
-costs during construction) is explicitly compared somewhere in the model to
-the value the completed asset supports (either an appraised/GDV-style value
-for a sale exit, or a GDV-equivalent discounted terminal EBITDA value for a
-hold/operate exit). A model with no visible cost-vs-value (GDV) reconciliation
-is missing a core viability check, regardless of exit mechanism.
+```
+Calendar/Activity Assumptions (occupancy/events/capacity/sell-through)
+   → Operating revenue (P&L)
+   → Stabilised EBITDA
 
-**GST treatment**
-Confirm GST is applied consistently: to both revenue and cost lines, at the
-same rate, with an explicit assumption on remittance timing (BAS frequency)
-feeding the cashflow — not just a net GST line that nets to zero by
-construction without ever modelling the timing mismatch.
+Debt sheet (facility terms, drawdown/repayment)
+   → Debt service
+   → Debt Dashboard (DSCR, ICR)
+   → Equity Dashboard (residual cash to equity, IRR, MOIC)
 
-**Settlement / drawdown timing**
-For a sale-exit model, check settlement timing assumptions (deposit vs.
-final settlement, and any settlement risk/delay allowance) flow into the
-cashflow in the correct period. For a hold/operate model, check the
-equivalent — equity/debt drawdown timing against the construction
-programme — is driven by one clearly authoritative timing source, not
-several partially-populated ones.
+Stabilised EBITDA + Valuation assumptions (WACC, exit multiple)
+   → Terminal value
+   → Equity IRR / MOIC (as an alternative to, or alongside, the
+     completed-asset-value / cap-rate path above)
 
-**Contingency adequacy**
-Confirm a contingency line exists, is sized as a percentage of a defined
-cost base (not a fixed dollar amount unrelated to scope), and responds to
-scenario-driven cost escalation or delay assumptions rather than remaining
-static across Base/Optimistic/Pessimistic cases.
-
-**Lifecycle phase integrity**
-Confirm every period in the model is unambiguously flagged as
-construction-phase or operating-phase (or transition), and that revenue,
-opex, and capex line items behave consistently with that flag — e.g. no
-operating revenue appearing during a period flagged as construction, and no
-construction-scale capex continuing indefinitely into stabilised operations.
+Scenarios (revenue/cost/capex/delay multipliers)
+   → re-runs both chains under Base/Optimistic/Pessimistic cases
+```

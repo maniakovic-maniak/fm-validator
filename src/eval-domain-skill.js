@@ -59,7 +59,7 @@ function checkFocusAreaCoverage(draftContent, weightingGuidance) {
   // development margin calculation, GST treatment, settlement timing,
   // contingency adequacy, lifecycle phases."
   const listPart = weightingGuidance.replace(/^Higher weight on:\s*/i, '').replace(/\.$/, '');
-  const focusAreas = listPart.split(',').map(s => s.trim()).filter(Boolean);
+  const focusAreas = listPart.split(',').map(s => s.trim().replace(/^and\s+/i, '')).filter(Boolean);
   // Collapse all whitespace (including newlines) to single spaces before
   // matching — markdown content is routinely soft-wrapped across lines,
   // and a multi-word focus area term can straddle a line break (e.g.
