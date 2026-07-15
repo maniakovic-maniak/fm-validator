@@ -155,32 +155,48 @@ emphasis. Apply these weightings when assessing overall_assessment and
 audit_completion_percent:
 
 **Project finance / infrastructure models**
-Higher weight on: debt roll-forward, DSCR, cash waterfall, covenant compliance,
-DSRA, period flags, actuals cut-over. A single gate failure here typically
-blocks a P1 finding that needs attention before the model is relied on.
+Higher weight on: debt service, debt roll-forward, debt sizing, reserve
+accounts (DSRA), cash waterfall sequencing, cash sweep and lock-up
+mechanisms, covenant definitions and compliance, interest during
+construction, period flags, actuals cut-over, and distributions. A single
+gate failure here typically blocks a P1 finding that needs attention
+before the model is relied on.
 
 **Corporate / operating company models**
-Higher weight on: three-statement integration, working capital, tax
-reconciliation, margin plausibility, scenario engine. Gate failures are
-a P1 or P2 finding depending on the scope of impact.
+Higher weight on: revenue drivers, opex classification, working capital,
+tax reconciliation, three-statement integration, scenario control
+(scenario engine), margin plausibility, and management reporting outputs.
+Gate failures are a P1 or P2 finding depending on the scope of impact.
 
-**Valuation / DCF models**
-Higher weight on: discount rate documentation, terminal value assumptions,
-IRR/NPV formula integrity, sensitivity analysis, shadow IRR check.
-Terminal value dominance (>70% of value) always warrants a flag.
+**Valuation / M&A models**
+Higher weight on: historical normalisation, bridge items, debt-like items,
+working capital normalisation, purchase accounting assumptions,
+transaction adjustments, valuation outputs, discount rate documentation,
+terminal value assumptions, IRR/NPV formula integrity, sensitivity
+analysis, and shadow IRR check. Terminal value dominance (>70% of value)
+always warrants a flag. Note this category covers two related but
+distinct angles — pure DCF valuation and M&A transaction analysis — apply
+whichever sub-set of these items the model actually contains rather than
+expecting every model to show all of them.
 
 **Lending / credit models**
-Higher weight on: covenant definitions, DSCR floor breach testing,
-downside not suppressed, debt roll-forward, no plugs.
-Any covenant breach in the base case is an immediate escalation.
+Higher weight on: cash flow, debt service, covenant definitions, DSCR
+floor breach testing, liquidity, downside scenarios (downside not
+suppressed), refinancing assumptions, security values, facility terms,
+debt roll-forward, and no plugs. Any covenant breach in the base case is
+an immediate escalation.
 
 **Fund / equity waterfall models**
-Higher weight on: ownership percentages, preferred return accrual,
-distributions after obligations, IRR from live cash flows, no plugs.
+Higher weight on: capital calls, distributions after obligations, carried
+interest, preferred return accrual, GP/LP splits and ownership
+percentages, hurdle mechanics, clawback, tax leakage, investor reporting,
+IRR from live cash flows, and no plugs.
 
 **Real estate / development models**
-Higher weight on: GDV reconciliation, development margin calculation,
-GST treatment, settlement timing, contingency adequacy, lifecycle phases.
+Higher weight on: land cost, development costs, phasing, sales/rent
+assumptions, GDV reconciliation, development margin calculation, GST/VAT
+treatment, debt drawdown, interest capitalisation, contingency adequacy,
+settlement timing, valuation, hold/sell cases, and lifecycle phases.
 
 **SaaS / technology models**
 Higher weight on: ARR waterfall integrity, revenue recognition timing,
