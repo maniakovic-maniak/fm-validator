@@ -166,7 +166,6 @@ def build_report(data_path, output_path):
             _w=str(_f.get('condition') or _f.get('what_wrong') or _f.get('reason') or _f.get('detail') or '').replace('\n',' ').strip()
             if _w:
                 _t=re.split(r'(?<=[.;])\s',_w)[0]
-                if len(_t)>70: _t=_t[:67].rstrip(' ,;:')+'...'
             else:
                 _t=_f.get('id','')
         _f['title']=_t; _f['label']=_t
@@ -384,13 +383,13 @@ def build_report(data_path, output_path):
         badge(ws1,i,2,pri,pf,pt)
         c3=ws1.cell(i,3); c3.value=f.get('category','') or '—'; c3.font=Fn(sz=9,col=CHARCOAL); c3.fill=F(WHITE); c3.alignment=A(h='center',v='center'); c3.border=B(col=PANEL_BORDER)
         ws1.merge_cells(f'D{i}:E{i}')
-        ws1[f'D{i}'].value=(f.get('title') or f.get('label') or '')[:90]
+        ws1[f'D{i}'].value=(f.get('title') or f.get('label') or '')
         ws1[f'D{i}'].font=Fn(sz=9,col=CHARCOAL); ws1[f'D{i}'].fill=F(WHITE); ws1[f'D{i}'].alignment=A(wrap=True,v='center')
         ws1.merge_cells(f'F{i}:G{i}')
         impact = f.get('model_risk') or f.get('consequence') or '—'
-        ws1[f'F{i}'].value=str(impact)[:110]; ws1[f'F{i}'].font=Fn(sz=9,col=CHARCOAL); ws1[f'F{i}'].fill=F(WHITE); ws1[f'F{i}'].alignment=A(wrap=True,v='center')
+        ws1[f'F{i}'].value=str(impact); ws1[f'F{i}'].font=Fn(sz=9,col=CHARCOAL); ws1[f'F{i}'].fill=F(WHITE); ws1[f'F{i}'].alignment=A(wrap=True,v='center')
         action = f.get('corrective_action') or f.get('fix_instruction') or '—'
-        c8=ws1.cell(i,8); c8.value=str(action)[:80]; c8.font=Fn(sz=9,col=CHARCOAL); c8.fill=F(WHITE); c8.alignment=A(wrap=True,v='center'); c8.border=B(col=PANEL_BORDER)
+        c8=ws1.cell(i,8); c8.value=str(action); c8.font=Fn(sz=9,col=CHARCOAL); c8.fill=F(WHITE); c8.alignment=A(wrap=True,v='center'); c8.border=B(col=PANEL_BORDER)
         _row_target = id_to_issue_row.get(f.get('id'))
         c9=ws1.cell(i,9)
         if _row_target:
@@ -485,7 +484,7 @@ def build_report(data_path, output_path):
         ws1[f'B{i}'].value=area; ws1[f'B{i}'].font=Fn(bold=True,sz=9,col=CHARCOAL); ws1[f'B{i}'].fill=F(WHITE); ws1[f'B{i}'].alignment=A(v='center')
         badge(ws1,i,4,status_txt,sf,st,sz=8)
         ws1.merge_cells(f'E{i}:H{i}')
-        ws1[f'E{i}'].value=summary[:130]; ws1[f'E{i}'].font=Fn(sz=9,col=GREY_TXT2); ws1[f'E{i}'].fill=F(WHITE); ws1[f'E{i}'].alignment=A(wrap=True,v='center')
+        ws1[f'E{i}'].value=summary; ws1[f'E{i}'].font=Fn(sz=9,col=GREY_TXT2); ws1[f'E{i}'].fill=F(WHITE); ws1[f'E{i}'].alignment=A(wrap=True,v='center')
         ref = _ref_tab.get(area,'Validation Matrix')
         c9=ws1.cell(i,9); c9.value=f"=HYPERLINK(\"#'{ref}'!A1\",\"{ref}\")"
         c9.font=Font(size=8,color=MID_BLUE,underline='single',name='Arial'); c9.fill=F(WHITE); c9.alignment=A(h='center',v='center')
@@ -1015,7 +1014,7 @@ def build_report(data_path, output_path):
         # source text already starts with one; otherwise keep as-is but cap
         # length tightly so it reads as an action item, not a paragraph.
         raw_action = f.get('corrective_action') or f.get('fix_instruction','')
-        action_text = raw_action[:100].rstrip(' ,;:')+('...' if len(raw_action)>100 else '')
+        action_text = (raw_action or '').rstrip(' ,;:')
 
         row_values={
             '#': idx+1, 'Finding ID': f.get('id',''), 'Priority': pri,
@@ -1193,7 +1192,7 @@ def build_report(data_path, output_path):
         row_i = VM_HEADER_ROW+1+idx
         row_bg = WHITE if idx%2==0 else 'FAFBFC'
         row_values={
-            'Rule ID': m['rid'], 'Test Area': m['area'], 'Rule': m['rule'][:120], 'Tier': m['tier'],
+            'Rule ID': m['rid'], 'Test Area': m['area'], 'Rule': m['rule'], 'Tier': m['tier'],
             'Status': m['status'], 'Confidence': m['conf_num'] if m['conf_num'] is not None else '—',
             'Related Findings': m['refs'], 'Retest Required': m['retest'],
             '#': idx+1, 'Performed': m['performed'], 'Evidence Reviewed': m['evidence'], 'Missing Evidence': m['missing'],
