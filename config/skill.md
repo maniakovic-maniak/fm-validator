@@ -1329,3 +1329,86 @@ depreciation, working capital, distributions, and return calculations.
 Do not apply this level of commentary to Low or Moderate complexity
 formulas — reserve it for High and above to keep findings proportionate
 and avoid diluting attention with commentary on routine calculations.
+
+---
+
+## Step 21: ICAEW Financial Modelling Code gap-fill tests (checklist v7)
+
+These five tests were added to close gaps identified against the ICAEW
+Financial Modelling Code (2024). Two are genuinely Mode B tests (formula
+text required) and are included here so they activate automatically once
+Mode B ships, rather than being forgotten. Three are Mode-A-workable with
+appropriate confidence caps.
+
+### test: unique_input_location
+Each distinct business assumption should have exactly one source cell;
+all other uses should reference it rather than re-entering the same
+value independently.
+- If the same label and same numeric value appear on more than one
+  sheet designated as an input/assumption sheet, and nothing in the
+  visible data indicates one is a formula reference to the other:
+  flag as a potential duplicate input, confidence 40-55, uncertain
+  rather than fail, since Mode A cannot confirm whether the second
+  instance is a live reference or an independent hardcode.
+- If only one location for the value is visible anywhere in the
+  extract: pass.
+- Full confirmation requires formula text (Mode B) to check whether
+  the second occurrence is `=OtherSheet!Cell` (fine) or a typed
+  literal (the actual issue).
+
+### test: range_names_meaningful
+Named ranges should be clear and specific enough that a reviewer
+unfamiliar with the model could interpret them without a separate
+lookup.
+This is a manual_only test in Mode A unless a named-range list is
+provided as evidence.
+- If a named-range list is available: flag any name under 5
+  characters, any name that is a bare abbreviation with no vowels
+  (e.g. "SNR1"), or any name duplicated with only a trailing number
+  distinguishing near-identical ranges, confidence 50-65.
+- If no named-range list is provided: return uncertain, confidence 30,
+  state that a named-range export is required.
+
+### test: master_check_visible_throughout
+The model's master/aggregate check result should be visible from
+working sheets, not only reachable by navigating to a dedicated
+checks sheet.
+This is a manual_only test in Mode A.
+- Return uncertain with confidence 30.
+- State: "Verifying whether the master check result is surfaced via
+  frozen panes or per-sheet reference cells requires visual inspection
+  of the live workbook, not extracted cell values."
+
+### test: rounding_presentation_only
+Figures should be carried at full precision through calculations and
+rounded only at final presentation (number formatting or a clearly
+labelled final output cell) — never mid-calculation, and never via
+the workbook's "Precision as displayed" setting.
+This is a manual_only test requiring formula text (Mode B).
+- Return uncertain with confidence 30 in Mode A.
+- State: "Detecting mid-calculation ROUND() usage or precision-as-
+  displayed-driven balancing requires formula text inspection."
+- Exception: if a row is already flagged by `no_accounting_plugs` with
+  the label "Rounding", note it as related corroborating evidence but
+  do not treat it as satisfying this test — that heuristic only catches
+  labelled plug rows, not silent rounding embedded in an unlabelled
+  formula.
+
+### test: traceable_cross_sheet_references
+Calculation formulas should import a cross-sheet value once via a
+local "call-up" cell on the calculating sheet, rather than referencing
+another sheet directly, several layers deep, inside a calculation.
+This is a manual_only test requiring formula text (Mode B).
+- Return uncertain with confidence 30 in Mode A.
+- State: "Tracing whether cross-sheet references are routed through
+  local call-up cells requires formula text inspection across sheets."
+
+**Mode A confidence caps for this batch:**
+
+| Test type | Max confidence in Mode A |
+|---|---|
+| unique_input_location | 55 |
+| range_names_meaningful | 65 (with named-range list) / 30 (without) |
+| master_check_visible_throughout | 30 |
+| rounding_presentation_only | 30 |
+| traceable_cross_sheet_references | 30 |

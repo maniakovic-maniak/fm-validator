@@ -1,6 +1,7 @@
 const checklist = require('../config/checklist.json');
 const { resolveSheetName, resolveAny } = require('./utils/sheet-resolver');
 const { scanFormulaErrors } = require('./parser');
+const icaewChecks = require('./utils/validator-tier1-icaew-additions');
 
 // Safe keyword match for sheet-name checks — short/ambiguous keywords need
 // a word boundary or they false-match inside unrelated longer names.
@@ -323,6 +324,42 @@ function runTier1(parsed) {
           reason: hasFlag ? null : 'Timing sheet exists but no actual/forecast flag row detected in first 30 rows. Manual verification required.'
         });
       }
+    }
+
+    // ── ICAEW Financial Modelling Code additions ────────────────────────────
+    // Five of the six new handlers — T1-017 (workbook_calc_settings_check)
+    // is deliberately NOT wired here. Confirmed via direct testing: exceljs
+    // neither reads nor writes calcPr's iterate/fullPrecision attributes
+    // correctly (a round-trip test showed both silently discarded), so any
+    // handler for it would always report a false "pass" regardless of the
+    // workbook's real settings. Leaving it unwired means the rule correctly
+    // shows as "Not Run" in the Validation Matrix — honest about not having
+    // been checked — rather than a confident, wrong "pass". A real fix
+    // needs reading xl/workbook.xml directly from the raw zip, bypassing
+    // exceljs for this one property specifically.
+    if (rule.type === 'hidden_rows_columns_present') {
+      const r = icaewChecks.hidden_rows_columns_present(parsed._raw, rule);
+      results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
+    }
+
+    if (rule.type === 'white_text_hidden_content') {
+      const r = icaewChecks.white_text_hidden_content(parsed._raw, rule);
+      results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
+    }
+
+    if (rule.type === 'worksheet_naming_check') {
+      const r = icaewChecks.worksheet_naming_check(parsed._raw, rule);
+      results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
+    }
+
+    if (rule.type === 'array_formula_check') {
+      const r = icaewChecks.array_formula_check(parsed._raw, rule);
+      results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
+    }
+
+    if (rule.type === 'data_validation_check') {
+      const r = icaewChecks.data_validation_check(parsed._raw, rule);
+      results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
     }
 
   }
