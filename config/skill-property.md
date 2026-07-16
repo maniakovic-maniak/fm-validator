@@ -30,6 +30,35 @@ model actually flags (planning/design, construction, completion,
 operations, exit) — a model missing an explicit phase flag for one of
 these is a structural gap, not just a documentation one.
 
+## Must-have / Optional / Skip
+
+Not every check below applies to every model of this type — which of the
+three sub-cases you're looking at (build-to-sell, income-producing asset,
+or the combined develop-and-operate variant) determines which tier a
+given check falls into. Use this to prioritise your review time, not as a
+substitute for judgment: if the model's own structure suggests a "Skip"
+item is actually relevant here, check it anyway.
+
+**Must-have — check on every property model of this type, regardless of sub-case:**
+- Development cost reconciliation (total cost genuinely accounted for, no unexplained residual)
+- GDV/value reconciliation (cost vs. value comparison exists in some form — GDV-style for a sale, terminal value for a hold)
+- GST/VAT treatment consistency (inclusive vs. exclusive, applied the same way throughout)
+- Live vs. backup sheet divergence (any archived/backup tab reconciles to the live version)
+- Development margin arithmetic (profit ÷ total development cost, correctly and consistently calculated)
+
+**Optional — check if the relevant sheet/mechanism is present; its absence is not itself a failure:**
+- Settlement risk / drawdown timing — only meaningful if the model has a defined settlement event or a construction drawdown schedule; a pure income-producing asset with no development phase won't have this
+- Contingency adequacy — only meaningful while genuinely in a development/construction phase; a fully stabilised asset with no further construction has nothing left to hold contingency against
+- DSRA / debt reserve mechanism — only relevant if the model has debt financing with a reserve account; many smaller or unlevered models won't have one
+- Working capital linked to operating drivers — only relevant once the model reaches an operating phase (the combined variant, or a pure income-producing asset)
+- Scenario propagation across phases — only relevant if the model actually has a Scenarios sheet or toggle
+- Sensitivity-table date-arithmetic check — only relevant if the model has a sensitivity grid to check in the first place
+
+**Skip by default — not native to this domain, but don't force this if the model's own structure says otherwise:**
+- SaaS-specific metrics (ARR waterfall, churn, CAC/LTV) — a property model is not a subscription business, but if a mixed-use project genuinely includes a SaaS-style tenant/subscription revenue line, check that specific line item against `skill-saas.md`'s guidance instead of skipping it
+- Mining-specific patterns (royalties, rehabilitation provisions, strip ratio) — not applicable unless the property happens to sit on or include a mining lease or extractive right, which does occasionally happen for large rural/regional sites
+- Fund/PE waterfall mechanics (carried interest, GP/LP splits, hurdle rates) — property capital structures are usually simpler than this, but check the funding sheet first: a Partnership Assumptions-style sheet with sponsorship tiers and a distribution waterfall may genuinely need this lens applied on top, not instead of, the property-specific checks above
+
 ## Project characteristics
 
 - Two distinct model types: development feasibility (land and development

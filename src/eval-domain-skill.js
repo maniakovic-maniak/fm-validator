@@ -32,6 +32,7 @@ const REQUIRED_SECTIONS = [
   '## Typical ranges',
   '## Common',          // "## Common failure patterns" / "## Common ... patterns"
   '## Dependency chain',
+  '## Must-have',       // B3/B4 — Must-have/Optional/Skip tiering, required for drafts generated after this convention was adopted
 ];
 
 // Domain-specific terminology that should NEVER appear in a draft for a

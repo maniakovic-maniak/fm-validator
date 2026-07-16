@@ -167,8 +167,26 @@ function loadDomainSkill(modelType) {
   for (const filename of candidates) {
     const filepath = path.join(skillDir, filename);
     if (fs.existsSync(filepath)) {
+      let content = fs.readFileSync(filepath, 'utf8');
+
+      // C3 — skill-creator's convention: keep the main skill file lean
+      // (actionable guidance, judgment calls) and push large reference-
+      // lookup tables (sheet maps, typical-range tables) into a separate
+      // skill-{type}-references.md file. Purely additive — only applies
+      // to the actual domain-specific file (not the skill-generic.md
+      // fallback), and a domain with no references file behaves exactly
+      // as before this change.
+      if (filename !== 'skill-generic.md') {
+        const refFilename = filename.replace(/\.md$/, '-references.md');
+        const refFilepath = path.join(skillDir, refFilename);
+        if (fs.existsSync(refFilepath)) {
+          const refContent = fs.readFileSync(refFilepath, 'utf8');
+          content += `\n\n---\n\n${refContent}`;
+        }
+      }
+
       return {
-        content: fs.readFileSync(filepath, 'utf8'),
+        content,
         file: filename
       };
     }

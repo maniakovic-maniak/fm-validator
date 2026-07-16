@@ -55,14 +55,32 @@ You will be given:
   explicitly cover every area named there
 
 Write the new domain skill file following the exact section structure of
-the structural example: Model type, Project/model characteristics, Sheet
-map (a table mapping common sheet names to their likely contents for
-this industry), Typical ranges (explicitly disclosed as context only, not
-pass/fail thresholds — this project never treats a benchmark as ground
-truth), Common failure patterns specific to this domain (5-8 patterns,
-each a real, specific, checkable mechanism — not generic advice),
-Dependency chain (a plain-text arrow diagram tracing how this industry's
-inputs flow through to outputs).
+the structural example: Model type, Project/model characteristics, a
+Must-have / Optional / Skip section (see below), Sheet map (a table
+mapping common sheet names to their likely contents for this industry),
+Typical ranges (explicitly disclosed as context only, not pass/fail
+thresholds — this project never treats a benchmark as ground truth),
+Common failure patterns specific to this domain (5-8 patterns, each a
+real, specific, checkable mechanism — not generic advice), Dependency
+chain (a plain-text arrow diagram tracing how this industry's inputs flow
+through to outputs).
+
+The Must-have / Optional / Skip section exists because not every check in
+a domain applies to every model of that type — some sub-variants within
+the same broad industry genuinely don't have the mechanism a check is
+about (e.g. a fully-stabilised asset has no contingency left to check,
+because there's no construction phase left to hold contingency against).
+Reason through this genuinely for the target domain, not mechanically:
+- Must-have: checks that apply regardless of which sub-variant of this
+  domain you're looking at
+- Optional: checks that only apply when a specific mechanism, sheet, or
+  sub-variant is actually present — state what that precondition is
+- Skip by default: checks native to a DIFFERENT domain that don't belong
+  here by default, but name the specific circumstance under which they'd
+  become relevant anyway (e.g. a mixed-use property with a genuine
+  subscription-revenue tenant might need a SaaS-domain check applied on
+  top) — never state a flat "skip", always give the reviewer a concrete
+  test for when to override it
 
 Ground every specific claim in what a real model of this type would
 actually contain, informed by the real sheet names and summary you were

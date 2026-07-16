@@ -279,6 +279,13 @@ def build_report(data_path, output_path):
     set_row(ws1,r,20); r+=1
     merge_bold_prefix(ws1,f'B{r}:I{r}','Required action:   ',_next_step,sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
     set_row(ws1,r,20); r+=1
+    # A5 — compact severity summary, borrowed from audit-xls's convention
+    # of a scannable one-line count at the top of the output, ahead of any
+    # detail. p1/p2/p3 are already computed above for the Work Not
+    # Performed table's own logic; this just surfaces the same counts
+    # more prominently, right where a reader looks first.
+    merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2 · {len(p3)} P3',sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+    set_row(ws1,r,20); r+=1
     set_row(ws1,r,8); r+=1
 
     # ── Key Takeaway box ──────────────────────────────────────────────────────
