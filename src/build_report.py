@@ -719,8 +719,17 @@ def build_report(data_path, output_path):
     # models using skill-mining.md — so the status below is conditional on
     # whether those rules actually exist in this run's checklist, not a
     # claim of universal omission-testing coverage.
-    _omission_rule_ids = {f'T2-S10-{n}' for n in range(90, 97)}
-    _omission_rules_present = [r for r in checklist_rules if r.get('id') in _omission_rule_ids]
+    # Whether the 7 rules EXIST in checklist_rules is not the right test —
+    # they're part of the fixed, universal checklist and are present for
+    # every run regardless of domain. The right test is whether mining's
+    # own domain skill was actually loaded for THIS run (matching the same
+    # detection pattern already used elsewhere in this file for mining-
+    # specific content) — otherwise this row would claim "performed,
+    # mining-specific" on every single run, including non-mining models
+    # where these rules mostly resolve to "not applicable".
+    _omission_rule_ids = {f'T2-S10-{n:03d}' for n in range(90, 97)}
+    _is_mining_run = 'mining' in (modelType or '').lower() or 'mining' in (domainSkill or '').lower()
+    _omission_rules_present = _is_mining_run and [r for r in checklist_rules if r.get('id') in _omission_rule_ids]
     _exclusions=[
         ('Formula text inspection', 'Performed' if _fdd_performed else 'Partial',
          _fdd_summary,
