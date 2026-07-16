@@ -735,19 +735,19 @@ def build_report(data_path, output_path):
          _fdd_summary,
          'None — opt-in deep review was performed for this run' if _fdd_performed else 'Enable the Formula Deep Dive opt-in for individual review of the highest-risk formulas, or provide direct Excel/formula access for full coverage'),
         ('Source document review','Not performed','This review has no access to contracts, invoices, bank statements or other source records — only the Excel file itself. An assumption can look internally consistent without being independently verified against reality.','Provide source documents for Mode C review'),
-        ('Cell-by-cell audit', 'Performed (targeted)' if _fdd_performed else 'Not performed',
+        ('Cell-by-cell audit', 'Partial',
          (f"The {formulaDeepIn.get('reviewed',0)} highest-risk formulas received individual review this run — not full coverage of every cell, but not merely pattern-based either."
-          if _fdd_performed else 'Formula logic inspection requires formula text access') + _chain_summary,
-         'None for the reviewed set — engage a manual reviewer for full coverage beyond the targeted set' if _fdd_performed else 'Engage manual reviewer or provide formula export'),
+          if _fdd_performed else 'Formula logic inspection requires formula text access for full individual review.') + _chain_summary,
+         'Enable the Formula Deep Dive opt-in for individual review of the highest-risk formulas, in addition to the chain tracing already performed' if not _fdd_performed else 'None for the reviewed set — engage a manual reviewer for full coverage beyond the targeted set'),
         ('Assumption and output reasonableness', 'Performed (targeted)' if _reason_performed else 'Not performed',
          _reason_summary,
          'None for the tested metrics — extend threshold coverage or add domain-specific benchmarks if deeper testing is wanted' if _reason_performed else 'Label key output metrics clearly in the model so they can be located and tested'),
         ('Commercial omission testing',
-         'Performed (targeted, mining-specific)' if _omission_rules_present else 'Not performed',
-         (f"{len(_omission_rules_present)} mining-specific omission pattern(s) (revenue-to-operations linkage, capex phasing post-commissioning, tax shield modelling, debt sculpting, rehabilitation provision, royalty treatment, FX consistency) are graded, mandatory checklist rules for this model — see the T2-S10-09x rows in the Validation Matrix. This is domain-specific: only models using the mining domain skill get this coverage today, and it does not extend to other missing line items (a cost category, a risk, a required schedule) a domain expert might separately expect to see."
+         'Partial (mining-specific)' if _omission_rules_present else 'Not performed',
+         (f"{len(_omission_rules_present)} mining-specific omission pattern(s) (revenue-to-operations linkage, capex phasing post-commissioning, tax shield modelling, debt sculpting, rehabilitation provision, royalty treatment, FX consistency) are graded, mandatory checklist rules for this model — see the T2-S10-09x rows in the Validation Matrix. This is domain-specific and only covers 7 named patterns: only models using the mining domain skill get even this partial coverage today, and it does not extend to other missing line items (a cost category, a risk, a required schedule) a domain expert might separately expect to see."
           if _omission_rules_present else
           'Different question to output reasonableness above: this is about line items missing from the model entirely (a cost category, a risk, a required schedule) that a domain expert would expect to see — not whether the stated figures are plausible. Requires a challenger model and commercial judgment.'),
-         'None for the 7 graded patterns — extend to other domains or add further patterns as they are identified' if _omission_rules_present else 'Commission a challenger-model review'),
+         'Extend to other domains or add further patterns as they are identified, or commission a challenger-model review for full coverage' if _omission_rules_present else 'Commission a challenger-model review'),
         ('VBA and macro audit',_vba_status,_vba_summary,_vba_next),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
