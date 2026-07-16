@@ -19,6 +19,7 @@ const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
+const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
@@ -498,6 +499,93 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         root_cause: isError ? 'Cached formula error at a shared precedent cell' : 'Shared precedent cell is blank',
         escalation_flag: false, urgency: 'Before next reliance', confidence: 70
       });
+    });
+  }
+
+  // ── FAST Standard checks — four rules confirmed directly against a real
+  // copy of the FAST Standard (02c, July 2019). Each aggregates into ONE
+  // finding per check, not one per instance.
+  const npvCheck = (() => { try { return checkBareNPV(tier0.cellScoreIndex); }
+    catch (e) { console.error('   \u26a0\ufe0f  Bare NPV check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (npvCheck.applicable && npvCheck.findings.length > 0) {
+    const sample = npvCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-NPV-001',
+      label: `${npvCheck.findings.length} formula cell(s) use NPV() rather than XNPV()`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${npvCheck.findings.length} formula cell(s) use NPV(), including: ${sample}${npvCheck.findings.length > 8 ? ' and others' : ''}. NPV() assumes the first cash flow occurs exactly one period from today and every subsequent flow is evenly spaced — an assumption that rarely matches a real model's actual dates. XNPV (using actual dates) avoids this silent timing mismatch. This is a named rule in the FAST Standard (FAST 4.01-02).`,
+      reason: `${npvCheck.findings.length} cell(s) use NPV() instead of XNPV()`,
+      corrective_action: 'Confirm the timing assumption embedded in each NPV() call is actually correct for this model, or replace with XNPV using the model\'s real dates.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'NPV timing assumption',
+      model_risk: 'A silent, uncommunicated assumption about cash flow timing can materially misstate a discounted value without ever producing a visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'NPV() used instead of XNPV()', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 90
+    });
+  }
+
+  const nestedIfCheck = (() => { try { return checkNestedIFs(tier0.cellScoreIndex); }
+    catch (e) { console.error('   \u26a0\ufe0f  Nested IF check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (nestedIfCheck.applicable && nestedIfCheck.findings.length > 0) {
+    const sheetCounts = {};
+    nestedIfCheck.findings.forEach(f => { sheetCounts[f.sheet] = (sheetCounts[f.sheet] || 0) + 1; });
+    const sheetSummary = Object.entries(sheetCounts).slice(0, 6).map(([s, c]) => `${s} (${c})`).join(', ');
+    const sample = nestedIfCheck.findings.slice(0, 5).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-NESTEDIF-001',
+      label: `${nestedIfCheck.findings.length} formula cell(s) contain nested IF statements`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${nestedIfCheck.findings.length} formula cell(s) contain a nested IF (an IF statement inside another IF's own arguments), concentrated in: ${sheetSummary}. Examples: ${sample}. Nested IFs are a named FAST Standard anti-pattern (FAST 3.03-07) — they take materially longer to decode correctly and are prone to untested combinations of logical states.`,
+      reason: `${nestedIfCheck.findings.length} cell(s) contain nested IF logic`,
+      corrective_action: 'Consider replacing nested IFs with flag-based multiplication or INDEX/CHOOSE lookups where the logic allows — particularly for the highest-concentration sheets listed.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Nested IF statements',
+      model_risk: 'Nested conditional logic is difficult to fully test — a combination of conditions that was never exercised during model construction can silently produce the wrong branch.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Nested IF statements', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 95
+    });
+  }
+
+  const mergedCellCheck = (() => { try { return checkMergedCells(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Merged cell check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (mergedCellCheck.applicable && mergedCellCheck.findings.length > 0) {
+    const totalMerges = mergedCellCheck.findings.reduce((sum, f) => sum + f.mergeCount, 0);
+    const sheetSummary = mergedCellCheck.findings.slice(0, 8).map(f => `${f.sheet} (${f.mergeCount})`).join(', ');
+    allFlagged.push({
+      id: 'T0-MERGE-001',
+      label: `${totalMerges} merged cell range(s) across ${mergedCellCheck.findings.length} sheet(s)`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${totalMerges} merged cell range(s) found across: ${sheetSummary}${mergedCellCheck.findings.length > 8 ? ' and others' : ''}. Merged cells break column/row selection consistency and are a named FAST Standard anti-pattern (FAST 4.02-02) — FAST's own stated concern is directly relevant to automated review: some model-audit tools will silently unmerge cells while processing a file, which can itself alter the workbook.`,
+      reason: `${totalMerges} merged range(s) across ${mergedCellCheck.findings.length} sheet(s)`,
+      corrective_action: 'Confirm merged cells are confined to presentation/header areas rather than calculation blocks — centre-across-selection formatting achieves the same visual effect without merging.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Merged cells',
+      model_risk: 'Merged cells in or near calculation areas can silently drop values (only the upper-left cell of a merge retains its value) and complicate automated or manual review alike.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Merged cell ranges present', escalation_flag: false,
+      urgency: 'When convenient', confidence: 100
+    });
+  }
+
+  const hiddenCheck = (() => { try { return checkHiddenRowsColumns(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Hidden rows/columns check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (hiddenCheck.applicable && hiddenCheck.findings.length > 0) {
+    const sheetSummary = hiddenCheck.findings.slice(0, 8).map(f => `${f.sheet} (${f.hiddenRowCount} row(s), ${f.hiddenColCount} col(s))`).join(', ');
+    allFlagged.push({
+      id: 'T0-HIDDEN-001',
+      label: `${hiddenCheck.findings.length} sheet(s) contain hidden rows or columns`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `Hidden rows and/or columns found on: ${sheetSummary}${hiddenCheck.findings.length > 8 ? ' and others' : ''}. This is distinct from the separate check for entirely hidden sheets — these are hidden ranges within otherwise-visible sheets. The FAST Standard names this explicitly (FAST 2.01-08): hidden ranges can conceal stale, overridden, or manipulated values from a reviewer who is only looking at what's visible.`,
+      reason: `Hidden rows/columns found on ${hiddenCheck.findings.length} sheet(s)`,
+      corrective_action: 'Unhide and review the contents of each hidden range to confirm nothing material is being concealed from a normal review.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Hidden rows or columns',
+      model_risk: 'A hidden row or column is invisible during a normal visual review, and any manual override or stale value sitting inside one would not be caught without deliberately unhiding it.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Hidden rows or columns present', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 100
     });
   }
 
