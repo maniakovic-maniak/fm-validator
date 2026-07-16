@@ -751,7 +751,7 @@ def build_report(data_path, output_path):
         ('VBA and macro audit',_vba_status,_vba_summary,_vba_next),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
-    _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT)}
+    _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Partial (mining-specific)':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT)}
     _col_chars = {2:22, 4:34, 5:22}  # rough usable characters per line, by column width
     for proc,status,impact,nxt in _exclusions:
         ws3.cell(r3,2).value=proc; ws3.cell(r3,2).font=Fn(sz=9,col=CHARCOAL); ws3.cell(r3,2).fill=F(WHITE); ws3.cell(r3,2).alignment=A(wrap=True,v='center')
