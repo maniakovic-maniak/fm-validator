@@ -21,6 +21,7 @@ const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
+const { checkCircularReferences } = require('./src/utils/circular-reference-detector');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
@@ -612,6 +613,52 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
         root_cause: 'Check result hardcoded rather than formula-driven', escalation_flag: false,
         urgency: 'Before next reliance', confidence: 85
+      });
+    }
+  }
+
+  // G7 — genuine circular-reference detection.
+  const circularRefResult = (() => { try { return checkCircularReferences(tier0.cellScoreIndex, parsed.sheetNames, parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Circular reference detection failed:', e.message); return { applicable:false, totalCycles:0, dividendRelatedCycles:[], otherCycles:[] }; } })();
+  if (circularRefResult.applicable) {
+    if (circularRefResult.dividendRelatedCycles.length > 0) {
+      const byCell = {};
+      circularRefResult.dividendRelatedCycles.forEach(c => {
+        if (!byCell[c.dividendCell]) byCell[c.dividendCell] = { label: c.dividendLabel, count: 0 };
+        byCell[c.dividendCell].count++;
+      });
+      const summary = Object.entries(byCell).map(([cell, v]) => `${cell} ("${v.label}") — ${v.count} distinct cycle path(s)`).join('; ');
+      const [sh, cl] = Object.keys(byCell)[0].split('!');
+      allFlagged.push({
+        id: 'T0-CIRC-001',
+        label: `Circular reference routed through a distribution/funding decision`,
+        severity: 'high', status: 'fail',
+        sheet: sh, cell: cl, category: 'Structure',
+        condition: `A genuine circular reference was found passing through: ${summary}. This is a distribution or funding-decision cell whose own formula depends, through a chain of precedents, on a cash balance that already reflects that same decision — the decision is calculated from its own outcome. Unlike the common, often-intentional interest-on-average-balance circularity, this pattern usually indicates a real logic error rather than a deliberate iterative-solve design choice.`,
+        reason: `Circular reference through a distribution/funding-decision cell`,
+        corrective_action: 'Trace the cycle in Excel (Formulas → Error Checking → Circular References) and confirm whether this is a genuine error or a deliberately iterative calculation. If deliberate, document the rationale on the Inputs sheet and confirm iterative calculation is enabled; if not, break the cycle by referencing a prior-period balance rather than the current period\'s post-decision balance.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Circular reference — distribution/funding',
+        model_risk: 'A distribution or funding decision that depends on its own outcome can converge to an unstable or misleading result, or silently rely on Excel\'s iterative-calculation settings without anyone realising the model requires them.',
+        key_output_impact: 'Yes', method: 'automated', needs_retest: true,
+        root_cause: 'Circular reference through a distribution/funding-decision cell', escalation_flag: false,
+        urgency: 'Before next reliance', confidence: 80
+      });
+    }
+    if (circularRefResult.otherCycles.length > 0) {
+      const sample = circularRefResult.otherCycles.slice(0, 3).map(c => c.path[0]).join(', ');
+      allFlagged.push({
+        id: 'T0-CIRC-002',
+        label: `${circularRefResult.otherCycles.length} other circular reference chain(s) found`,
+        severity: 'low', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: `${circularRefResult.otherCycles.length} circular reference chain(s) found not involving a distribution/funding-decision cell, e.g. starting near: ${sample}. This may be a deliberate, common pattern such as interest calculated on an average debt or cash balance — not necessarily an error, but worth confirming iterative calculation is intentionally enabled and documented.`,
+        reason: `${circularRefResult.otherCycles.length} circular reference chain(s) found`,
+        corrective_action: 'Confirm each is a deliberate, documented circularity (e.g. interest on average balance) rather than an unintended error.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Circular reference — general',
+        model_risk: 'An undocumented circular reference makes it unclear to a reviewer whether iterative calculation is required by design or is masking an error.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+        root_cause: 'Circular reference present', escalation_flag: false,
+        urgency: 'When convenient', confidence: 75
       });
     }
   }
