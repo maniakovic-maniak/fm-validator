@@ -71,6 +71,36 @@ import json
 import time
 import re
 import os
+import math
+
+try:
+    import openpyxl
+    # openpyxl's internal number parser (_cast_number) only recognizes a
+    # float by the presence of '.', 'E', or 'e' in the text, and falls
+    # through to int(value) otherwise — which crashes on 'NaN',
+    # 'Infinity', and '-Infinity', all valid IEEE-754 values Excel can
+    # legitimately cache as a formula's result (e.g. certain invalid
+    # statistical operations). Confirmed via a real crash against Hidden
+    # Gem: this happens deep inside openpyxl's internal row-parsing
+    # generator, where a per-cell try/except in THIS script can't catch
+    # it without losing every other cell in the same row generator —
+    # patched at the source instead, before any workbook is loaded.
+    import openpyxl.worksheet._reader as _oxl_reader
+
+    _original_cast_number = _oxl_reader._cast_number
+
+    def _patched_cast_number(value):
+        if value in ('NaN', 'nan'):
+            return float('nan')
+        if value in ('Infinity', 'INF'):
+            return float('inf')
+        if value in ('-Infinity', '-INF'):
+            return float('-inf')
+        return _original_cast_number(value)
+
+    _oxl_reader._cast_number = _patched_cast_number
+except ImportError:
+    openpyxl = None  # handled by the existing "unavailable" check below
 
 try:
     import formualizer as fz
@@ -78,9 +108,7 @@ except ImportError:
     print(json.dumps({"status": "unavailable", "reason": "formualizer not installed"}))
     sys.exit(0)
 
-try:
-    import openpyxl
-except ImportError:
+if openpyxl is None:
     print(json.dumps({"status": "unavailable", "reason": "openpyxl not installed"}))
     sys.exit(0)
 
@@ -215,6 +243,19 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
 
         if isinstance(recalced_val, str) and recalced_val.startswith('#'):
             unresolved_errors.append({"sheet": sheet_name, "cell": cell_addr, "recalculated_error": recalced_val})
+            continue
+
+        cached_is_nan = isinstance(cached_val, float) and math.isnan(cached_val)
+        recalced_is_nan = isinstance(recalced_val, float) and math.isnan(recalced_val)
+        if cached_is_nan or recalced_is_nan:
+            # IEEE-754 NaN comparisons are always False in Python (nan > x
+            # is never true), so the normal mismatch check below would
+            # silently treat this as "no mismatch" — but a formula
+            # genuinely producing NaN is itself usually a real problem
+            # (e.g. an invalid statistical operation), not something to
+            # hide by falling through the tolerance check.
+            unresolved_errors.append({"sheet": sheet_name, "cell": cell_addr,
+                                       "cached_is_nan": cached_is_nan, "recalculated_is_nan": recalced_is_nan})
             continue
 
         if isinstance(cached_val, (int, float)) and isinstance(recalced_val, (int, float)):
