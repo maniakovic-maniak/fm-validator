@@ -223,13 +223,19 @@ def count_formula_cells(path):
     return count
 
 
+def _progress(msg):
+    print(f"[recalc_check] {msg}", file=sys.stderr, flush=True)
+
+
 def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     t_start = time.time()
 
+    _progress("Counting formula cells...")
     try:
         formula_count = count_formula_cells(path)
     except Exception as e:
         return {"status": "cached_value_read_failed", "error": str(e), "elapsed_s": round(time.time() - t_start, 2)}
+    _progress(f"{formula_count:,} formula cells found ({round(time.time()-t_start,1)}s elapsed).")
 
     max_cells = get_max_formula_cells()
     if max_cells > 0 and formula_count > max_cells:
@@ -241,12 +247,15 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     cfg = fz.EvaluationConfig()
     cfg.cycle_policy = "iterate"  # fix #1 — see module docstring, never omit this
 
+    _progress("Loading workbook into Formualizer...")
     try:
         wb = fz.Workbook.load_path(path, config=fz.WorkbookConfig(eval_config=cfg))
     except Exception as e:
         return {"status": "load_or_eval_failed", "error": str(e), "elapsed_s": round(time.time() - t_start, 2)}
+    _progress(f"Formualizer load complete ({round(time.time()-t_start,1)}s elapsed).")
 
     # fix #3a — read_only=True is primary, not a fallback. See module docstring.
+    _progress("Loading workbook into openpyxl (for cached values)...")
     try:
         wb_formulas = openpyxl.load_workbook(path, data_only=False, read_only=True)
         wb_cached = openpyxl.load_workbook(path, data_only=True, read_only=True)
@@ -256,6 +265,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             wb_cached = openpyxl.load_workbook(path, data_only=True, keep_vba=path.lower().endswith('.xlsm'))
         except Exception as e2:
             return {"status": "cached_value_read_failed", "error": str(e), "fallback_error": str(e2), "elapsed_s": round(time.time() - t_start, 2)}
+    _progress(f"openpyxl loads complete ({round(time.time()-t_start,1)}s elapsed).")
 
     # Single parallel-sequential pass (fix #3b) that both (i) identifies
     # and neutralizes external-reference cells (fix #2) and (ii) collects
@@ -270,6 +280,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     formula_texts = []    # parallel to targets — needed for the taint trace below
     sheet_of_target = {}  # "Sheet!A1" -> sheet name, for the taint trace
 
+    _progress("Scanning formulas and cached values (single pass)...")
     for sheet_name in wb_formulas.sheetnames:
         if sheet_name not in wb_cached.sheetnames:
             continue
@@ -302,8 +313,11 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # reasonable number of BFS waves rather than iterating to an
     # unbounded fixed point, since each wave requires another pass over
     # every remaining formula.
+    _progress(f"Scan complete: {len(targets):,} target(s), {len(external_ref_cells)} external-reference cell(s) found ({round(time.time()-t_start,1)}s elapsed).")
+
     tainted = set(external_ref_cells)
     if tainted:
+        _progress(f"Tracing dependents of {len(external_ref_cells)} external-reference cell(s)...")
         addr_patterns = {key.split('!', 1)[1] for key in tainted}  # e.g. "E50", without the sheet
         max_waves = 8
         for _wave in range(max_waves):
@@ -323,6 +337,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
                 break
             tainted |= newly_tainted
             addr_patterns |= {key.split('!', 1)[1] for key in newly_tainted}
+            _progress(f"  wave {_wave+1}: {len(newly_tainted):,} newly tainted, {len(tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
 
         if len(tainted) > len(external_ref_cells):
             # Filter targets/keys/cached_values/formula_texts to drop
@@ -334,21 +349,28 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             formula_texts = [formula_texts[i] for i in keep_indices]
 
     tainted_downstream_count = len(tainted) - len(external_ref_cells)
+    if tainted_downstream_count > 0:
+        _progress(f"Taint trace complete: {tainted_downstream_count:,} downstream cell(s) excluded ({round(time.time()-t_start,1)}s elapsed).")
 
+    _progress(f"Running evaluate_all() ({len(targets):,} target cells to compare)...")
     try:
         wb.evaluate_all()
     except Exception as e:
         return {"status": "load_or_eval_failed", "error": str(e), "elapsed_s": round(time.time() - t_start, 2),
                 "note": f"{len(external_ref_cells)} external-reference cell(s) were pre-neutralized but evaluation still failed — a second, different blocking issue exists beyond external references."}
+    _progress(f"evaluate_all() complete ({round(time.time()-t_start,1)}s elapsed).")
 
     telemetry = wb.last_cycle_telemetry()
+    _progress(f"Circularity: {telemetry.iterated_sccs} genuine group(s), {telemetry.converged_sccs} converged, {telemetry.capped_sccs} unconverged.")
 
     # fix #3b — one batched call instead of len(targets) individual ones.
+    _progress(f"Running batch evaluate_cells() for {len(targets):,} target(s) — this is usually fast (~0.008ms/cell observed in testing), but is a single call with no incremental progress once started. If this step runs far longer than {len(targets)*0.001:.0f}s-{len(targets)*0.01:.0f}s, something is genuinely different about this file's formulas, not just scale.")
     try:
         recalculated_values = wb.evaluate_cells(targets)
     except Exception as e:
         return {"status": "batch_evaluation_failed", "error": str(e), "elapsed_s": round(time.time() - t_start, 2),
                 "target_count": len(targets)}
+    _progress(f"Batch evaluation complete ({round(time.time()-t_start,1)}s elapsed). Comparing against cached values...")
 
     mismatches = []
     unresolved_errors = []
