@@ -72,6 +72,19 @@ import time
 import re
 import os
 import math
+import warnings
+
+# Confirmed via direct inspection of openpyxl's own source
+# (openpyxl/worksheet/_reader.py): when a date-formatted cell's cached
+# value is NaN (see the _cast_number patch below for why that value can
+# legitimately be NaN in the first place), openpyxl tries to convert it
+# to a date via from_excel(), which correctly raises on NaN — and
+# openpyxl's OWN try/except catches that internally, sets the cell to
+# "#VALUE!", and emits this warning purely for information. It is not a
+# sign of a problem this script needs to react to. At real-file scale
+# (hundreds+ of affected cells in one sheet observed in testing) this
+# was flooding stderr with no functional benefit — suppressed here.
+warnings.filterwarnings('ignore', message=r'.*is marked as a date but the serial value.*')
 
 try:
     import openpyxl
