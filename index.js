@@ -706,6 +706,8 @@ async function run() {
 
   if (recalcCheckResult.status === 'unavailable') {
     console.log(`   \u2139\ufe0f  Recalculation check skipped: ${recalcCheckResult.reason} (run 'pip install formualizer openpyxl' on the server to enable)`);
+  } else if (recalcCheckResult.status === 'skipped_too_large') {
+    console.log(`   \u2139\ufe0f  Recalculation check skipped: ${recalcCheckResult.formula_cells.toLocaleString()} formula cells exceeds the ${recalcCheckResult.threshold.toLocaleString()}-cell safety threshold (see recalc_check.py for tuning notes).`);
   } else if (recalcCheckResult.status === 'success') {
     if (recalcCheckResult.mismatch_count > 0) {
       const sample = recalcCheckResult.mismatches.slice(0, 8)
