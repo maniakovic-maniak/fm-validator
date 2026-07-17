@@ -7,6 +7,7 @@ const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
+const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
@@ -448,6 +449,38 @@ async function run() {
       root_cause: 'Hidden rows or columns present', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 100
     });
+  }
+
+  // G1 — hardcoded check/reconciliation cells: a false-assurance risk
+  // distinct from generic hardcode counting. High vs low confidence are
+  // deliberately reported differently, not pooled — testing against real
+  // files showed the low-confidence bucket is genuinely noisier (column
+  // headers like "Expected"/"Actual"/"Status", period labels) than a
+  // reliable finding set, while high-confidence (the value itself reads
+  // as pass/fail/ok/0) has held up cleanly in testing.
+  const hardcodedCheckResult = (() => { try { return checkHardcodedCheckCells(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Hardcoded check-cell scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (hardcodedCheckResult.applicable) {
+    const highConf = hardcodedCheckResult.findings.filter(f => f.confidence === 'high');
+    const lowConf = hardcodedCheckResult.findings.filter(f => f.confidence === 'low');
+    if (highConf.length > 0) {
+      const sample = highConf.slice(0, 8).map(f => `${f.sheet}!${f.cell} ("${f.label}" = ${JSON.stringify(f.value)})`).join(', ');
+      const lowNote = lowConf.length > 0 ? ` A further ${lowConf.length} lower-confidence candidate(s) were also found but are more likely to be column headers or period labels than genuine check results — not included above, worth a manual glance if time allows.` : '';
+      allFlagged.push({
+        id: 'T0-HARDCHECK-001',
+        label: `${highConf.length} check/reconciliation cell(s) appear hardcoded rather than formula-driven`,
+        severity: 'high', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: `${highConf.length} cell(s) in a check- or reconciliation-labeled row show a static, typed-in pass/fail-style value with no formula behind them: ${sample}.${lowNote} A hardcoded check result will keep showing the same outcome forever, regardless of what the underlying numbers actually do — the model could stop passing this test and the cell would never reflect it.`,
+        reason: `${highConf.length} check cell(s) appear to be hardcoded rather than live`,
+        corrective_action: 'Replace each flagged cell with a formula that genuinely compares the observed result against the expected result, rather than a static status.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Hardcoded check cell',
+        model_risk: 'A check cell that cannot fail gives false assurance — a reviewer sees "PASS" and trusts it, without realising the cell never actually recalculates.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: 'Check result hardcoded rather than formula-driven', escalation_flag: false,
+        urgency: 'Before next reliance', confidence: 85
+      });
+    }
   }
 
     if (reasonableness.waccOverride.applicable && reasonableness.waccOverride.mismatch) {
