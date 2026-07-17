@@ -70,6 +70,7 @@ import sys
 import json
 import time
 import re
+import os
 
 try:
     import formualizer as fz
@@ -89,12 +90,28 @@ EXTERNAL_REF_RE = re.compile(r'\[\d+\]')
 # Formualizer's evaluate_all() was killed by the OS after growing to
 # ~3.9GB while processing a real 1,152,789-formula-cell mining model —
 # Formualizer's own initial load alone took ~1.4GB for that file, before
-# evaluate_all() pushed memory past the available ceiling. This
-# threshold is a conservative guess calibrated only against a 3.9GB
-# sandbox; it has NOT been validated against the actual memory available
-# on the production server, which may be higher or lower. Tune this
-# based on real production testing, not left as a permanent guess.
-MAX_FORMULA_CELLS = 200000
+# evaluate_all() pushed memory past the available ceiling. That test ran
+# in a 3.9GB sandbox; local machines and production servers can have
+# very different headroom, so this is configurable via the
+# RECALC_CHECK_MAX_FORMULA_CELLS environment variable rather than a
+# fixed constant — set it high (or to 0) for local runs on a machine
+# with plenty of memory, leave the default in place for a
+# resource-constrained host (e.g. fm-validator's current CloudLinux/
+# shared-hosting production environment, which has separately confirmed
+# resource constraints — see the planned VPS migration). 0 or a negative
+# value disables the check entirely. An unset or malformed value falls
+# back to the default below.
+DEFAULT_MAX_FORMULA_CELLS = 500000
+
+
+def get_max_formula_cells():
+    raw = os.environ.get('RECALC_CHECK_MAX_FORMULA_CELLS')
+    if raw is None:
+        return DEFAULT_MAX_FORMULA_CELLS
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_MAX_FORMULA_CELLS
 
 
 def count_formula_cells(path):
@@ -119,10 +136,11 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     except Exception as e:
         return {"status": "cached_value_read_failed", "error": str(e), "elapsed_s": round(time.time() - t_start, 2)}
 
-    if formula_count > MAX_FORMULA_CELLS:
+    max_cells = get_max_formula_cells()
+    if max_cells > 0 and formula_count > max_cells:
         return {"status": "skipped_too_large", "formula_cells": formula_count,
-                "threshold": MAX_FORMULA_CELLS,
-                "reason": f"{formula_count:,} formula cells exceeds the {MAX_FORMULA_CELLS:,}-cell safety threshold — skipped to avoid a memory-related crash. This threshold is a conservative estimate from sandbox testing, not validated against this server's actual available memory; raise it if this server has more headroom.",
+                "threshold": max_cells,
+                "reason": f"{formula_count:,} formula cells exceeds the {max_cells:,}-cell safety threshold (RECALC_CHECK_MAX_FORMULA_CELLS) — skipped to avoid a memory-related crash. Raise this via the environment variable if this machine has more headroom, or set it to 0 to disable the check entirely.",
                 "elapsed_s": round(time.time() - t_start, 2)}
 
     cfg = fz.EvaluationConfig()
