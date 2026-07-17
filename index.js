@@ -9,6 +9,7 @@ const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
 const { checkCircularReferences } = require('./src/utils/circular-reference-detector');
+const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
@@ -542,6 +543,96 @@ async function run() {
         urgency: 'When convenient', confidence: 75
       });
     }
+  }
+
+  // G8-G11 — inspired by patterns confirmed real in the
+  // petehottelet/spreadsheet-auditor project. Each was tested against
+  // real files and had at least one genuine false-positive class found
+  // and fixed before being wired in here (see comments in
+  // spreadsheet-auditor-checks.js for the specifics — a legitimate
+  // cumulative-total pattern for G8, a dashboard-layout false positive
+  // for G9's original design, requiring a whole-formula match for G9's
+  // final design).
+  const g8Result = (() => { try { return checkOffByOneRanges(tier0.cellScoreIndex); }
+    catch (e) { console.error('   \u26a0\ufe0f  Off-by-one range check failed:', e.message); return { applicable:false, findings:[] }; } })();
+  if (g8Result.applicable && g8Result.findings.length > 0) {
+    const sample = g8Result.findings.slice(0, 6).map(f => f.expectedEndCol
+      ? `${f.cell} (ends at column ${f.actualEndCol}, its ${f.peerCount} peers mostly end at ${f.expectedEndCol})`
+      : `${f.cell} (ends at row ${f.actualEndRow}, its ${f.peerCount} peers mostly end at ${f.expectedEndRow})`).join(', ');
+    allFlagged.push({
+      id: 'T0-OFFBYONE-001',
+      label: `${g8Result.findings.length} aggregate range(s) appear shorter than their structural peers`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${g8Result.findings.length} aggregate formula(s) span a noticeably shorter range than other, structurally identical formulas nearby: ${sample}. Compared against peers (same function, same column, same range start) rather than judged in isolation — a real, specific majority pattern each of these deviates from, not a guess about what the range "should" be.`,
+      reason: `${g8Result.findings.length} range(s) end earlier than their peer group's majority pattern`,
+      corrective_action: 'Confirm whether the shorter range is intentional (e.g. this row genuinely covers a shorter period) or an unupdated range left behind when a column was inserted elsewhere in the block.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Off-by-one aggregate range',
+      model_risk: 'A range that silently excludes the most recent period is a common, easy-to-miss error when new columns are inserted into an existing block.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Aggregate range shorter than its peer group', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 70
+    });
+  }
+
+  const g9Result = (() => { try { return checkAggregateResultMismatch(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Aggregate result mismatch check failed:', e.message); return { applicable:false, findings:[] }; } })();
+  if (g9Result.applicable && g9Result.findings.length > 0) {
+    const sample = g9Result.findings.slice(0, 6).map(f => `${f.sheet}!${f.cell} (shows ${f.cachedResult.toLocaleString()}, its own range sums to ${f.independentSum.toLocaleString()})`).join(', ');
+    allFlagged.push({
+      id: 'T0-AGGMISMATCH-001',
+      label: `${g9Result.findings.length} SUM formula(s) whose cached result doesn't match their own range`,
+      severity: 'high', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${g9Result.findings.length} formula(s) whose stored, displayed result doesn't match an independent sum of their own explicit range's own cached values: ${sample}. This can mean either the file wasn't recalculated and saved with calculation enabled before delivery, or a genuine formula error.`,
+      reason: `${g9Result.findings.length} formula(s) show a cached result inconsistent with their own range`,
+      corrective_action: 'Open the file in Excel, force a full recalculation (Ctrl+Alt+F9), and re-save. If the mismatch persists after recalculation, it is a genuine formula error requiring investigation.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Stale or inconsistent aggregate result',
+      model_risk: 'A displayed total that doesn\'t match its own underlying data is one of the most direct forms of misleading output a reviewer can encounter.',
+      key_output_impact: 'Yes', method: 'automated', needs_retest: true,
+      root_cause: 'Cached formula result inconsistent with its own range', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 90
+    });
+  }
+
+  const g10Result = (() => { try { return checkRangeIncludesOwnTotal(tier0.cellScoreIndex, parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Range-includes-own-total check failed:', e.message); return { applicable:false, findings:[] }; } })();
+  if (g10Result.applicable && g10Result.findings.length > 0) {
+    const sample = g10Result.findings.slice(0, 6).map(f => `${f.cell} (range ${f.range} includes row ${f.subtotalRow}, labeled "${f.subtotalLabel}")`).join(', ');
+    allFlagged.push({
+      id: 'T0-RANGEDUP-001',
+      label: `${g10Result.findings.length} SUM range(s) include a subtotal row within their own span`,
+      severity: 'high', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${g10Result.findings.length} SUM formula(s) span a range that includes a row itself labeled as a total or subtotal, within the range rather than at its boundary: ${sample}. This likely double-counts that subtotal's own components alongside the subtotal itself.`,
+      reason: `${g10Result.findings.length} range(s) likely double-count an internal subtotal`,
+      corrective_action: 'Adjust the range to either sum only the line items (excluding the subtotal row) or only the subtotals (excluding the individual line items), not both.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Range includes its own subtotal',
+      model_risk: 'A total that silently double-counts a subset of its own components can materially overstate a key figure without any visible error.',
+      key_output_impact: 'Yes', method: 'automated', needs_retest: true,
+      root_cause: 'Aggregate range includes an internal subtotal row', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 80
+    });
+  }
+
+  const g11Result = (() => { try { return checkSuspiciousErrorMasking(tier0.cellScoreIndex); }
+    catch (e) { console.error('   \u26a0\ufe0f  Error-masking check failed:', e.message); return { applicable:false, findings:[] }; } })();
+  if (g11Result.applicable && g11Result.findings.length > 0) {
+    const sample = g11Result.findings.slice(0, 8).map(f => `${f.cell} (${f.functionName} falls back to ${f.fallbackValue})`).join(', ');
+    allFlagged.push({
+      id: 'T0-ERRMASK-001',
+      label: `${g11Result.findings.length} IFERROR/IFNA cell(s) fall back to a specific non-zero hardcoded value`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${g11Result.findings.length} cell(s) use IFERROR or IFNA with a fallback to a specific, non-zero hardcoded number rather than 0 or blank: ${sample}. Falling back to 0 or blank for an expected edge case (e.g. an early-period ratio dividing by zero) is common and usually safe — falling back to a specific number is less common and can look like a plug masking whatever the underlying formula would otherwise have produced.`,
+      reason: `${g11Result.findings.length} cell(s) mask errors with a specific non-zero fallback`,
+      corrective_action: 'Confirm each flagged fallback value is a deliberate, reasoned default rather than a plug covering an unresolved formula issue.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Non-zero error-masking fallback',
+      model_risk: 'A hardcoded fallback value can silently substitute for a broken calculation indefinitely, with no visible indication anything is wrong.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'IFERROR/IFNA falls back to a specific non-zero value', escalation_flag: false,
+      urgency: 'When convenient', confidence: 65
+    });
   }
 
     if (reasonableness.waccOverride.applicable && reasonableness.waccOverride.mismatch) {
