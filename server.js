@@ -23,6 +23,7 @@ const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns }
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
 const { checkCircularReferences } = require('./src/utils/circular-reference-detector');
 const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
+const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
@@ -746,6 +747,34 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       root_cause: 'IFERROR/IFNA falls back to a specific non-zero value', escalation_flag: false,
       urgency: 'When convenient', confidence: 65
     });
+  }
+
+  // G12 — PII detection.
+  const piiResult = (() => { try { return checkPII(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  PII scan failed:', e.message); return { applicable:false, findings:[] }; } })();
+  if (piiResult.applicable && piiResult.findings.length > 0) {
+    const highConf = piiResult.findings.filter(f => f.confidence === 'high');
+    const lowConf = piiResult.findings.filter(f => f.confidence === 'low');
+    if (highConf.length > 0) {
+      const byType = {};
+      highConf.forEach(f => { (byType[f.type] ||= []).push(`${f.sheet}!${f.cell}`); });
+      const summary = Object.entries(byType).map(([type, cells]) => `${type}: ${cells.slice(0,5).join(', ')}${cells.length > 5 ? ` and ${cells.length-5} more` : ''}`).join('; ');
+      const lowNote = lowConf.length > 0 ? ` A further ${lowConf.length} lower-confidence candidate(s) were also found, requiring row-label context to trigger — worth a manual glance.` : '';
+      allFlagged.push({
+        id: 'T0-PII-001',
+        label: `${highConf.length} cell(s) appear to contain personally identifiable information`,
+        severity: 'high', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: `${highConf.length} cell(s) contain data matching a recognised PII pattern: ${summary}.${lowNote} Values are not reproduced here — only the cell locations. This workbook may not be safe to share as broadly as a typical financial model, or the data may need to be removed or redacted before wider circulation.`,
+        reason: `${highConf.length} cell(s) appear to contain PII`,
+        corrective_action: 'Confirm whether this data is genuinely needed in the model; if not, remove it. If it is needed, restrict circulation of this workbook accordingly and consider whether it should be masked or moved to a separate, access-controlled file.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Personally identifiable information detected',
+        model_risk: 'A financial model is often circulated more broadly than its original author expects — investment committees, lenders, advisors. PII embedded in the workbook travels with it.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: 'Cell value matches a recognised PII pattern', escalation_flag: true,
+        urgency: 'Before external circulation', confidence: 85
+      });
+    }
   }
 
       if (reasonableness.waccOverride.applicable && reasonableness.waccOverride.mismatch) {
