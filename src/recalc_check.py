@@ -378,8 +378,11 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     for key, cached_val, recalced_val in zip(target_keys, cached_values, recalculated_values):
         sheet_name, cell_addr = key.split('!', 1)
 
-        if isinstance(recalced_val, str) and recalced_val.startswith('#'):
-            unresolved_errors.append({"sheet": sheet_name, "cell": cell_addr, "recalculated_error": recalced_val})
+        is_string_error = isinstance(recalced_val, str) and recalced_val.startswith('#')
+        is_dict_error = isinstance(recalced_val, dict) and recalced_val.get('type') == 'Error'
+        if is_string_error or is_dict_error:
+            error_repr = recalced_val if is_string_error else f"{recalced_val.get('kind', 'Unknown')} error"
+            unresolved_errors.append({"sheet": sheet_name, "cell": cell_addr, "recalculated_error": error_repr})
             continue
 
         cached_is_nan = isinstance(cached_val, float) and math.isnan(cached_val)
@@ -404,6 +407,44 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
                     "diff": recalced_val - cached_val,
                 })
 
+    # Separate genuinely clean mismatches from a chain of IFERROR/IFNA-
+    # masked upstream failures. Found via real testing against Hidden
+    # Gem: a Dashboard cell wraps 'Unit Economics'!F12 in IFERROR(...,0);
+    # that cell's own formula is ALSO wrapped in an error-masking
+    # function referencing something further upstream, and so on — each
+    # layer silently returns its fallback rather than propagating a
+    # visible error, so the single-hop reference-based taint trace above
+    # can't see through more than one layer. This runs entirely on data
+    # already in memory (formula text, the mismatches just built) — no
+    # need to re-run the expensive Formualizer evaluation again.
+    _IFERROR_IFNA_RE = re.compile(r'\bIFERROR\s*\(|\bIFNA\s*\(', re.IGNORECASE)
+    mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
+    formula_by_key = {key: formula_texts[i] for i, key in enumerate(target_keys) if key in mismatch_keys}
+
+    masked = {key for key in mismatch_keys if formula_by_key.get(key) and _IFERROR_IFNA_RE.search(formula_by_key[key])}
+    if masked:
+        addr_patterns = {key.split('!', 1)[1] for key in masked}
+        for _wave in range(8):
+            newly_masked = set()
+            for key in mismatch_keys:
+                if key in masked:
+                    continue
+                formula = formula_by_key.get(key)
+                if not formula or not any(pat in formula for pat in addr_patterns):
+                    continue
+                refs = _extract_refs(formula, key.split('!', 1)[0])
+                for (rsheet, rcol, rrow) in refs:
+                    if f"{rsheet}!{rcol}{rrow}" in masked:
+                        newly_masked.add(key)
+                        break
+            if not newly_masked:
+                break
+            masked |= newly_masked
+            addr_patterns |= {key.split('!', 1)[1] for key in newly_masked}
+
+    mismatches_clean = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" not in masked]
+    mismatches_likely_masked_upstream_error = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" in masked]
+
     return {
         "status": "success",
         "elapsed_s": round(time.time() - t_start, 2),
@@ -413,8 +454,10 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         "genuine_circular_groups": telemetry.iterated_sccs,
         "converged_circular_groups": telemetry.converged_sccs,
         "unconverged_circular_groups": telemetry.capped_sccs,
-        "mismatches": mismatches,
-        "mismatch_count": len(mismatches),
+        "mismatches": mismatches_clean,
+        "mismatch_count": len(mismatches_clean),
+        "mismatches_likely_masked_upstream_error": mismatches_likely_masked_upstream_error,
+        "mismatches_likely_masked_upstream_error_count": len(mismatches_likely_masked_upstream_error),
         "unresolved_errors": unresolved_errors,
         "unresolved_error_count": len(unresolved_errors),
     }
