@@ -114,6 +114,60 @@ if openpyxl is None:
 
 EXTERNAL_REF_RE = re.compile(r'\[\d+\]')
 
+# Confirmed via real testing against Hidden Gem: neutralizing an
+# external-reference cell to 0 (see fix #2 in the module docstring)
+# correctly avoids the crash, but that fabricated 0 propagates through
+# the dependency graph — any cell that references a neutralized cell,
+# directly or transitively, inherits the same fabricated value. Without
+# tracing this, such cells show up as "mismatches" against their real
+# cached value (which reflects the actual external data) even though
+# nothing is genuinely wrong with their formula — a real, confirmed
+# false-positive class (4,155 cells on a single sheet in one real test,
+# all recalculating to exactly 0.0). This section traces forward from
+# each neutralized cell to find everything downstream and excludes it
+# from the comparison too, not just the neutralized cells themselves.
+
+_CELL_REF_RE = re.compile(
+    r"(?:'([^']+)'|([A-Za-z0-9_ ]+))?!?\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?"
+)
+
+
+def _col_to_num(col):
+    n = 0
+    for ch in col:
+        n = n * 26 + (ord(ch) - 64)
+    return n
+
+
+def _num_to_col(n):
+    s = ''
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        s = chr(65 + rem) + s
+    return s
+
+
+def _extract_refs(formula, current_sheet, max_range_cells=2000):
+    """Best-effort cell/range reference extraction — doesn't need to be a
+    complete Excel-grammar parser, just reliable enough to catch real
+    references for taint propagation. Pathologically large ranges are
+    skipped rather than fully expanded (not worth the cost here)."""
+    refs = set()
+    for m in _CELL_REF_RE.finditer(formula):
+        quoted_sheet, bare_sheet, col1, row1, col2, row2 = m.groups()
+        sheet = (quoted_sheet or bare_sheet or current_sheet).strip()
+        if col2 and row2:
+            c1, c2 = sorted([_col_to_num(col1.upper()), _col_to_num(col2.upper())])
+            r1, r2 = sorted([int(row1), int(row2)])
+            if (c2 - c1 + 1) * (r2 - r1 + 1) > max_range_cells:
+                continue
+            for c in range(c1, c2 + 1):
+                for r in range(r1, r2 + 1):
+                    refs.add((sheet, _num_to_col(c), r))
+        else:
+            refs.add((sheet, col1.upper(), int(row1)))
+    return refs
+
 # Confirmed via direct testing (the system's own OOM killer log) that
 # Formualizer's evaluate_all() was killed by the OS after growing to
 # ~3.9GB while processing a real 1,152,789-formula-cell mining model —
@@ -192,13 +246,16 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
 
     # Single parallel-sequential pass (fix #3b) that both (i) identifies
     # and neutralizes external-reference cells (fix #2) and (ii) collects
-    # the full target list + cached values for the batch comparison
-    # below. Never uses random access (ws[coordinate]) — confirmed
-    # catastrophically slow in read_only mode.
+    # the full target list + cached values + formula text for the batch
+    # comparison and taint-propagation trace below. Never uses random
+    # access (ws[coordinate]) — confirmed catastrophically slow in
+    # read_only mode.
     external_ref_cells = set()
     targets = []          # [(sheet, row, col), ...]
     target_keys = []      # ["Sheet!A1", ...] parallel to targets
     cached_values = []    # parallel to targets
+    formula_texts = []    # parallel to targets — needed for the taint trace below
+    sheet_of_target = {}  # "Sheet!A1" -> sheet name, for the taint trace
 
     for sheet_name in wb_formulas.sheetnames:
         if sheet_name not in wb_cached.sheetnames:
@@ -216,9 +273,54 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
                     except Exception:
                         pass  # if neutralizing itself fails, evaluate_all() below will surface it clearly
                     continue  # never compare a neutralized cell — its value is fabricated
+                key = f"{sheet_name}!{cell_f.coordinate}"
                 targets.append((sheet_name, cell_f.row, cell_f.column))
-                target_keys.append(f"{sheet_name}!{cell_f.coordinate}")
+                target_keys.append(key)
                 cached_values.append(cell_c.value)
+                formula_texts.append(cell_f.value)
+                sheet_of_target[key] = sheet_name
+
+    # Taint propagation: find every cell that references a neutralized
+    # cell, directly or transitively, and exclude it from the comparison
+    # too. Fast string-contains pre-filter (cheap) before the more
+    # expensive regex-based reference parsing (only run on formulas that
+    # plausibly could reference a tainted cell) — necessary for this to
+    # stay tractable at real scale (1M+ formula cells). Bounded to a
+    # reasonable number of BFS waves rather than iterating to an
+    # unbounded fixed point, since each wave requires another pass over
+    # every remaining formula.
+    tainted = set(external_ref_cells)
+    if tainted:
+        addr_patterns = {key.split('!', 1)[1] for key in tainted}  # e.g. "E50", without the sheet
+        max_waves = 8
+        for _wave in range(max_waves):
+            newly_tainted = set()
+            for i, formula in enumerate(formula_texts):
+                key = target_keys[i]
+                if key in tainted:
+                    continue
+                if not formula or not any(pat in formula for pat in addr_patterns):
+                    continue  # cheap pre-filter: formula can't possibly reference a tainted cell
+                refs = _extract_refs(formula, sheet_of_target[key])
+                for (rsheet, rcol, rrow) in refs:
+                    if f"{rsheet}!{rcol}{rrow}" in tainted:
+                        newly_tainted.add(key)
+                        break
+            if not newly_tainted:
+                break
+            tainted |= newly_tainted
+            addr_patterns |= {key.split('!', 1)[1] for key in newly_tainted}
+
+        if len(tainted) > len(external_ref_cells):
+            # Filter targets/keys/cached_values/formula_texts to drop
+            # every tainted cell before the batch comparison below.
+            keep_indices = [i for i, key in enumerate(target_keys) if key not in tainted]
+            targets = [targets[i] for i in keep_indices]
+            target_keys = [target_keys[i] for i in keep_indices]
+            cached_values = [cached_values[i] for i in keep_indices]
+            formula_texts = [formula_texts[i] for i in keep_indices]
+
+    tainted_downstream_count = len(tainted) - len(external_ref_cells)
 
     try:
         wb.evaluate_all()
@@ -272,6 +374,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         "elapsed_s": round(time.time() - t_start, 2),
         "formula_cells_checked": len(targets),
         "external_reference_cells_excluded": len(external_ref_cells),
+        "tainted_downstream_cells_excluded": tainted_downstream_count,
         "genuine_circular_groups": telemetry.iterated_sccs,
         "converged_circular_groups": telemetry.converged_sccs,
         "unconverged_circular_groups": telemetry.capped_sccs,
