@@ -417,13 +417,44 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # can't see through more than one layer. This runs entirely on data
     # already in memory (formula text, the mismatches just built) — no
     # need to re-run the expensive Formualizer evaluation again.
+    # Separate genuinely clean mismatches from ones caused by the same
+    # upstream root cause as a confirmed genuine failure. Originally
+    # this only looked for IFERROR/IFNA-wrapped mismatches referencing
+    # each other, but real testing against Hidden Gem found a case that
+    # breaks that assumption: =AA12-AA13, plain arithmetic with no
+    # error-masking function at all, inheriting the same 0.0 result as
+    # its precedents simply by referencing them. The correct, more
+    # general test is reference-based, not function-based: seed from
+    # cells we KNOW are genuinely broken (external-reference cells,
+    # and any cell Formualizer itself reports as an unresolved error),
+    # then propagate to any OTHER mismatch that references a seed or an
+    # already-tainted cell — regardless of what function, if any, that
+    # mismatch's own formula uses. Runs entirely on data already in
+    # memory (formula text, the mismatches/unresolved_errors just
+    # built) — no need to re-run the expensive Formualizer evaluation.
     _IFERROR_IFNA_RE = re.compile(r'\bIFERROR\s*\(|\bIFNA\s*\(', re.IGNORECASE)
     mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
     formula_by_key = {key: formula_texts[i] for i, key in enumerate(target_keys) if key in mismatch_keys}
 
-    masked = {key for key in mismatch_keys if formula_by_key.get(key) and _IFERROR_IFNA_RE.search(formula_by_key[key])}
+    root_seeds = set(external_ref_cells) | {f"{e['sheet']}!{e['cell']}" for e in unresolved_errors}
+
+    masked = set()
+    for key in mismatch_keys:
+        formula = formula_by_key.get(key)
+        if not formula:
+            continue
+        # Directly references a confirmed-broken cell, or uses an
+        # explicit error-masking function as a supplementary signal
+        # (still valid — just no longer the ONLY signal).
+        if _IFERROR_IFNA_RE.search(formula):
+            masked.add(key)
+            continue
+        refs = _extract_refs(formula, key.split('!', 1)[0])
+        if any(f"{rsheet}!{rcol}{rrow}" in root_seeds for (rsheet, rcol, rrow) in refs):
+            masked.add(key)
+
     if masked:
-        addr_patterns = {key.split('!', 1)[1] for key in masked}
+        addr_patterns = {key.split('!', 1)[1] for key in masked} | {key.split('!', 1)[1] for key in root_seeds}
         for _wave in range(8):
             newly_masked = set()
             for key in mismatch_keys:
