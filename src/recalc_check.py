@@ -141,7 +141,7 @@ EXTERNAL_REF_RE = re.compile(r'\[\d+\]')
 # from the comparison too, not just the neutralized cells themselves.
 
 _CELL_REF_RE = re.compile(
-    r"(?:'([^']+)'|([A-Za-z0-9_ ]+))?!?\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?"
+    r"(?:(?:'([^']+)'|([A-Za-z0-9_]+))!)?\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?"
 )
 
 
