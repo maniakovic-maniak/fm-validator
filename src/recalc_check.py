@@ -319,7 +319,13 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     if tainted:
         _progress(f"Tracing dependents of {len(external_ref_cells)} external-reference cell(s)...")
         addr_patterns = {key.split('!', 1)[1] for key in tainted}  # e.g. "E50", without the sheet
-        max_waves = 8
+        # Confirmed via real testing against Hidden Gem: a large, deep
+        # model can have dependency chains longer than 8 hops (e.g.
+        # Ops!BG67=BG18, itself several hops from the root MATCH()
+        # failure) — 8 stopped the propagation before reaching
+        # genuinely-affected cells. 30 gives substantial headroom while
+        # staying bounded.
+        max_waves = 30
         for _wave in range(max_waves):
             newly_tainted = set()
             for i, formula in enumerate(formula_texts):
@@ -455,7 +461,10 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
 
     if masked:
         addr_patterns = {key.split('!', 1)[1] for key in masked} | {key.split('!', 1)[1] for key in root_seeds}
-        for _wave in range(8):
+        # Same reasoning as the external-reference propagation above —
+        # 30 waves instead of 8 to handle deep dependency chains in a
+        # large, complex model.
+        for _wave in range(30):
             newly_masked = set()
             for key in mismatch_keys:
                 if key in masked:
