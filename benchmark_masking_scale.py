@@ -34,17 +34,28 @@ SHEET = "Sheet1"
 
 print(f"Building synthetic scenario: {N_TARGETS:,} target cells, "
       f"{N_UNRESOLVED:,} unresolved_errors...")
+print("Deliberately includes a >30-hop linear chain (A1 -> A2 -> A3 -> ... "
+      "-> A50000), matching the real failure mode: the old 30-wave cap cut "
+      "propagation off mid-chain against the real Hidden Gem file.")
 t0 = time.time()
 
 # Build a chain-like dependency structure: cell N often references a
 # handful of earlier cells (N-1, N-2, ...), similar to how a real model's
 # formulas mostly reference nearby/earlier cells, with some randomness.
+# The first 50,000 cells form a STRICT single-hop chain (each references
+# only the immediately preceding cell) — this is the part that needs
+# 50,000 waves to fully converge if uncapped, and would have been
+# silently truncated at 30 under the old code.
+CHAIN_LEN = 50_000
 target_keys = [f"{SHEET}!A{i}" for i in range(1, N_TARGETS + 1)]
 formula_texts = {}
 for i in range(1, N_TARGETS + 1):
     key = f"{SHEET}!A{i}"
     if i == 1:
         formula_texts[key] = "=1"
+        continue
+    if i <= CHAIN_LEN:
+        formula_texts[key] = f"=A{i-1}"
         continue
     n_refs = random.choice([1, 1, 1, 2, 2, 3])
     refs = []
@@ -108,18 +119,21 @@ print(f"  initial seeding: {round(time.time()-t_seed,1)}s ({len(tainted_by_error
 t_waves = time.time()
 frontier = set(tainted_by_error)
 wave_count = 0
-for _wave in range(30):
+while True:
+    wave_count += 1
     newly_tainted = set()
     for tkey in frontier:
         for dep_key in dependents_of.get(tkey, ()):
             if dep_key not in tainted_by_error:
                 newly_tainted.add(dep_key)
-    wave_count += 1
     if not newly_tainted:
         break
     tainted_by_error |= newly_tainted
     frontier = newly_tainted
 print(f"  wave propagation: {round(time.time()-t_waves,1)}s ({wave_count} waves, {len(tainted_by_error):,} total tainted)")
+if wave_count > 30:
+    print(f"  -> confirms convergence past the old 30-wave cap ({wave_count} waves needed) "
+          f"WITHOUT the runaway cost that would have implied under the old design.")
 
 total = time.time() - t1
 print(f"\nTOTAL masking BFS time: {round(total,1)}s ({round(total/60,2)} minutes)")

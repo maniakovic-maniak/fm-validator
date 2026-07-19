@@ -335,52 +335,47 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # every remaining formula.
     _progress(f"Scan complete: {len(targets):,} target(s), {len(external_ref_cells)} external-reference cell(s) found ({round(time.time()-t_start,1)}s elapsed).")
 
-    # FIX (found via real testing against Hidden Gem): the cheap pre-filter
-    # below checks `pat in formula` where `pat` is a bare coordinate like
-    # "U183" — but a formula referencing that cell absolutely, e.g.
-    # "U$183" or "$U$183", never contains the literal substring "U183" at
-    # all (the "$" sits between the letter and the digit). Confirmed
-    # directly: 'U183' in '=SUMIF($H$183:$H$184,$G188,U$183:U$184)' is
-    # False, even though this formula genuinely references U183. Absolute
-    # references are extremely common in real financial models, so this
-    # silently broke propagation through any hop using one — comparing
-    # against a $-stripped copy of the formula fixes it while keeping the
-    # check just as cheap (one precomputed strip per formula, not per
-    # wave). The original (unstripped) formula text is still what's
-    # passed to _extract_refs below, since that regex already handles
-    # "$" correctly on its own.
-    formula_texts_stripped = [f.replace('$', '') if f else f for f in formula_texts]
+    # FIX #2 (found via a real Hidden Gem run: the masking BFS below hit
+    # its old 30-wave cap with 7 cells STILL newly tainted on wave 30 —
+    # i.e. genuinely not converged, silently truncated). The same fixed-
+    # cap risk applies here too, even though this particular run's 4
+    # external-reference cells happened to have zero downstream
+    # dependents. Rather than leave one BFS capped and hope a future
+    # file's external-ref chain never happens to be long, both passes
+    # now use the same reverse-dependency-index architecture: parse
+    # every formula's references once, build a reverse index once, then
+    # propagate via the actual frontier with NO fixed wave limit — safe
+    # to run to true convergence because each wave's cost is bounded by
+    # the frontier size, not by rescanning every target cell.
+    _progress(f"Parsing references for {len(target_keys):,} target cell(s) "
+               f"for external-reference taint tracing...")
+    _ext_refs_by_key = {}
+    for i, formula in enumerate(formula_texts):
+        if formula:
+            _ext_refs_by_key[target_keys[i]] = _extract_refs(formula, sheet_of_target[target_keys[i]])
+    _ext_dependents_of = {}
+    for key, refs in _ext_refs_by_key.items():
+        for (rsheet, rcol, rrow) in refs:
+            _ext_dependents_of.setdefault(f"{rsheet}!{rcol}{rrow}", []).append(key)
+    _progress(f"  reference parsing and reverse index complete ({round(time.time()-t_start,1)}s elapsed).")
 
     tainted = set(external_ref_cells)
     if tainted:
         _progress(f"Tracing dependents of {len(external_ref_cells)} external-reference cell(s)...")
-        addr_patterns = {key.split('!', 1)[1] for key in tainted}  # e.g. "E50", without the sheet
-        # Confirmed via real testing against Hidden Gem: a large, deep
-        # model can have dependency chains longer than 8 hops (e.g.
-        # Ops!BG67=BG18, itself several hops from the root MATCH()
-        # failure) — 8 stopped the propagation before reaching
-        # genuinely-affected cells. 30 gives substantial headroom while
-        # staying bounded.
-        max_waves = 30
-        for _wave in range(max_waves):
+        frontier = set(tainted)
+        _wave = 0
+        while True:
+            _wave += 1
             newly_tainted = set()
-            for i, formula in enumerate(formula_texts):
-                key = target_keys[i]
-                if key in tainted:
-                    continue
-                formula_stripped = formula_texts_stripped[i]
-                if not formula or not any(pat in formula_stripped for pat in addr_patterns):
-                    continue  # cheap pre-filter: formula can't possibly reference a tainted cell
-                refs = _extract_refs(formula, sheet_of_target[key])
-                for (rsheet, rcol, rrow) in refs:
-                    if f"{rsheet}!{rcol}{rrow}" in tainted:
-                        newly_tainted.add(key)
-                        break
+            for tkey in frontier:
+                for dep_key in _ext_dependents_of.get(tkey, ()):
+                    if dep_key not in tainted:
+                        newly_tainted.add(dep_key)
             if not newly_tainted:
                 break
             tainted |= newly_tainted
-            addr_patterns |= {key.split('!', 1)[1] for key in newly_tainted}
-            _progress(f"  wave {_wave+1}: {len(newly_tainted):,} newly tainted, {len(tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
+            frontier = newly_tainted
+            _progress(f"  wave {_wave}: {len(newly_tainted):,} newly tainted, {len(tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
 
         if len(tainted) > len(external_ref_cells):
             # Filter targets/keys/cached_values/formula_texts to drop
@@ -533,19 +528,22 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     _progress(f"  initial seeding pass complete: {len(tainted_by_error):,} cell(s) tainted "
                f"({round(time.time()-t_start,1)}s elapsed).")
 
-    # Same 30-wave depth allowance as the external-reference propagation
-    # above, for the same reason (deep dependency chains in a large,
-    # complex model) — but each wave now only visits cells that actually
-    # depend on something newly tainted, via the reverse index, instead
-    # of rescanning every target cell.
+    # FIX #2 continued: same reasoning as the external-reference BFS
+    # above — no fixed wave cap. Confirmed this was NOT just theoretical:
+    # a real run against Hidden Gem hit the old 30-wave cap with 7 cells
+    # still newly tainted on wave 30, meaning propagation was silently
+    # truncated before converging. Safe to run uncapped now that each
+    # wave only touches the actual frontier via the reverse index.
     frontier = set(tainted_by_error)
-    for _wave in range(30):
+    _wave = 0
+    while True:
+        _wave += 1
         newly_tainted = set()
         for tkey in frontier:
             for dep_key in dependents_of.get(tkey, ()):
                 if dep_key not in tainted_by_error:
                     newly_tainted.add(dep_key)
-        _progress(f"  masking wave {_wave+1}: {len(newly_tainted):,} newly tainted, "
+        _progress(f"  masking wave {_wave}: {len(newly_tainted):,} newly tainted, "
                   f"{len(tainted_by_error)+len(newly_tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
         if not newly_tainted:
             break
