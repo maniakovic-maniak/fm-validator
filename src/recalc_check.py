@@ -315,6 +315,22 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # every remaining formula.
     _progress(f"Scan complete: {len(targets):,} target(s), {len(external_ref_cells)} external-reference cell(s) found ({round(time.time()-t_start,1)}s elapsed).")
 
+    # FIX (found via real testing against Hidden Gem): the cheap pre-filter
+    # below checks `pat in formula` where `pat` is a bare coordinate like
+    # "U183" — but a formula referencing that cell absolutely, e.g.
+    # "U$183" or "$U$183", never contains the literal substring "U183" at
+    # all (the "$" sits between the letter and the digit). Confirmed
+    # directly: 'U183' in '=SUMIF($H$183:$H$184,$G188,U$183:U$184)' is
+    # False, even though this formula genuinely references U183. Absolute
+    # references are extremely common in real financial models, so this
+    # silently broke propagation through any hop using one — comparing
+    # against a $-stripped copy of the formula fixes it while keeping the
+    # check just as cheap (one precomputed strip per formula, not per
+    # wave). The original (unstripped) formula text is still what's
+    # passed to _extract_refs below, since that regex already handles
+    # "$" correctly on its own.
+    formula_texts_stripped = [f.replace('$', '') if f else f for f in formula_texts]
+
     tainted = set(external_ref_cells)
     if tainted:
         _progress(f"Tracing dependents of {len(external_ref_cells)} external-reference cell(s)...")
@@ -332,7 +348,8 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
                 key = target_keys[i]
                 if key in tainted:
                     continue
-                if not formula or not any(pat in formula for pat in addr_patterns):
+                formula_stripped = formula_texts_stripped[i]
+                if not formula or not any(pat in formula_stripped for pat in addr_patterns):
                     continue  # cheap pre-filter: formula can't possibly reference a tainted cell
                 refs = _extract_refs(formula, sheet_of_target[key])
                 for (rsheet, rcol, rrow) in refs:
@@ -440,12 +457,34 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # built) — no need to re-run the expensive Formualizer evaluation.
     _IFERROR_IFNA_RE = re.compile(r'\bIFERROR\s*\(|\bIFNA\s*\(', re.IGNORECASE)
     mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
-    formula_by_key = {key: formula_texts[i] for i, key in enumerate(target_keys) if key in mismatch_keys}
+
+    # FIX (found via real testing against Hidden Gem): this used to only
+    # index formulas for cells already classified as a "mismatch", and the
+    # propagation below only ever walked mismatch_keys. That silently
+    # orphans a real, common pattern — an aggregation function (SUM/SUMIF)
+    # can fold several *individually sub-threshold* discrepancies into one
+    # cell whose combined gap finally clears absolute_tolerance. Confirmed
+    # concretely: Ops!U188 (cached 0.788 vs. recalculated 0.0) and Ops!U189
+    # (cached 0.525 vs. 0.0) each carry a genuine discrepancy traceable to
+    # an upstream Formualizer limitation (here, an unrecognized _xlfn.
+    # function), but neither individually exceeds the 1.0 absolute
+    # tolerance, so neither ever entered mismatch_keys — leaving no path
+    # for the old BFS to reach Ops!U193 = SUM(U188:U192), whose *combined*
+    # 1.31 vs. 0.0 gap does clear the threshold. Indexing and propagating
+    # over every target cell (not just mismatches) closes that gap: an
+    # intermediate cell can now carry the taint forward even when its own
+    # discrepancy is too small to be flagged in isolation.
+    formula_by_key = {key: formula_texts[i] for i, key in enumerate(target_keys)}
+    # Same $-stripped pre-filter fix as the external-reference BFS above —
+    # a formula referencing U183 absolutely (e.g. "U$183") never contains
+    # the literal substring "U183", so the cheap pre-filter needs to check
+    # against a $-stripped copy, not the raw formula text.
+    formula_by_key_stripped = {key: (f.replace('$', '') if f else f) for key, f in formula_by_key.items()}
 
     root_seeds = set(external_ref_cells) | {f"{e['sheet']}!{e['cell']}" for e in unresolved_errors}
 
-    masked = set()
-    for key in mismatch_keys:
+    tainted_by_error = set()
+    for key in target_keys:
         formula = formula_by_key.get(key)
         if not formula:
             continue
@@ -453,34 +492,42 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         # explicit error-masking function as a supplementary signal
         # (still valid — just no longer the ONLY signal).
         if _IFERROR_IFNA_RE.search(formula):
-            masked.add(key)
+            tainted_by_error.add(key)
             continue
         refs = _extract_refs(formula, key.split('!', 1)[0])
         if any(f"{rsheet}!{rcol}{rrow}" in root_seeds for (rsheet, rcol, rrow) in refs):
-            masked.add(key)
+            tainted_by_error.add(key)
 
-    if masked:
-        addr_patterns = {key.split('!', 1)[1] for key in masked} | {key.split('!', 1)[1] for key in root_seeds}
+    if tainted_by_error:
+        addr_patterns = {key.split('!', 1)[1] for key in tainted_by_error} | {key.split('!', 1)[1] for key in root_seeds}
         # Same reasoning as the external-reference propagation above —
         # 30 waves instead of 8 to handle deep dependency chains in a
-        # large, complex model.
+        # large, complex model. Now walks every target cell, not just
+        # mismatches (see FIX note above) — the cheap substring pre-filter
+        # keeps each wave's cost close to what the mismatch-only version
+        # cost before, since the vast majority of cells are skipped on the
+        # `not any(pat in formula_stripped ...)` check without ever
+        # reaching the more expensive reference-extraction step.
         for _wave in range(30):
-            newly_masked = set()
-            for key in mismatch_keys:
-                if key in masked:
+            newly_tainted = set()
+            for key in target_keys:
+                if key in tainted_by_error:
                     continue
                 formula = formula_by_key.get(key)
-                if not formula or not any(pat in formula for pat in addr_patterns):
+                formula_stripped = formula_by_key_stripped.get(key)
+                if not formula or not any(pat in formula_stripped for pat in addr_patterns):
                     continue
                 refs = _extract_refs(formula, key.split('!', 1)[0])
                 for (rsheet, rcol, rrow) in refs:
-                    if f"{rsheet}!{rcol}{rrow}" in masked:
-                        newly_masked.add(key)
+                    if f"{rsheet}!{rcol}{rrow}" in tainted_by_error:
+                        newly_tainted.add(key)
                         break
-            if not newly_masked:
+            if not newly_tainted:
                 break
-            masked |= newly_masked
-            addr_patterns |= {key.split('!', 1)[1] for key in newly_masked}
+            tainted_by_error |= newly_tainted
+            addr_patterns |= {key.split('!', 1)[1] for key in newly_tainted}
+
+    masked = tainted_by_error & mismatch_keys
 
     mismatches_clean = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" not in masked]
     mismatches_likely_masked_upstream_error = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" in masked]
