@@ -290,7 +290,27 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             for cell_f, cell_c in zip(row_f, row_c):
                 if cell_f.data_type != 'f':
                     continue
-                if cell_f.value and EXTERNAL_REF_RE.search(str(cell_f.value)):
+                # FIX (found via real testing against Hidden Gem at
+                # production scale): openpyxl represents a legacy CSE
+                # array formula as an ArrayFormula object (attributes
+                # .ref, .text), not a plain string. Two consequences if
+                # left unnormalized: (1) the EXTERNAL_REF_RE check just
+                # below used str(cell_f.value), which on an ArrayFormula
+                # stringifies to its object repr, not the actual formula
+                # text — silently missing any "[N]" external reference
+                # living inside an array formula; (2) the $-stripped
+                # pre-filter added for the taint-BFS fixes calls
+                # .replace('$', ''), which doesn't exist on ArrayFormula
+                # at all and crashed with AttributeError on this exact
+                # file. Normalizing once here, at the single point
+                # formula_texts is populated, means every downstream
+                # consumer (both BFS passes, IFERROR/IFNA regex,
+                # _extract_refs, mismatch reporting) always sees plain
+                # formula text or None — never a wrapper object.
+                formula_value = cell_f.value
+                if not isinstance(formula_value, str):
+                    formula_value = getattr(formula_value, 'text', None)
+                if formula_value and EXTERNAL_REF_RE.search(formula_value):
                     try:
                         wb.sheet(sheet_name).set_value(cell_f.row, cell_f.column, 0)
                         external_ref_cells.add(f"{sheet_name}!{cell_f.coordinate}")
@@ -301,7 +321,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
                 targets.append((sheet_name, cell_f.row, cell_f.column))
                 target_keys.append(key)
                 cached_values.append(cell_c.value)
-                formula_texts.append(cell_f.value)
+                formula_texts.append(formula_value)
                 sheet_of_target[key] = sheet_name
 
     # Taint propagation: find every cell that references a neutralized
