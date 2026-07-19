@@ -124,15 +124,24 @@ def old_masking_logic(target_keys, formula_texts, unresolved_errors, external_re
 
 
 def new_masking_logic(target_keys, formula_texts, unresolved_errors, external_ref_cells, mismatches, extract_refs_fn):
-    """The PATCHED logic: formula_by_key and the BFS both cover every
-    target cell, not just ones already classified as mismatches."""
+    """The current (reverse-index BFS) logic — parses every formula's
+    references once, builds a reverse dependency index once, then
+    propagates by walking only the actual frontier each wave."""
     IFERROR_IFNA_RE = re.compile(r'\bIFERROR\s*\(|\bIFNA\s*\(', re.IGNORECASE)
     mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
     formula_by_key = {key: formula_texts[key] for key in target_keys}
-
     root_seeds = set(external_ref_cells) | {f"{e['sheet']}!{e['cell']}" for e in unresolved_errors}
 
-    formula_by_key_stripped = {key: (f.replace('$', '') if f else f) for key, f in formula_by_key.items()}
+    refs_by_key = {}
+    for key in target_keys:
+        formula = formula_by_key.get(key)
+        if formula:
+            refs_by_key[key] = extract_refs_fn(formula, key.split('!', 1)[0])
+
+    dependents_of = {}
+    for key, refs in refs_by_key.items():
+        for (rsheet, rcol, rrow) in refs:
+            dependents_of.setdefault(f"{rsheet}!{rcol}{rrow}", []).append(key)
 
     tainted_by_error = set()
     for key in target_keys:
@@ -142,30 +151,21 @@ def new_masking_logic(target_keys, formula_texts, unresolved_errors, external_re
         if IFERROR_IFNA_RE.search(formula):
             tainted_by_error.add(key)
             continue
-        refs = extract_refs_fn(formula, key.split('!', 1)[0])
+        refs = refs_by_key.get(key, ())
         if any(f"{rsheet}!{rcol}{rrow}" in root_seeds for (rsheet, rcol, rrow) in refs):
             tainted_by_error.add(key)
 
-    if tainted_by_error:
-        addr_patterns = {key.split('!', 1)[1] for key in tainted_by_error} | {key.split('!', 1)[1] for key in root_seeds}
-        for _wave in range(30):
-            newly_tainted = set()
-            for key in target_keys:
-                if key in tainted_by_error:
-                    continue
-                formula = formula_by_key.get(key)
-                formula_stripped = formula_by_key_stripped.get(key)
-                if not formula or not any(pat in formula_stripped for pat in addr_patterns):
-                    continue
-                refs = extract_refs_fn(formula, key.split('!', 1)[0])
-                for (rsheet, rcol, rrow) in refs:
-                    if f"{rsheet}!{rcol}{rrow}" in tainted_by_error:
-                        newly_tainted.add(key)
-                        break
-            if not newly_tainted:
-                break
-            tainted_by_error |= newly_tainted
-            addr_patterns |= {key.split('!', 1)[1] for key in newly_tainted}
+    frontier = set(tainted_by_error)
+    for _wave in range(30):
+        newly_tainted = set()
+        for tkey in frontier:
+            for dep_key in dependents_of.get(tkey, ()):
+                if dep_key not in tainted_by_error:
+                    newly_tainted.add(dep_key)
+        if not newly_tainted:
+            break
+        tainted_by_error |= newly_tainted
+        frontier = newly_tainted
 
     return tainted_by_error & mismatch_keys
 

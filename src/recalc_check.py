@@ -478,30 +478,43 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     _IFERROR_IFNA_RE = re.compile(r'\bIFERROR\s*\(|\bIFNA\s*\(', re.IGNORECASE)
     mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
 
-    # FIX (found via real testing against Hidden Gem): this used to only
-    # index formulas for cells already classified as a "mismatch", and the
-    # propagation below only ever walked mismatch_keys. That silently
-    # orphans a real, common pattern — an aggregation function (SUM/SUMIF)
-    # can fold several *individually sub-threshold* discrepancies into one
-    # cell whose combined gap finally clears absolute_tolerance. Confirmed
-    # concretely: Ops!U188 (cached 0.788 vs. recalculated 0.0) and Ops!U189
-    # (cached 0.525 vs. 0.0) each carry a genuine discrepancy traceable to
-    # an upstream Formualizer limitation (here, an unrecognized _xlfn.
-    # function), but neither individually exceeds the 1.0 absolute
-    # tolerance, so neither ever entered mismatch_keys — leaving no path
-    # for the old BFS to reach Ops!U193 = SUM(U188:U192), whose *combined*
-    # 1.31 vs. 0.0 gap does clear the threshold. Indexing and propagating
-    # over every target cell (not just mismatches) closes that gap: an
-    # intermediate cell can now carry the taint forward even when its own
-    # discrepancy is too small to be flagged in isolation.
     formula_by_key = {key: formula_texts[i] for i, key in enumerate(target_keys)}
-    # Same $-stripped pre-filter fix as the external-reference BFS above —
-    # a formula referencing U183 absolutely (e.g. "U$183") never contains
-    # the literal substring "U183", so the cheap pre-filter needs to check
-    # against a $-stripped copy, not the raw formula text.
-    formula_by_key_stripped = {key: (f.replace('$', '') if f else f) for key, f in formula_by_key.items()}
-
     root_seeds = set(external_ref_cells) | {f"{e['sheet']}!{e['cell']}" for e in unresolved_errors}
+
+    # FIX #2 (found via a real 8+ hour run against Hidden Gem that had to
+    # be interrupted — the earlier fix below was itself broken at scale).
+    # That version used a "cheap" substring pre-filter — any(pat in
+    # formula for pat in addr_patterns) — on the assumption addr_patterns
+    # would stay small, as it does for the external-ref-only BFS above
+    # (seeded from a handful of cells). But THIS masking BFS seeds from
+    # root_seeds = external_ref_cells | unresolved_errors, and Hidden
+    # Gem's unresolved_error_count was 264,055 — so addr_patterns started
+    # near that size and only grew every wave. Measured directly: a
+    # substring check against ~113K patterns costs ~200 microseconds PER
+    # FORMULA; doing that for ~1.15M target cells across multiple waves
+    # extrapolates to hours, matching what actually happened. The real
+    # fix is architectural, not a smaller constant: parse every formula's
+    # references ONCE (not once per wave), build a reverse index of
+    # "which cells reference cell X" ONCE, then propagate by walking only
+    # the actual frontier each wave — a proper BFS over the dependency
+    # graph, bounded by the number of (cell, reference) edges overall,
+    # rather than rescanning all target cells' formula text on every
+    # wave regardless of whether they're anywhere near the taint.
+    _progress(f"Parsing references for {len(target_keys):,} target cell(s) "
+               f"(one-time cost, not repeated per wave)...")
+    refs_by_key = {}
+    for key in target_keys:
+        formula = formula_by_key.get(key)
+        if formula:
+            refs_by_key[key] = _extract_refs(formula, key.split('!', 1)[0])
+    _progress(f"  reference parsing complete ({round(time.time()-t_start,1)}s elapsed).")
+
+    dependents_of = {}
+    for key, refs in refs_by_key.items():
+        for (rsheet, rcol, rrow) in refs:
+            dependents_of.setdefault(f"{rsheet}!{rcol}{rrow}", []).append(key)
+    _progress(f"  reverse dependency index built: {len(dependents_of):,} referenced cell(s) "
+               f"({round(time.time()-t_start,1)}s elapsed).")
 
     tainted_by_error = set()
     for key in target_keys:
@@ -514,38 +527,30 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         if _IFERROR_IFNA_RE.search(formula):
             tainted_by_error.add(key)
             continue
-        refs = _extract_refs(formula, key.split('!', 1)[0])
+        refs = refs_by_key.get(key, ())
         if any(f"{rsheet}!{rcol}{rrow}" in root_seeds for (rsheet, rcol, rrow) in refs):
             tainted_by_error.add(key)
+    _progress(f"  initial seeding pass complete: {len(tainted_by_error):,} cell(s) tainted "
+               f"({round(time.time()-t_start,1)}s elapsed).")
 
-    if tainted_by_error:
-        addr_patterns = {key.split('!', 1)[1] for key in tainted_by_error} | {key.split('!', 1)[1] for key in root_seeds}
-        # Same reasoning as the external-reference propagation above —
-        # 30 waves instead of 8 to handle deep dependency chains in a
-        # large, complex model. Now walks every target cell, not just
-        # mismatches (see FIX note above) — the cheap substring pre-filter
-        # keeps each wave's cost close to what the mismatch-only version
-        # cost before, since the vast majority of cells are skipped on the
-        # `not any(pat in formula_stripped ...)` check without ever
-        # reaching the more expensive reference-extraction step.
-        for _wave in range(30):
-            newly_tainted = set()
-            for key in target_keys:
-                if key in tainted_by_error:
-                    continue
-                formula = formula_by_key.get(key)
-                formula_stripped = formula_by_key_stripped.get(key)
-                if not formula or not any(pat in formula_stripped for pat in addr_patterns):
-                    continue
-                refs = _extract_refs(formula, key.split('!', 1)[0])
-                for (rsheet, rcol, rrow) in refs:
-                    if f"{rsheet}!{rcol}{rrow}" in tainted_by_error:
-                        newly_tainted.add(key)
-                        break
-            if not newly_tainted:
-                break
-            tainted_by_error |= newly_tainted
-            addr_patterns |= {key.split('!', 1)[1] for key in newly_tainted}
+    # Same 30-wave depth allowance as the external-reference propagation
+    # above, for the same reason (deep dependency chains in a large,
+    # complex model) — but each wave now only visits cells that actually
+    # depend on something newly tainted, via the reverse index, instead
+    # of rescanning every target cell.
+    frontier = set(tainted_by_error)
+    for _wave in range(30):
+        newly_tainted = set()
+        for tkey in frontier:
+            for dep_key in dependents_of.get(tkey, ()):
+                if dep_key not in tainted_by_error:
+                    newly_tainted.add(dep_key)
+        _progress(f"  masking wave {_wave+1}: {len(newly_tainted):,} newly tainted, "
+                  f"{len(tainted_by_error)+len(newly_tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
+        if not newly_tainted:
+            break
+        tainted_by_error |= newly_tainted
+        frontier = newly_tainted
 
     masked = tainted_by_error & mismatch_keys
 
