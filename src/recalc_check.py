@@ -144,6 +144,24 @@ _CELL_REF_RE = re.compile(
     r"(?:(?:'([^']+)'|([A-Za-z0-9_]+))!)?\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?"
 )
 
+# FIX (found via mining "Advanced Excel", Jordan — L23): 3D references
+# like =SUM(Jan:Dec!B5), aggregating across every sheet from Jan to Dec
+# inclusive, were not recognized by _CELL_REF_RE at all. Confirmed via
+# direct testing: '=SUM(Jan:Dec!B5)' extracted only ('Dec','B',5) —
+# "Jan:" doesn't match anything so the engine just skips past it. Worse,
+# '=SUM(Sheet1:Sheet3!B3)' produced an outright CORRUPTED ref —
+# ('Summary','EET',1) — because "Sheet1" doesn't match the sheet-prefix
+# pattern (no "!" immediately after it) or the plain cell pattern (too
+# many letters), but the SUBSTRING "eet1" within it accidentally does
+# match \$?([A-Za-z]{1,3})\$?(\d+) using the current sheet as an implicit
+# prefix. This regex is matched and MASKED OUT of the formula text before
+# _CELL_REF_RE runs, so the existing single-sheet logic never sees (and
+# can't corrupt-match into) a 3D-reference span.
+_SHEET_RANGE_REF_RE = re.compile(
+    r"(?:'([^']+)'|([A-Za-z0-9_]+)):(?:'([^']+)'|([A-Za-z0-9_]+))!"
+    r"\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?"
+)
+
 
 def _col_to_num(col):
     n = 0
@@ -160,13 +178,59 @@ def _num_to_col(n):
     return s
 
 
-def _extract_refs(formula, current_sheet, max_range_cells=2000):
+def _sheets_in_span(sheet1, sheet2, sheet_order):
+    """Every sheet from sheet1 to sheet2 inclusive, in actual tab order —
+    NOT alphabetical or numeric order, since that's what "Jan:Dec!B5"
+    genuinely means in Excel (whatever sheets sit between Jan's and
+    Dec's tab positions, in whichever direction). Falls back to just the
+    two named sheets if sheet_order wasn't supplied or either name isn't
+    found in it — degraded (won't catch sheets strictly between them),
+    but still correct for those two, and no longer silently drops the
+    first one or corrupts the parse the way the old behavior did."""
+    if sheet_order and sheet1 in sheet_order and sheet2 in sheet_order:
+        i1, i2 = sheet_order.index(sheet1), sheet_order.index(sheet2)
+        lo, hi = (i1, i2) if i1 <= i2 else (i2, i1)
+        return sheet_order[lo:hi + 1]
+    return [sheet1, sheet2] if sheet1 != sheet2 else [sheet1]
+
+
+def _extract_refs(formula, current_sheet, sheet_order=None, max_range_cells=2000):
     """Best-effort cell/range reference extraction — doesn't need to be a
     complete Excel-grammar parser, just reliable enough to catch real
     references for taint propagation. Pathologically large ranges are
-    skipped rather than fully expanded (not worth the cost here)."""
+    skipped rather than fully expanded (not worth the cost here).
+
+    sheet_order: the workbook's sheets in actual tab order (e.g.
+    wb.sheetnames), used to correctly expand 3D references like
+    "Jan:Dec!B5". Optional — falls back to a degraded-but-not-corrupted
+    two-sheet interpretation if not supplied."""
     refs = set()
-    for m in _CELL_REF_RE.finditer(formula):
+
+    # Pass 1: 3D (multi-sheet) references — matched and masked out of the
+    # formula text before the single-sheet regex runs.
+    masked_formula = formula
+    for m in _SHEET_RANGE_REF_RE.finditer(formula):
+        q1, b1, q2, b2, col1, row1, col2, row2 = m.groups()
+        sheet1 = (q1 or b1).strip()
+        sheet2 = (q2 or b2).strip()
+        for sheet in _sheets_in_span(sheet1, sheet2, sheet_order):
+            if col2 and row2:
+                c1, c2 = sorted([_col_to_num(col1.upper()), _col_to_num(col2.upper())])
+                r1, r2 = sorted([int(row1), int(row2)])
+                if (c2 - c1 + 1) * (r2 - r1 + 1) > max_range_cells:
+                    continue
+                for c in range(c1, c2 + 1):
+                    for r in range(r1, r2 + 1):
+                        refs.add((sheet, _num_to_col(c), r))
+            else:
+                refs.add((sheet, col1.upper(), int(row1)))
+        start, end = m.span()
+        masked_formula = masked_formula[:start] + (' ' * (end - start)) + masked_formula[end:]
+
+    # Pass 2: ordinary single-sheet (or same-sheet) references, over the
+    # masked text so 3D-reference spans can't be re-matched or
+    # corrupt-matched here.
+    for m in _CELL_REF_RE.finditer(masked_formula):
         quoted_sheet, bare_sheet, col1, row1, col2, row2 = m.groups()
         sheet = (quoted_sheet or bare_sheet or current_sheet).strip()
         if col2 and row2:
@@ -267,6 +331,11 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             return {"status": "cached_value_read_failed", "error": str(e), "fallback_error": str(e2), "elapsed_s": round(time.time() - t_start, 2)}
     _progress(f"openpyxl loads complete ({round(time.time()-t_start,1)}s elapsed).")
 
+    # L23 fix: the workbook's actual sheet tab order, needed to correctly
+    # expand 3D references like "Jan:Dec!B5" into every sheet in between —
+    # "between" means tab position, not alphabetical or creation order.
+    sheet_order = list(wb_formulas.sheetnames)
+
     # Single parallel-sequential pass (fix #3b) that both (i) identifies
     # and neutralizes external-reference cells (fix #2) and (ii) collects
     # the full target list + cached values + formula text for the batch
@@ -352,7 +421,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     _ext_refs_by_key = {}
     for i, formula in enumerate(formula_texts):
         if formula:
-            _ext_refs_by_key[target_keys[i]] = _extract_refs(formula, sheet_of_target[target_keys[i]])
+            _ext_refs_by_key[target_keys[i]] = _extract_refs(formula, sheet_of_target[target_keys[i]], sheet_order=sheet_order)
     _ext_dependents_of = {}
     for key, refs in _ext_refs_by_key.items():
         for (rsheet, rcol, rrow) in refs:
@@ -501,7 +570,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     for key in target_keys:
         formula = formula_by_key.get(key)
         if formula:
-            refs_by_key[key] = _extract_refs(formula, key.split('!', 1)[0])
+            refs_by_key[key] = _extract_refs(formula, key.split('!', 1)[0], sheet_order=sheet_order)
     _progress(f"  reference parsing complete ({round(time.time()-t_start,1)}s elapsed).")
 
     dependents_of = {}
