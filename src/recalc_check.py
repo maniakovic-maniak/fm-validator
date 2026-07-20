@@ -61,6 +61,42 @@ motivated fixes 2 and 3; re-confirm against it after any future change
 to this script, since it is the only real file tested so far that
 exercises the external-reference and scale code paths at all.
 
+4. UNSUPPORTED MODERN EXCEL FUNCTIONS. Formualizer 0.7.1's function
+   registry does not recognize several functions introduced with
+   Excel's dynamic-array era. Confirmed individually, each via multiple
+   independent test shapes (not a one-off argument-shape mistake):
+     a. _xlfn.SINGLE — Excel's serialized form of the "@" implicit-
+        intersection operator. Formualizer DOES support the "@" operator
+        itself (confirmed: "=@A1" evaluates correctly) but does not
+        recognize the literal function name "_xlfn.SINGLE" as an alias
+        for it — {'type': 'Error', 'kind': 'Name'}. Root-caused live
+        against Hidden Gem: this is what silently zeroed out Ops!U193
+        and 50 related cells (see the masking-BFS fix history below) —
+        Timing!E7 = _xlfn.SINGLE(Ops_end) failed with a Name error, and
+        that error propagated through several formula hops before being
+        silently absorbed by a SUM()/SUMIF() into a plausible-looking
+        0.0, rather than surfacing as an error at the top level.
+     b. LAMBDA — returns Formualizer's own explicit
+        {'type': 'Error', 'kind': 'NImpl'} (Not Implemented) for the
+        realistic inline-invoked usage pattern ("=LAMBDA(x,x*2)(A1)") —
+        a genuinely different signal from "unrecognized name": Formualizer
+        knows about LAMBDA and has explicitly marked it unimplemented,
+        not merely unrecognized.
+     c. EXPAND — {'type': 'Error', 'kind': 'Name'}, confirmed across
+        three independent argument shapes (with and without the optional
+        pad-value argument, and a 1x1-to-2x2 expansion).
+   Any model using one of these will have that formula silently produce
+   a wrong-but-plausible recalculated value if the error is absorbed by
+   a downstream SUM()/SUMIF() before reaching a target cell being
+   compared — exactly the class of bug the masking-BFS fixes below exist
+   to correctly attribute rather than report as an unexplained mismatch.
+   No code-level workaround applied here (unlike fixes 1-3 above) — this
+   is a genuine Formualizer limitation to track, not something this
+   script can neutralize the way external references are neutralized,
+   since (unlike an external reference) there's no way to know in
+   advance which specific cells in a real file use one of these
+   functions without already having tried to evaluate them.
+
 Usage:
     python3 recalc_check.py path/to/workbook.xlsx
     (outputs a JSON summary to stdout)
