@@ -12,6 +12,10 @@ const { checkFormulaPatternConsistency } = require('./src/utils/formula-pattern-
 const { checkDaisyChains } = require('./src/utils/daisy-chain-check');
 const { checkEmbeddedErrorBranches } = require('./src/utils/embedded-error-branch-check');
 const { checkDsraSizing } = require('./src/utils/dsra-sizing-check');
+const { checkComplexFormulas } = require('./src/utils/complex-formula-check');
+const { checkNumbersStoredAsText } = require('./src/utils/number-as-text-check');
+const { checkBalanceNeverNegative } = require('./src/utils/balance-never-negative-check');
+const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distributions-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -525,6 +529,114 @@ async function run() {
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'DSRA target value covers fewer than the customary minimum months of debt service', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 55
+    });
+  }
+
+  // ── Complex-formula detection ────────────────────────────────────────────
+  // Sourced from PwC Global Financial Modeling Guidelines (D1) — explicit
+  // named threshold (3+ opening parentheses). Deliberately low confidence
+  // and aggregated: expect a high volume, including many common,
+  // unremarkable idioms (IFERROR(INDEX(...,MATCH(...)),0) already clears
+  // this threshold) — a readability-review prompt, not an error signal.
+  const complexFormulaCheck = (() => { try { return checkComplexFormulas(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Complex formula check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (complexFormulaCheck.applicable && complexFormulaCheck.findings.length > 0) {
+    const sample = complexFormulaCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-COMPLEXFML-001',
+      label: `${complexFormulaCheck.findings.length} formula(s) with 3+ parentheses`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${complexFormulaCheck.findings.length} formula(s) contain 3 or more opening parentheses, per PwC's stated complexity threshold, including: ${sample}${complexFormulaCheck.findings.length > 8 ? ' and others' : ''}. Many of these are likely standard nested-lookup idioms (e.g. IFERROR wrapping INDEX/MATCH) rather than genuine readability problems.`,
+      reason: `${complexFormulaCheck.findings.length} formula(s) exceed PwC's stated complexity threshold`,
+      corrective_action: 'Informational — review flagged formulas for genuine readability concerns; a high count here is expected and not itself evidence of a problem.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Formula complexity (informational)',
+      model_risk: 'A genuinely over-complex formula is harder to review and more error-prone, but this check cannot distinguish that from a standard nested-lookup pattern.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Formula contains 3 or more opening parentheses', escalation_flag: false,
+      urgency: 'Informational', confidence: 30
+    });
+  }
+
+  // ── Numbers stored as text ───────────────────────────────────────────────
+  // Sourced from ICAEW's "How to Review a Spreadsheet" (D6) — a common,
+  // well-known Excel gotcha: a numeric-looking value stored as text is
+  // silently excluded from SUM() and most arithmetic.
+  const numberAsTextCheck = (() => { try { return checkNumbersStoredAsText(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Numbers-as-text check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (numberAsTextCheck.applicable && numberAsTextCheck.findings.length > 0) {
+    const sample = numberAsTextCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell} ("${f.textValue}")`).join(', ');
+    allFlagged.push({
+      id: 'T0-NUMASTEXT-001',
+      label: `${numberAsTextCheck.findings.length} number(s) stored as text`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${numberAsTextCheck.findings.length} plain input cell(s) contain a numeric-looking value stored as text rather than a real number, including: ${sample}${numberAsTextCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${numberAsTextCheck.findings.length} cell(s) contain a number stored as text`,
+      corrective_action: 'Confirm whether these cells feed into any calculation — if so, re-enter them as genuine numeric values (e.g. via Text to Columns or a paste-special multiply-by-1) rather than text.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Number stored as text',
+      model_risk: 'A number stored as text is silently excluded from SUM() and most arithmetic without any visible error — a common paste-from-PDF or paste-from-web artifact.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Cell contains a numeric-looking value stored as text', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 70
+    });
+  }
+
+  // ── Revolver/cash never-negative ─────────────────────────────────────────
+  // Sourced from FMI's "Checking and Reviewing a Model" (D2). Checks
+  // EVERY period of a labelled time series, using findLabeledRowSeries
+  // rather than the single-nearest-value findLabeledValues — necessary
+  // given the same limitation disclosed for sign-convention-check.js's
+  // balance-type groups (the nearest column is often a genuine zero
+  // opening balance, hiding a much longer real series).
+  const balanceNeverNegativeCheck = (() => { try { return checkBalanceNeverNegative(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Balance never-negative check failed:', e.message); return { applicable:false, flaggedCount:0, results:[] }; } })();
+  if (balanceNeverNegativeCheck.applicable && balanceNeverNegativeCheck.results.length > 0) {
+    for (const r of balanceNeverNegativeCheck.results) {
+      const sample = r.negativeInstances.slice(0, 5).map(n => `${n.sheet}!${n.cell} (${n.value})`).join(', ');
+      allFlagged.push({
+        id: `T0-BALNEG-${r.label.replace(/\s+/g, '').toUpperCase().slice(0, 10)}-001`,
+        label: `${r.negativeCount} negative period(s) in "${r.label}"`,
+        severity: 'high', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: `"${r.label}"-labelled time series include ${r.negativeCount} negative period(s), e.g. ${sample}.`,
+        reason: `${r.negativeCount} negative period(s) found in a "${r.label}" time series`,
+        corrective_action: 'A negative cash or revolver balance is a common sign of a broken or incomplete funding mechanism (e.g. a revolver draw not triggering, a minimum-cash requirement not enforced) — trace the driving logic for the flagged period(s).',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Negative balance-sheet balance',
+        model_risk: 'A negative cash or revolver balance is not commercially achievable — its presence indicates the funding/draw mechanism is not correctly enforcing a floor.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: `${r.label} time series includes a negative value`, escalation_flag: false,
+        urgency: 'Before next reliance', confidence: 75
+      });
+    }
+  }
+
+  // ── DSCR-gated distributions ─────────────────────────────────────────────
+  // Sourced from the World Bank/PPIAF Greenfield Mining Transport
+  // Infrastructure report (D5). Anchored on DSCR < 1.0x (mathematically
+  // insufficient cash flow) rather than the deal-varying customary
+  // ~1.4x lock-up level, to avoid false positives against a different
+  // agreed threshold. Falls back to a single unified "DSCR" label when
+  // no explicit backward/forward split exists — confirmed necessary via
+  // real testing (a real file used exactly this pattern, and its stated
+  // lock-up mechanism was confirmed genuinely working, zero violations).
+  const dscrGatedCheck = (() => { try { return checkDscrGatedDistributions(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  DSCR-gated distributions check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (dscrGatedCheck.applicable && dscrGatedCheck.findings.length > 0) {
+    const sample = dscrGatedCheck.findings.slice(0, 5).map(f => `${f.sheet}!${f.distributionCell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-DSCRGATE-001',
+      label: `${dscrGatedCheck.findings.length} distribution(s) paid with DSCR below 1.0x`,
+      severity: 'high', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${dscrGatedCheck.findings.length} period(s) show a distribution paid while DSCR reads below 1.0x, including: ${sample}. The project's own cash flow was mathematically insufficient to cover debt service in the affected period(s).`,
+      reason: `${dscrGatedCheck.findings.length} distribution(s) paid despite DSCR below 1.0x`,
+      corrective_action: 'Trace the distribution formula\'s gating logic for the flagged period(s) — confirm whether a DSCR-based lock-up test is actually wired into the distribution calculation, or whether distributions are flowing regardless of DSCR.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'DSCR lock-up not enforced',
+      model_risk: 'A distribution paid while DSCR is below 1.0x understates the project\'s inability to cover its own debt service that period — a real lender-protection mechanism appears not to be enforced.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Distribution paid in a period where DSCR is below 1.0x', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 65
     });
   }
 
