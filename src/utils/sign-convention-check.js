@@ -26,6 +26,32 @@ const SIGN_CHECK_GROUPS = [
   { label: 'Interest expense', terms: ['interest expense', 'interest paid'] },
   { label: 'Distributions', terms: ['distributions paid', 'dividends paid', 'distribution to equity'] },
   { label: 'Depreciation', terms: ['depreciation expense', 'depreciation charge'] },
+  // Added from Plum Solutions/Mazars "Top 10 Errors" (fm-validator book-
+  // mining D3, error #3): "Incorrect signs: Cash, Fixed Assets, Debt
+  // Balance" — named explicitly as common sign-error locations distinct
+  // from the flow-statement items above (these are balance-sheet items,
+  // where a sign flip is easy to miss since both signs can look
+  // superficially plausible on a summary view).
+  //
+  // KNOWN, DISCLOSED LIMITATION (confirmed via real testing against The
+  // Bend): these three groups are structurally less likely to fire than
+  // the flow-statement groups above, for a real reason, not a bug.
+  // findLabeledValues grabs only the FIRST numeric cell to the right of a
+  // label (by design — see its own module comment). For a flow item like
+  // Capex that's usually a real figure. For a BALANCE-type time series
+  // like "Closing Cash Balance" or "Opening Cash Balance", the first
+  // period column is very often a genuine zero (before construction, or
+  // before financial close) — correctly filtered out by the |value|>=1
+  // floor above, but leaving fewer than 2 usable candidates to compare on
+  // real files. Confirmed directly: on The Bend, 10 "cash balance"
+  // candidates were found, every one of them 0. This is not silently
+  // hidden — it just means these three groups will under-detect relative
+  // to the flow-statement groups until findLabeledValues (or a dedicated
+  // variant) can scan a full time-series row for a representative
+  // non-zero value rather than only the nearest cell.
+  { label: 'Cash balance', terms: ['cash balance', 'closing cash', 'cash and cash equivalents'] },
+  { label: 'Fixed assets', terms: ['fixed assets', 'property, plant and equipment', 'net fixed assets'] },
+  { label: 'Debt balance', terms: ['debt balance', 'loan balance', 'closing debt balance'] },
 ];
 
 function checkSignConventions(workbook) {

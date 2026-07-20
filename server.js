@@ -22,6 +22,9 @@ const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk } = require('./src/utils/formula-logic-checks');
 const { checkAutoSumHeaderInclusion } = require('./src/utils/autosum-header-check');
 const { checkFormulaPatternConsistency } = require('./src/utils/formula-pattern-consistency-check');
+const { checkDaisyChains } = require('./src/utils/daisy-chain-check');
+const { checkEmbeddedErrorBranches } = require('./src/utils/embedded-error-branch-check');
+const { checkDsraSizing } = require('./src/utils/dsra-sizing-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -583,6 +586,95 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Formula cell structurally deviates from its row\'s established pattern', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 60
+    });
+  }
+
+  // ── Daisy-chain / link-to-link detection ────────────────────────────────
+  // Sourced from THREE independent standards: FAST 3.06-02, PwC Global
+  // Financial Modeling Guidelines (D1), and ICAEW's "How to Review a
+  // Spreadsheet" (D6) — the most cross-validated candidate in this
+  // session's book-mining. Uses fan-in (is the intermediate cell reused
+  // elsewhere) rather than same-sheet-vs-cross-sheet as the signal,
+  // after real testing found the naive "any 2-hop chain" version
+  // produced 1,125 false positives on a real file, driven by a
+  // deliberately-built staging sheet. Confidence set at a moderate
+  // level, not high: even with the fan-in fix, a real remaining
+  // ambiguity was found and disclosed — a dedicated staging sheet with a
+  // genuine 1:1 staging-cell-to-consumer mapping is technically a daisy
+  // chain under FAST's own literal definition, but is also a legitimate,
+  // deliberate architecture choice, not necessarily an accident. This is
+  // presented as a worth-reviewing pattern, not an asserted defect.
+  const daisyChainCheck = (() => { try { return checkDaisyChains(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Daisy-chain check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (daisyChainCheck.applicable && daisyChainCheck.findings.length > 0) {
+    const sample = daisyChainCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-DAISYCHAIN-001',
+      label: `${daisyChainCheck.findings.length} daisy-chained link(s) found`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${daisyChainCheck.findings.length} cell(s) link to another cell that is itself just a link with no other use in the workbook, rather than the original source, including: ${sample}${daisyChainCheck.findings.length > 8 ? ' and others' : ''}. Some of these may sit within a deliberately-built staging/import sheet — worth a quick review to confirm whether simplifying is warranted, not an assumed defect.`,
+      reason: `${daisyChainCheck.findings.length} cell(s) show link-to-link chaining`,
+      corrective_action: 'For each flagged cell, confirm whether routing through the intermediate link serves a real purpose (e.g. a shared local reference); if not, redirect the link to reference the ultimate source directly.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Daisy-chained link',
+      model_risk: 'Extra, purposeless hops make a formula harder to trace and slightly increase the chance of an intermediate cell being edited or deleted without the chain being noticed.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Cell links to another cell that is itself just a link, with no other use', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 50
+    });
+  }
+
+  // ── Embedded error-literal in IF branches ───────────────────────────────
+  // Sourced from Plum Solutions/Mazars "Top 10 Errors" (D3) and
+  // independently confirmed by FAST Standard 3.03-11 — two sources for
+  // the same pattern, which FAST itself notes "model audit software will
+  // often not detect."
+  const embeddedErrorCheck = (() => { try { return checkEmbeddedErrorBranches(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Embedded error-branch check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (embeddedErrorCheck.applicable && embeddedErrorCheck.findings.length > 0) {
+    const sample = embeddedErrorCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-IFERRLIT-001',
+      label: `${embeddedErrorCheck.findings.length} IF() branch(es) with a literal error value`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${embeddedErrorCheck.findings.length} IF() call(s) have an Excel error literal (#REF!, #VALUE!, etc.) wired directly into a branch, including: ${sample}${embeddedErrorCheck.findings.length > 8 ? ' and others' : ''}. These produce no visible error today, only once the underlying condition flips.`,
+      reason: `${embeddedErrorCheck.findings.length} IF() branch(es) contain a dormant error literal`,
+      corrective_action: 'Review each flagged cell — confirm whether the error branch is genuinely unreachable under all valid model states, or replace it with the correct fallback logic.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Dormant error literal in IF branch',
+      model_risk: 'A condition change (a date range shift, a flag flip, a scenario switch) can surface this error for the first time long after the model was built and reviewed, with no warning beforehand.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'IF() branch contains a literal Excel error value', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 80
+    });
+  }
+
+  // ── DSRA target sizing ───────────────────────────────────────────────────
+  // Sourced from TWO independent references citing the same customary
+  // practice: Ofgem's Cap and Floor Financial Model Handbook (D4) and
+  // the World Bank/PPIAF Greenfield Mining Transport Infrastructure
+  // report (D5). Directly feeds G3 per this project's own Phase D
+  // sequencing. One-sided (only flags apparent under-funding, never
+  // over-funding) and deliberately narrow (only fires when an explicitly
+  // monthly-labelled debt service figure exists — periodicity is never
+  // guessed).
+  const dsraSizingCheck = (() => { try { return checkDsraSizing(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  DSRA sizing check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (dsraSizingCheck.applicable && dsraSizingCheck.findings.length > 0) {
+    const sample = dsraSizingCheck.findings.slice(0, 5).map(f => `${f.sheet}!${f.dsraCell} (~${f.monthsCovered} months)`).join(', ');
+    allFlagged.push({
+      id: 'T0-DSRASIZE-001',
+      label: `${dsraSizingCheck.findings.length} DSRA target(s) apparently below the customary funding floor`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${dsraSizingCheck.findings.length} DSRA target value(s) cover fewer than ~5 months of a labelled monthly debt service figure, including: ${sample}. Lenders customarily require at least six months of coverage at completion.`,
+      reason: `${dsraSizingCheck.findings.length} DSRA target(s) below the customary six-month funding floor`,
+      corrective_action: 'Confirm whether the DSRA sizing shown reflects the deal\'s actual agreed terms (which vary by transaction) or an under-funded reserve relative to customary market practice.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'DSRA under-funding risk',
+      model_risk: 'A DSRA sized below customary lender requirements may not provide adequate liquidity cover in a downside scenario, and may not match what was actually agreed in financing documents.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'DSRA target value covers fewer than the customary minimum months of debt service', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 55
     });
   }
 
