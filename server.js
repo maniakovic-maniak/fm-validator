@@ -20,6 +20,8 @@ const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk } = require('./src/utils/formula-logic-checks');
+const { checkAutoSumHeaderInclusion } = require('./src/utils/autosum-header-check');
+const { checkFormulaPatternConsistency } = require('./src/utils/formula-pattern-consistency-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -524,6 +526,63 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'IRR() range contains no negative (initial-investment) value', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 80
+    });
+  }
+
+  // ── AutoSum header-inclusion risk (L7) ──────────────────────────────────
+  // Sourced from "Excel for Auditors" (Jelen & Dowell) — fm-validator
+  // book-mining finding L7. Distinct from total-range-check.js (which
+  // catches a SUM range that EXCLUDES real adjacent data) — this catches
+  // the opposite symptom: a SUM range that INCLUDES a header row it
+  // shouldn't. Cannot achieve zero false positives (a genuine value could
+  // coincidentally fall in a plausible-year range), so framed as a
+  // verification prompt in its own finding text.
+  const autoSumHeaderCheck = (() => { try { return checkAutoSumHeaderInclusion(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  AutoSum header-inclusion check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (autoSumHeaderCheck.applicable && autoSumHeaderCheck.findings.length > 0) {
+    const sample = autoSumHeaderCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-AUTOSUMHDR-001',
+      label: `${autoSumHeaderCheck.findings.length} SUM() range(s) with a plausible header year at the top of the range`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${autoSumHeaderCheck.findings.length} SUM() formula(s) have a plain numeric value in the range 1990-2100 as the very first cell of their range, including: ${sample}${autoSumHeaderCheck.findings.length > 8 ? ' and others' : ''}. This is the classic symptom of AutoSum sweeping a year-heading row into a total when there's no blank row separating the header from the data below it.`,
+      reason: `${autoSumHeaderCheck.findings.length} SUM() range(s) start with a plausible calendar-year value`,
+      corrective_action: 'Confirm the top cell of each flagged range is genuine data, not a header label swept into the total — if it is a header, adjust the range to start one row lower.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'AutoSum header-inclusion risk',
+      model_risk: 'A total inflated by a header value (e.g. adding 2024 to a sum of dollar figures) looks plausible at a glance and can go unnoticed indefinitely.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'SUM() range appears to include a header row rather than starting at the first row of real data', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 65
+    });
+  }
+
+  // ── Formula pattern consistency (L10) ───────────────────────────────────
+  // Sourced from "Excel for Auditors" (Jelen & Dowell) — fm-validator
+  // book-mining finding L10 — formalizing Excel's own native "formula
+  // differs from surrounding cells" warning into a check that can't be
+  // permanently dismissed via "Ignore Error". Independently backed by
+  // FAST Standard 3.02-01 and ICAEW Financial Modelling Code Principle
+  // #12. Aggregated into one finding with a sample, matching this
+  // pipeline's established convention for checks that can fire hundreds+
+  // of times (confirmed on real files: 123-695 findings per model).
+  const formulaPatternCheck = (() => { try { return checkFormulaPatternConsistency(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Formula pattern consistency check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (formulaPatternCheck.applicable && formulaPatternCheck.findings.length > 0) {
+    const sample = formulaPatternCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-FMLPATTERN-001',
+      label: `${formulaPatternCheck.findings.length} formula cell(s) differ from their row's dominant pattern`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${formulaPatternCheck.findings.length} formula cell(s) have a different structure than the majority pattern used by the rest of their row, including: ${sample}${formulaPatternCheck.findings.length > 8 ? ' and others' : ''}. This is the same signal Excel's own "inconsistent formula" warning uses, but cannot be permanently dismissed the way that warning can via "Ignore Error".`,
+      reason: `${formulaPatternCheck.findings.length} formula cell(s) show a row-pattern inconsistency`,
+      corrective_action: 'Review each flagged cell against the rest of its row — confirm whether the difference is deliberate (e.g. a genuinely different calculation for that period) or an unintended range/reference that was not extended or updated consistently with the rest of the row.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Formula pattern inconsistency',
+      model_risk: 'A single cell in an otherwise-consistent row using a different range or reference structure can silently produce a wrong value for that one period, indistinguishable at a glance from its neighbors.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula cell structurally deviates from its row\'s established pattern', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 60
     });
   }
 
