@@ -6,6 +6,7 @@ const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
+const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk } = require('./src/utils/formula-logic-checks');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -321,6 +322,58 @@ async function run() {
         root_cause: 'Same labelled line item has inconsistent sign across the workbook', escalation_flag: false,
         urgency: 'Before next reliance', confidence: 75
       });
+    });
+  }
+
+  // ── NPV period-0 inclusion risk / IRR negative-cash-flow risk ──────────
+  // Sourced from real worked examples in "Mastering Advanced Excel
+  // Formulas and Functions" (Suman) — fm-validator book-mining findings
+  // L19 and L20. Distinct from the existing T0-NPV check above (which is
+  // about NPV()'s implicit even-period-spacing assumption vs. XNPV — a
+  // timing question) and from key-output-chain-check.js / reasonableness-
+  // checks.js (which treat IRR as a labelled RESULT to sanity-check, not
+  // a formula whose own RANGE composition is being verified here). Also
+  // formalizes what config/checklist.json's Tier 2 rule "IRR and NPV
+  // formulas use correct timing, sign convention, and dates" currently
+  // only asks a human/Claude reviewer to check qualitatively — this makes
+  // the sign-convention half of that same question deterministic.
+  const npvPeriodZeroCheck = (() => { try { return checkNpvPeriodZeroRisk(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  NPV period-0 check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (npvPeriodZeroCheck.applicable && npvPeriodZeroCheck.findings.length > 0) {
+    const sample = npvPeriodZeroCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-NPVP0-001',
+      label: `${npvPeriodZeroCheck.findings.length} NPV() formula(s) with no separate period-0 term`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${npvPeriodZeroCheck.findings.length} NPV() formula(s) have no term added outside the NPV() call itself, including: ${sample}${npvPeriodZeroCheck.findings.length > 8 ? ' and others' : ''}. NPV()'s summation treats its first value as one period from now — if the period-0 (initial) investment is folded into the NPV range rather than added separately, it is silently discounted by one extra period it shouldn't be.`,
+      reason: `${npvPeriodZeroCheck.findings.length} NPV() call(s) show no separate period-0 addition term`,
+      corrective_action: 'Confirm the NPV() range genuinely starts at period 1 (not period 0), and that any period-0 investment is added as a separate term outside the NPV() call.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'NPV period-0 inclusion risk',
+      model_risk: 'A period-0 investment folded into an NPV() range is discounted by one extra period, understating (or overstating, for a negative rate) the true NPV without producing any visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'NPV() formula has no visible separate period-0 term', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 70
+    });
+  }
+
+  const irrNegativeCashFlowCheck = (() => { try { return checkIrrNegativeCashFlowRisk(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  IRR negative-cash-flow check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (irrNegativeCashFlowCheck.applicable && irrNegativeCashFlowCheck.findings.length > 0) {
+    const sample = irrNegativeCashFlowCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-IRRSIGN-001',
+      label: `${irrNegativeCashFlowCheck.findings.length} IRR() formula(s) with no negative value in range`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${irrNegativeCashFlowCheck.findings.length} IRR() formula(s) reference a range where every value is currently zero or positive, including: ${sample}${irrNegativeCashFlowCheck.findings.length > 8 ? ' and others' : ''}. IRR() requires at least one negative value (the initial outflow) to be mathematically defined.`,
+      reason: `${irrNegativeCashFlowCheck.findings.length} IRR() range(s) contain no negative value`,
+      corrective_action: 'Confirm whether the initial investment/outflow is genuinely missing from this range, or zero, before attributing any IRR-related error to a recalculation-engine limitation.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'IRR missing negative cash flow',
+      model_risk: 'IRR() over a range with no negative value is mathematically undefined — Excel returns #NUM!, and a downstream formula referencing this cell may mask that with a misleading fallback value.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'IRR() range contains no negative (initial-investment) value', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 80
     });
   }
 
