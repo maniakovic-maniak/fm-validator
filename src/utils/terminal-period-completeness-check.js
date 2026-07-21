@@ -43,6 +43,44 @@ const ESTABLISHED_WINDOW = 5;     // periods immediately before the terminal win
 const DROP_THRESHOLD_FRACTION = 0.1; // terminal value must fall below 10% of the established average
 const STABILITY_FRACTION = 0.5;   // established window's first value must be >= 50% of its last — guards against flagging a genuine gradual wind-down
 
+// FIX (found via a real run on a property/development equity model —
+// "The Bend / David Gifford"): ALL FOUR findings on that file were
+// false positives of a single, previously-unseen kind — a construction/
+// development cost aggregate ("TOTAL USES", "TOTAL SOURCES", "BG cost
+// and capitalised interest") correctly dropping to zero because
+// construction genuinely completes at a known, finite date, not
+// because a driver silently dropped out. This looks IDENTICAL to a
+// genuine omission from raw values alone (stable, then a hard drop) —
+// the only real distinguishing signal is the row's own label naming it
+// as a construction-cost rollup. Excluding these specific labels is a
+// narrow, targeted fix for a real, recurring pattern on any finite-
+// duration development/construction schedule — it does not solve the
+// general problem of distinguishing "project genuinely finished" from
+// "data was omitted" for an unlabelled row, which remains a real,
+// disclosed limitation (see the module note below).
+const CONSTRUCTION_COMPLETION_LABEL_TERMS = [
+  'total uses', 'total sources', 'total development cost', 'total construction cost',
+  'total capex', 'total project cost', 'capitalised interest', 'construction cost',
+  // FIX (found via the same real run): a funding-side line — "Proposed
+  // future equity" — showed the identical legitimate pattern (draws
+  // stop once construction completes) but isn't a cost-aggregate label
+  // at all. Same underlying cause (a finite-duration development
+  // project's funding activity ending at completion), different wording.
+  'future equity', 'equity draw', 'equity contribution', 'proposed equity',
+];
+
+function hasConstructionCompletionLabel(row) {
+  let labelText = null;
+  row.eachCell({ includeEmpty: false }, (cell) => {
+    if (labelText) return;
+    if (typeof cell.value === 'string' && cell.value.trim()) {
+      labelText = cell.value.toLowerCase();
+    }
+  });
+  if (!labelText) return false;
+  return CONSTRUCTION_COMPLETION_LABEL_TERMS.some(t => labelText.includes(t));
+}
+
 function checkTerminalPeriodCompleteness(workbook) {
   const findings = [];
 
@@ -75,6 +113,8 @@ function checkTerminalPeriodCompleteness(workbook) {
       // Focus on genuine CALCULATED time series, not a row of hardcoded/unrelated numbers.
       const formulaFraction = cells.filter(c => c.hasFormula).length / cells.length;
       if (formulaFraction < 0.7) return;
+
+      if (hasConstructionCompletionLabel(row)) return; // a labelled construction-cost aggregate genuinely reaching zero at project completion — not this check's concern
 
       cells.sort((a, b) => a.colNum - b.colNum);
       const terminal = cells.slice(-TERMINAL_WINDOW);
@@ -132,7 +172,7 @@ function checkTerminalPeriodCompleteness(workbook) {
     applicable: true,
     flaggedCount: findings.length,
     findings,
-    note: 'Flags a row whose values drop suddenly to near-zero in the last 1-2 periods after a stable, non-declining run of prior periods — a value-based signal distinct from L10\'s formula-pattern check, since a terminal-period omission can be structurally identical to every other period\'s formula while still resolving to an unexpected zero. Requires at least 8 numeric periods, >=70% formula-derived, and a stable (non-declining) established window immediately before the terminal periods, specifically to avoid flagging a genuine gradual business wind-down.',
+    note: 'Flags a row whose values drop suddenly to near-zero in the last 1-2 periods after a stable, non-declining run of prior periods — a value-based signal distinct from L10\'s formula-pattern check, since a terminal-period omission can be structurally identical to every other period\'s formula while still resolving to an unexpected zero. Requires at least 8 numeric periods, >=70% formula-derived, and a stable (non-declining) established window immediately before the terminal periods. A row labelled as a construction/development cost aggregate (e.g. "Total Uses", "Total Sources") is excluded, since these legitimately reach zero at a finite project\'s completion date — a real, disclosed limitation remains for an UNLABELLED row in the same situation, which this check cannot yet distinguish from a genuine omission without semantic context (e.g. a known project-completion date) that lives elsewhere in the model.',
   };
 }
 

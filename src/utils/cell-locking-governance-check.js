@@ -12,7 +12,18 @@
 // cell role (an input cell locked, or a formula cell left unlocked) is
 // the real signal.
 
-const BLUE_FONT_RE = /^FF0000FF$|^FF0070C0$/i;
+// FIX (partial — found via a real run on a property/development model):
+// that file used NEITHER of these two blues for its input cells at all
+// — it used a dark blue-grey theme colour (FF44546A), grey, and black
+// instead. Broadening to catch grey/black would be unsafe: those are
+// also used for ordinary labels and text throughout most models, so
+// they carry no reliable "this is an input" signal on their own. Added
+// FF1F4E78 (a common "blue, darker 50%" Excel theme variant seen in
+// other real models) as a modest, evidence-based addition — but this
+// remains a genuine, disclosed limitation: a model using a font-colour
+// convention outside this list will correctly report "not applicable"
+// rather than a false structural read, which is the safer failure mode.
+const BLUE_FONT_RE = /^FF0000FF$|^FF0070C0$|^FF1F4E78$/i;
 function isBlueFont(cell) {
   const argb = cell.font && cell.font.color && cell.font.color.argb;
   return typeof argb === 'string' && BLUE_FONT_RE.test(argb);

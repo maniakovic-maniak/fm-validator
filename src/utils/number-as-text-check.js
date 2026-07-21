@@ -18,7 +18,30 @@
 // for a negative value (not both — genuine numbers don't mix the two).
 const NUMBER_LIKE_TEXT_RE = /^\s*(-?\$?[\d,]+\.?\d*%?|\(\$?[\d,]+\.?\d*%?\))\s*$/;
 
+// FIX (found via real testing on a property/development model): a bare
+// 4-digit value with NO formatting at all (no $, %, comma, decimal,
+// sign) in a plausible calendar-year range is very likely an
+// intentional year label stored as text — this project's own `xlsx`
+// skill explicitly documents this as correct, recommended practice
+// ("years as text ('2024', never 2,024)"), specifically to avoid Excel
+// rendering a year with a thousands separator. Confirmed directly:
+// "2030" flagged on a real file was exactly this case, not a defect.
+// Deliberately narrow — only a BARE year with nothing else is excluded;
+// "$2,030" or "2030.00" or "2030%" are not plausible year labels and
+// are still flagged.
+const BARE_YEAR_RE = /^\s*(\d{4})\s*$/;
+const PLAUSIBLE_YEAR_MIN = 1990;
+const PLAUSIBLE_YEAR_MAX = 2100;
+
+function isBarePlausibleYear(text) {
+  const m = BARE_YEAR_RE.exec(text);
+  if (!m) return false;
+  const year = parseInt(m[1], 10);
+  return year >= PLAUSIBLE_YEAR_MIN && year <= PLAUSIBLE_YEAR_MAX;
+}
+
 function looksLikeNumber(text) {
+  if (isBarePlausibleYear(text)) return false; // an intentional year label, not a broken number
   if (!NUMBER_LIKE_TEXT_RE.test(text)) return false;
   // Must contain at least one digit — guards against a bare "-" or "()"
   // matching the pattern with no actual number in it.
@@ -49,7 +72,7 @@ function checkNumbersStoredAsText(workbook) {
     applicable: true,
     flaggedCount: findings.length,
     findings,
-    note: 'Flags plain (non-formula) cells whose value is a string that reads as a number (e.g. "1,234.56", "(500)", "42%") rather than a real numeric value — a common result of pasting from a PDF or web page. These are silently excluded from SUM() and most arithmetic without producing a visible error.',
+    note: 'Flags plain (non-formula) cells whose value is a string that reads as a number (e.g. "1,234.56", "(500)", "42%") rather than a real numeric value — a common result of pasting from a PDF or web page. These are silently excluded from SUM() and most arithmetic without producing a visible error. A bare 4-digit value in a plausible calendar-year range (1990-2100) with no other formatting is excluded — this project\'s own conventions treat a year stored as text as correct, deliberate practice, not a defect.',
   };
 }
 

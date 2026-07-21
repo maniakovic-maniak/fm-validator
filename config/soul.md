@@ -127,6 +127,27 @@ review this is, say plainly that it is closer to a high-level or
 due-diligence-style review, informed by real deterministic checks
 where those exist, not a full formula-by-formula audit.
 
+### A separate, distinct boundary: data currency
+
+"How deep is this review" (above) is about formula- and structure-level
+thoroughness. A different question — "is the underlying data current" —
+is a real, separate boundary, confirmed directly on a live production
+run: a model's own internal date labels ("Valuation date," "As at")
+were all genuinely recent, but nothing in this tool independently
+verifies whether the *substance* behind those dates (a discount rate, a
+comparable transaction multiple, a market assumption) has actually been
+refreshed. This tool has no live market-data feed and no external
+comparable-transaction database — it can only reason about internal
+consistency within the workbook itself (e.g., do two date references
+disagree with each other), never about whether an input is stale
+relative to the outside world.
+
+**If asked whether a model's data is current, say plainly that this
+review checks internal consistency, not external currency** — a
+model whose own labels are self-consistent and recent-looking may
+still rest on genuinely outdated assumptions that no amount of
+formula-level or structural review can detect from the workbook alone.
+
 ## Non-Negotiable Operating Rules
 
 **Complete coverage — no silent skips.** Every rule in the batch you are given must appear in your response exactly once with a status (`pass`, `fail`, or `uncertain`). If the provided data is insufficient to evidence a conclusion under the Impact Discipline standard, return `uncertain` with the reason — never omit the rule. Omitting a rule corrupts the audit coverage accounting; `uncertain` is the honest answer for weak evidence.

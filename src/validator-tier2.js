@@ -238,11 +238,23 @@ function splitIntoBatches(rules) {
 // the accounting batch in place of a real cash flow statement, while the
 // genuine Balance Sheet/P&L/Cashflow sheets were never matched at all.
 const DEEP_ACCOUNTING_CATEGORIES = {
-  'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS'],
-  'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
-  'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
+  // FIX (found via a real run on a property/development equity model —
+  // "The Bend / David Gifford"): all 6 categories below failed to
+  // resolve against real sheets named SOURCES & USES, CAP TABLE,
+  // OPERATING, DEVELOPMENT CF — none of which matched any existing
+  // alias. Consequence, confirmed directly: roughly a quarter of that
+  // run's 139 findings were Tier 2 reporting "no [X] rows visible for
+  // this test" rather than genuine findings, because Batch 2/3 had
+  // almost no real sheet data to work with. The additions below are
+  // durable, archetype-level aliases (a property/development model's
+  // own common naming conventions), not overfit to this one file's
+  // literal sheet names — though this file's exact names are included
+  // too, since they cost nothing and directly fix the observed gap.
+  'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table'],
+  'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating'],
+  'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons', 'Development CF', 'Development Cash Flow'],
   'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
-  'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity'],
+  'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors'],
   'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T'],
   'Leases':             ['Lease Schedule', 'Leases', 'Lease'],
 };
@@ -279,13 +291,13 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   // non-mining model — confirmed on a real production file where only
   // 'Inputs' and 'Debt' resolved out of seven targets.
   const KEY_SHEET_CATEGORIES = {
-    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons'],
-    'Income Statement': ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL'],
-    'Balance Sheet':    ['Balance Sheet', 'Statement of Financial Position', 'AFS', 'SOFP', 'BS'],
+    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons', 'Development CF', 'Development Cash Flow'],
+    'Income Statement': ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating'],
+    'Balance Sheet':    ['Balance Sheet', 'Statement of Financial Position', 'AFS', 'SOFP', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table'],
     'Inputs':           ['Inputs', 'Assumptions', 'Key Inputs'],
     'Debt':             ['Debt Schedule', 'Debt Dashboard', 'Debt'],
     'Operations':       ['Operations', 'Ops', 'Operating Assumptions'],
-    'Equity':           ['Equity Schedule', 'Equity Dashboard', 'Equity'],
+    'Equity':           ['Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors'],
   };
 
   let sheetsToCheck;

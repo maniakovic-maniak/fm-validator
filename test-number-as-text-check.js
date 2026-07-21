@@ -30,12 +30,33 @@ async function main() {
   // this check only targets plain input cells, not formula results.
   ws.getCell('C2').value = { formula: 'TEXT(D2,"0.00")', result: '123.45' };
 
+  // CLEAN CASE (the real false positive found on a real property/
+  // development model): a bare year stored as text -- must NOT be
+  // flagged, since this project's own conventions treat this as
+  // correct, deliberate practice.
+  ws.getCell('B7').value = '2030';
+  ws.getCell('B8').value = '1999';
+  ws.getCell('B9').value = ' 2024 '; // whitespace-padded bare year, still excluded
+
+  // RISK CASE: a year-LIKE value that's actually formatted (not a bare
+  // year) -- must still be flagged, since $2,030 or 2030.00 or 2030%
+  // are not plausible year labels.
+  ws.getCell('A8').value = '$2,030';
+  ws.getCell('A9').value = '2030.00';
+  ws.getCell('A10').value = '2030%';
+
+  // CLEAN CASE: a 4-digit number outside the plausible year range --
+  // must still be excluded only if it's implausible as a year (this
+  // project's own year check uses 1990-2100; a value like "1500" is
+  // outside that range and should be treated as a genuine number).
+  ws.getCell('A11').value = '1500';
+
   const result = checkNumbersStoredAsText(wb);
   console.log('flaggedCount:', result.flaggedCount);
   result.findings.forEach(f => console.log(' ', f.sheet + '!' + f.cell, '=', JSON.stringify(f.textValue)));
 
   const flaggedCells = result.findings.map(f => f.cell).sort();
-  const expected = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'].sort();
+  const expected = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10', 'A11'].sort();
   const pass = JSON.stringify(flaggedCells) === JSON.stringify(expected);
   console.log('\nResult:', pass ? 'PASS' : `FAIL (expected ${JSON.stringify(expected)}, got ${JSON.stringify(flaggedCells)})`);
 

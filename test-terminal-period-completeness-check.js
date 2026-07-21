@@ -42,6 +42,16 @@ async function main() {
     ws.getCell(cols[i]+'50').value = { formula: `${cols[i]}49*1.0`, result: v };
   });
 
+  // CLEAN CASE (the real false-positive class found on a real
+  // property/development model): a labelled construction-cost
+  // aggregate that stays stable then genuinely drops to zero at
+  // project completion -- must NOT be flagged, even though the raw
+  // values look identical to the genuine risk case (row 10).
+  ws.getCell('A60').value = 'TOTAL USES';
+  riskVals.forEach((v,i) => {
+    ws.getCell(cols[i]+'60').value = { formula: `${cols[i]}59*1.0`, result: v };
+  });
+
   const result = checkTerminalPeriodCompleteness(wb);
   console.log('flaggedCount:', result.flaggedCount);
   result.findings.forEach(f => console.log(' ', f.sheet, 'row', f.row, '-', f.terminalCells, 'avg was', f.establishedAvg));
