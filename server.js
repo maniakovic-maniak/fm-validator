@@ -37,6 +37,8 @@ const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-count
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
+const { checkBlankCellBoundary } = require('./src/utils/blank-cell-boundary-check');
+const { checkBalanceSheetPlug } = require('./src/utils/balance-sheet-plug-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -1000,6 +1002,55 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Revolver balance and cash balance show an inconsistent relationship in the same period', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 50
+    });
+  }
+
+  // ── Blank-cell reference at period boundary ──────────────────────────────
+  // Sourced from PwC Global Financial Modeling Guidelines (D1). Confirmed
+  // genuine on real Carlsberg data before shipping.
+  const blankBoundaryCheck = (() => { try { return checkBlankCellBoundary(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Blank-cell boundary check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (blankBoundaryCheck.applicable && blankBoundaryCheck.findings.length > 0) {
+    const sample = blankBoundaryCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-BLANKBOUND-001',
+      label: `${blankBoundaryCheck.findings.length} opening-balance reference(s) to a blank cell`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${blankBoundaryCheck.findings.length} first-period opening-balance cell(s) reference a genuinely blank cell rather than an explicit zero, including: ${sample}${blankBoundaryCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${blankBoundaryCheck.findings.length} opening-balance formula(s) reference a blank cell`,
+      corrective_action: 'Replace the blank-cell reference with an explicit 0, or confirm the referenced cell is intentionally reserved and will never hold a stray value.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Blank-cell boundary reference',
+      model_risk: 'Evaluates correctly today (Excel treats a blank as 0), but any future stray value in that cell would silently flow into the opening balance with no warning.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Opening-balance formula references a genuinely blank cell rather than an explicit zero', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 55
+    });
+  }
+
+  // ── Balance-sheet plug detection ─────────────────────────────────────────
+  // Sourced from ICAEW's "How to Review a Spreadsheet" (D6). Deliberately
+  // narrow: only flags a cell that is BOTH plug-labelled AND has a
+  // residual formula shape — does not attempt to infer plug-ness from
+  // formula structure alone, which would need identifying which cell is
+  // "the check" being forced to balance, a Tier 2-level judgment call.
+  const plugCheck = (() => { try { return checkBalanceSheetPlug(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Balance-sheet plug check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (plugCheck.applicable && plugCheck.findings.length > 0) {
+    const sample = plugCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell} ("${f.labelText}")`).join(', ');
+    allFlagged.push({
+      id: 'T0-BSPLUG-001',
+      label: `${plugCheck.findings.length} labelled balancing/plug figure(s) with a residual formula`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${plugCheck.findings.length} cell(s) are labelled as a balancing figure/plug and use a residual formula (a SUM combined with a subtraction), including: ${sample}.`,
+      reason: `${plugCheck.findings.length} labelled plug/balancing cell(s) found with a residual formula shape`,
+      corrective_action: 'Confirm what this line represents commercially, and whether its presence indicates an unresolved discrepancy elsewhere that should be traced to its root cause instead.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Balancing figure / plug',
+      model_risk: 'A plug can mask a genuine error elsewhere in the model by absorbing the discrepancy into an unexplained residual line rather than surfacing it.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Cell is labelled as a balancing/plug figure and computes a residual', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 55
     });
   }
 
