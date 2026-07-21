@@ -29,6 +29,8 @@ const { checkComplexFormulas } = require('./src/utils/complex-formula-check');
 const { checkNumbersStoredAsText } = require('./src/utils/number-as-text-check');
 const { checkBalanceNeverNegative } = require('./src/utils/balance-never-negative-check');
 const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distributions-check');
+const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check');
+const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -787,6 +789,56 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Distribution paid in a period where DSCR is below 1.0x', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 65
+    });
+  }
+
+  // ── VLOOKUP/HLOOKUP/MATCH missing exact-match parameter (L1) ────────────
+  // Sourced from "Excel for Auditors" (Jelen & Dowell). Confirmed via
+  // real testing to correctly identify the root cause of an already-
+  // documented Formualizer limitation on Carlsberg (MATCH() with default
+  // approximate type against a mixed text/number row).
+  const lookupExactMatchCheck = (() => { try { return checkLookupExactMatch(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Lookup exact-match check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (lookupExactMatchCheck.applicable && lookupExactMatchCheck.findings.length > 0) {
+    const sample = lookupExactMatchCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-LOOKUPMATCH-001',
+      label: `${lookupExactMatchCheck.findings.length} lookup(s) missing an exact-match parameter`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${lookupExactMatchCheck.findings.length} VLOOKUP()/HLOOKUP()/MATCH() call(s) do not use an explicit exact-match argument, including: ${sample}${lookupExactMatchCheck.findings.length > 8 ? ' and others' : ''}. These silently default to approximate matching, which requires the lookup column to be sorted and can return a plausible but wrong value with no visible error.`,
+      reason: `${lookupExactMatchCheck.findings.length} lookup formula(s) default to approximate matching`,
+      corrective_action: 'Add an explicit FALSE (VLOOKUP/HLOOKUP) or 0 (MATCH) exact-match argument, unless approximate matching is genuinely intended and the lookup range is confirmed sorted.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Lookup missing exact-match parameter',
+      model_risk: 'Approximate matching against an unsorted range can silently return a plausible but wrong value — one of the most common, well-documented sources of silent lookup errors.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'VLOOKUP/HLOOKUP/MATCH call missing an explicit exact-match argument', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 75
+    });
+  }
+
+  // ── PMT/IPMT/PPMT sign convention consistency (L18) ──────────────────────
+  // Sourced from "Mastering Advanced Excel Formulas and Functions"
+  // (Suman). Compares the sign of the pv FORMULA ARGUMENT across all
+  // PMT-family calls, distinct from sign-convention-check.js which
+  // compares labelled VALUE signs.
+  const pmtSignCheck = (() => { try { return checkPmtSignConsistency(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  PMT sign convention check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (pmtSignCheck.applicable && pmtSignCheck.flaggedCount > 0) {
+    const f = pmtSignCheck.findings[0];
+    allFlagged.push({
+      id: 'T0-PMTSIGN-001',
+      label: 'PMT()/IPMT()/PPMT() pv argument sign is inconsistent',
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: f.note,
+      reason: `${f.positiveCount} positive-pv and ${f.negativeCount} negative-pv PMT-family call(s) found`,
+      corrective_action: 'Standardize the pv argument sign across all PMT()/IPMT()/PPMT() calls in the model — either convention is fine, but it must be applied consistently.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'PMT sign convention inconsistency',
+      model_risk: 'Payment values with inconsistent signs cannot be safely summed together, silently misstating any total that combines them.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'PMT-family calls use an inconsistent pv-argument sign convention', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 70
     });
   }
 
