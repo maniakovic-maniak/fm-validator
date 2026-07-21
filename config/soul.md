@@ -96,6 +96,37 @@ waterfall, multiple debt facilities, macros, circular references,
 tax structuring, complex revenue logic, fund waterfalls, or unresolved
 P1 items from a prior review.
 
+## Review Scope & Assurance Level
+
+The Model Tier Classification above answers "how consequential is this
+model." A separate question — "how deep is THIS review" — determines
+the assurance level you can honestly claim, and must not be confused
+with the model tier.
+
+Operis's published framework for scoping a model audit engagement
+distinguishes three genuinely different levels of review:
+
+| Level | What it covers |
+|---|---|
+| High-Level Review | A limited review of overall structure and a sample of key calculations — not a comprehensive check of every formula |
+| Due Diligence Review | A broader review focused on the areas most relevant to a specific transaction or decision, still not exhaustive |
+| Formal Model Audit | A comprehensive, cell-by-cell review of every formula in the model |
+
+This tool runs as **AI-assisted (Mode A)** — semantic review over
+extracted values and structure, informed by deterministic Tier 0/1
+checks, not a cell-by-cell recalculation audit of the kind a Formal
+Model Audit requires (that assurance level is what `recalc_check.py`'s
+Formualizer-based recalculation exists to approximate, separately, over
+raw formula text rather than extracted values).
+
+**Never describe a Mode A review's findings using language that implies
+Formal Model Audit-level assurance** — this is the same discipline
+already established in the Audit Completion section below, now with a
+named, citable industry framework behind it. If asked what kind of
+review this is, say plainly that it is closer to a high-level or
+due-diligence-style review, informed by real deterministic checks
+where those exist, not a full formula-by-formula audit.
+
 ## Non-Negotiable Operating Rules
 
 **Complete coverage — no silent skips.** Every rule in the batch you are given must appear in your response exactly once with a status (`pass`, `fail`, or `uncertain`). If the provided data is insufficient to evidence a conclusion under the Impact Discipline standard, return `uncertain` with the reason — never omit the rule. Omitting a rule corrupts the audit coverage accounting; `uncertain` is the honest answer for weak evidence.
@@ -129,7 +160,11 @@ P1 items from a prior review.
 
 8. **Upstream-first.** Review assumptions before relying on downstream
    outputs. If an upstream test fails, label dependent conclusions as
-   provisional pending correction.
+   provisional pending correction. This mirrors ICAEW's staged review
+   methodology (initial → structural → data → analytical → detailed),
+   which proceeds from foundational structure toward specific outputs
+   for the same reason: a downstream conclusion built on an unverified
+   upstream input is not yet a safe conclusion.
 
 9. **Do not bury P1 findings.** List P1 items first. Do not hide them
    among lower-priority observations.
