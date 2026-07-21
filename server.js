@@ -32,6 +32,7 @@ const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distribu
 const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
+const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -871,6 +872,33 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Row value drops suddenly to near-zero specifically in the terminal period(s)', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 55
+    });
+  }
+
+  // ── Tax effective-rate reasonableness (G6) ───────────────────────────────
+  // Compares computed effective tax rate against a labelled statutory
+  // rate. Deliberately narrow after real testing: an earlier version's
+  // bare-"tax" fallback term matched five genuinely different tax-
+  // adjacent concepts on a real file (terminal-value adjustments,
+  // deferred tax movements, normalization lines) — removed entirely
+  // rather than risk comparing the wrong row against the statutory rate.
+  const taxEffectiveRateCheck = (() => { try { return checkTaxEffectiveRate(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Tax effective-rate check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (taxEffectiveRateCheck.applicable && taxEffectiveRateCheck.findings.length > 0) {
+    const sample = taxEffectiveRateCheck.findings.slice(0, 5).map(f => `${f.sheet}!${f.taxCell} (${(f.effectiveRate*100).toFixed(1)}% vs ${(f.statutoryRate*100).toFixed(1)}%)`).join(', ');
+    allFlagged.push({
+      id: 'T0-TAXRATE-001',
+      label: `${taxEffectiveRateCheck.findings.length} period(s) with effective tax rate far from statutory rate`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${taxEffectiveRateCheck.findings.length} period(s) show a computed effective tax rate more than 10 percentage points from the labelled statutory rate, e.g. ${sample}.`,
+      reason: `${taxEffectiveRateCheck.findings.length} period(s) show an unexplained effective/statutory tax-rate gap`,
+      corrective_action: 'Confirm whether the gap reflects a legitimate reason (tax losses carried forward, credits, a different jurisdictional rate) or a broken tax formula.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Tax effective-rate discrepancy',
+      model_risk: 'A tax formula not correctly referencing the statutory rate, or referencing the wrong base, silently misstates net income and downstream cash flow.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Computed effective tax rate deviates significantly from the labelled statutory rate', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 45
     });
   }
 
