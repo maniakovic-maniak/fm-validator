@@ -33,6 +33,7 @@ const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check'
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
+const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -899,6 +900,31 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Computed effective tax rate deviates significantly from the labelled statutory rate', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 45
+    });
+  }
+
+  // ── Revenue double-counting (G4) ─────────────────────────────────────────
+  // Sourced from "Issues the Audit Missed." Scoped deliberately narrower
+  // than full multi-path graph tracing: flags a revenue source cell
+  // summed into two or more SEPARATE "Total Revenue"-style aggregations,
+  // not one total simply linking to another (a harmless pass-through).
+  const revDoubleCountCheck = (() => { try { return checkRevenueDoubleCounting(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Revenue double-counting check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (revDoubleCountCheck.applicable && revDoubleCountCheck.findings.length > 0) {
+    const sample = revDoubleCountCheck.findings.slice(0, 5).map(f => f.componentCell).join(', ');
+    allFlagged.push({
+      id: 'T0-REVDOUBLE-001',
+      label: `${revDoubleCountCheck.findings.length} revenue source(s) summed into multiple separate totals`,
+      severity: 'high', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${revDoubleCountCheck.findings.length} revenue source cell(s) are summed into two or more separately-labelled "Total Revenue" aggregations, including: ${sample}.`,
+      reason: `${revDoubleCountCheck.findings.length} revenue source(s) contribute to multiple distinct revenue totals`,
+      corrective_action: 'Confirm whether these totals are ever combined further downstream — if so, this revenue source is being counted more than once in the combined figure.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Revenue double-counting risk',
+      model_risk: 'A revenue source counted in two separate totals inflates any downstream figure that combines both totals, without producing any visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Revenue source cell is summed into multiple separate revenue-total aggregations', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 50
     });
   }
 
