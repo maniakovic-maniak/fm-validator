@@ -39,6 +39,10 @@ const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
 const { checkBlankCellBoundary } = require('./src/utils/blank-cell-boundary-check');
 const { checkBalanceSheetPlug } = require('./src/utils/balance-sheet-plug-check');
+const { checkPeriodSequenceGaps } = require('./src/utils/period-sequence-gap-check');
+const { checkStdevaVaraUsage } = require('./src/utils/stdeva-vara-check');
+const { checkDataValidationPresence } = require('./src/utils/data-validation-presence-check');
+const { checkCellLockingGovernance } = require('./src/utils/cell-locking-governance-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -1051,6 +1055,98 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Cell is labelled as a balancing/plug figure and computes a residual', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 55
+    });
+  }
+
+  // ── Period-sequence gap detection (L11) ──────────────────────────────────
+  // Sourced from "Excel for Auditors" (Jelen & Dowell).
+  const periodGapCheck = (() => { try { return checkPeriodSequenceGaps(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Period-sequence gap check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (periodGapCheck.applicable && periodGapCheck.findings.length > 0) {
+    const sample = periodGapCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.beforeCell}->${f.afterCell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-PERIODGAP-001',
+      label: `${periodGapCheck.findings.length} irregular gap(s) found in a period/date sequence`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${periodGapCheck.findings.length} location(s) show a period/date sequence gap well beyond the row's own established spacing, including: ${sample}${periodGapCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${periodGapCheck.findings.length} irregular period-sequence gap(s) found`,
+      corrective_action: 'Confirm whether a period was intentionally skipped, or a column/record was deleted from the sequence without the surrounding logic being adjusted.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Period-sequence gap',
+      model_risk: 'A skipped or deleted period can silently break period-over-period formulas that assume a continuous, regularly-spaced sequence.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Date/period sequence shows a gap well beyond the row\'s established spacing', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 60
+    });
+  }
+
+  // ── STDEVA/VARA usage (L21) ───────────────────────────────────────────────
+  // Sourced from "Mastering Advanced Excel Formulas and Functions" (Suman).
+  const stdevaCheck = (() => { try { return checkStdevaVaraUsage(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  STDEVA/VARA check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (stdevaCheck.applicable && stdevaCheck.findings.length > 0) {
+    const sample = stdevaCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell} (${f.functionUsed})`).join(', ');
+    allFlagged.push({
+      id: 'T0-STDEVA-001',
+      label: `${stdevaCheck.findings.length} STDEVA()/VARA() usage(s)`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${stdevaCheck.findings.length} formula(s) use STDEVA()/VARA(), which include text and logical values in their calculation, including: ${sample}${stdevaCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${stdevaCheck.findings.length} formula(s) use STDEVA()/VARA() instead of STDEV()/VAR()`,
+      corrective_action: 'Confirm this is intentional, not a mistyped or pasted function name — if the range includes any header, label, or flag cell, this will silently distort the result.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'STDEVA/VARA usage',
+      model_risk: 'A range containing a header, label, or boolean flag alongside real numeric data will silently distort the statistic under STDEVA/VARA, without producing any visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Formula uses STDEVA()/VARA() rather than STDEV()/VAR()', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 65
+    });
+  }
+
+  // ── Data Validation presence on inputs (L24) ─────────────────────────────
+  // Sourced from ICAEW's "How to Review a Spreadsheet". Purely
+  // informational — absence of Data Validation is common and normal,
+  // never itself a defect. Only surfaced when coverage is genuinely
+  // near-zero among a meaningful number of identified input cells.
+  const dataValCheck = (() => { try { return checkDataValidationPresence(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Data Validation presence check failed:', e.message); return { applicable:false, inputCells:0, withValidation:0 }; } })();
+  if (dataValCheck.applicable && dataValCheck.inputCells >= 20 && dataValCheck.coverageFraction < 0.05) {
+    allFlagged.push({
+      id: 'T0-DATAVALID-001',
+      label: `${dataValCheck.withValidation} of ${dataValCheck.inputCells} input cell(s) carry Data Validation`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${dataValCheck.note}`,
+      reason: 'Informational — Data Validation coverage on identified input cells is near zero',
+      corrective_action: 'Informational only — consider adding Data Validation on key input cells to reduce the risk of an out-of-range value being entered, if that risk is material for this model.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Data Validation coverage (informational)',
+      model_risk: 'No material risk implied by absence alone — this is a governance observation, not a defect.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Input cells identified via font colour convention carry no Data Validation rule', escalation_flag: false,
+      urgency: 'Informational', confidence: 40
+    });
+  }
+
+  // ── Cell-locking governance signal (L25) ─────────────────────────────────
+  // Sourced from "Excel for Auditors" (Jelen & Dowell). Only evaluated
+  // where sheet protection is actually enabled — absence of protection
+  // is common and not itself flagged.
+  const cellLockCheck = (() => { try { return checkCellLockingGovernance(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Cell-locking governance check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (cellLockCheck.applicable && cellLockCheck.findings.length > 0) {
+    const sample = cellLockCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell} (${f.issue})`).join(', ');
+    allFlagged.push({
+      id: 'T0-CELLLOCK-001',
+      label: `${cellLockCheck.findings.length} cell(s) with a lock state inconsistent with their role`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `Sheet protection is enabled on ${cellLockCheck.protectedSheets.join(', ')}. ${cellLockCheck.findings.length} cell(s) have a lock state inconsistent with their apparent role, including: ${sample}${cellLockCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${cellLockCheck.findings.length} cell(s) show an inconsistent lock state under active sheet protection`,
+      corrective_action: 'Confirm whether the locked/unlocked state of these cells is intentional — an input cell left locked cannot be edited without unprotecting the sheet, and a formula cell left unlocked can be overwritten despite protection.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Cell-locking inconsistency',
+      model_risk: 'An input cell locked under active protection blocks legitimate editing; a formula cell left unlocked defeats the purpose of protecting the sheet.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Cell lock state does not match its apparent input/formula role under active sheet protection', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 55
     });
   }
 
