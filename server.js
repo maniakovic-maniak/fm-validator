@@ -31,6 +31,7 @@ const { checkBalanceNeverNegative } = require('./src/utils/balance-never-negativ
 const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distributions-check');
 const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
+const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -839,6 +840,37 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'PMT-family calls use an inconsistent pv-argument sign convention', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 70
+    });
+  }
+
+  // ── Terminal-period completeness (G2) ────────────────────────────────────
+  // Sourced from "Issues the Audit Missed." Architecturally distinct
+  // from L10 (formula-pattern check): catches a VALUE anomaly (a sudden
+  // drop to zero at the terminal boundary) even when the formula
+  // structure is identical across the whole row. Two real bugs found
+  // and fixed via testing before shipping: (1) cell.value?.result
+  // silently drops a genuine zero result due to an ExcelJS quirk — the
+  // exact value this check most needs to see; (2) a sparse one-time-cost
+  // row (mostly zero with a single spike) could pass an average-based
+  // threshold without being a genuine stable series — now requires
+  // established-window consistency, not just a nonzero average.
+  const terminalPeriodCheck = (() => { try { return checkTerminalPeriodCompleteness(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Terminal-period completeness check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (terminalPeriodCheck.applicable && terminalPeriodCheck.findings.length > 0) {
+    const sample = terminalPeriodCheck.findings.slice(0, 8).map(f => `${f.sheet} row ${f.row}`).join(', ');
+    allFlagged.push({
+      id: 'T0-TERMPERIOD-001',
+      label: `${terminalPeriodCheck.findings.length} row(s) drop suddenly to zero in the terminal period(s)`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${terminalPeriodCheck.findings.length} row(s) show a stable, non-declining run of values that then drops suddenly to near-zero in the last 1-2 periods, including: ${sample}${terminalPeriodCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${terminalPeriodCheck.findings.length} row(s) show an unexplained terminal-period drop to zero`,
+      corrective_action: 'Confirm whether the terminal period genuinely has zero activity (e.g. a loan reaching maturity), or whether an upstream driver silently drops out at that boundary.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Terminal-period value gap',
+      model_risk: 'A silent terminal-period omission (a cost category, a working-capital movement, a capex schedule) understates the model\'s later years without producing any visible error — the formula can look identical to every other period.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Row value drops suddenly to near-zero specifically in the terminal period(s)', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 55
     });
   }
 
