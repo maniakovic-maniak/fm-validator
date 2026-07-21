@@ -34,6 +34,8 @@ const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-che
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
+const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
+const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -925,6 +927,56 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Revenue source cell is summed into multiple separate revenue-total aggregations', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 50
+    });
+  }
+
+  // ── Display rounds to zero ───────────────────────────────────────────────
+  // Sourced from ICAEW's "How to Review a Spreadsheet" (D6). Only the
+  // no-decimal-place percentage format case is checked, matching the
+  // specific example ICAEW cites.
+  const displayZeroCheck = (() => { try { return checkDisplayRoundsToZero(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Display-rounds-to-zero check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (displayZeroCheck.applicable && displayZeroCheck.findings.length > 0) {
+    const sample = displayZeroCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-DISPLAYZERO-001',
+      label: `${displayZeroCheck.findings.length} cell(s) with a nonzero value displaying as "0%"`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${displayZeroCheck.findings.length} cell(s) hold a small nonzero percentage but are formatted with no decimal places, displaying as "0%" — indistinguishable from a genuine zero, including: ${sample}${displayZeroCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${displayZeroCheck.findings.length} cell(s) display as 0% despite a nonzero underlying value`,
+      corrective_action: 'Add a decimal place to the number format for these cells, or confirm the near-zero value is genuinely intended.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Display rounds to zero',
+      model_risk: 'A reviewer scanning displayed values would reasonably read this as exactly zero, potentially missing a real, small, nonzero driver.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Cell value rounds to 0% under its own number format', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 60
+    });
+  }
+
+  // ── Custom number-format unit-hiding ─────────────────────────────────────
+  // Sourced from PwC's "Essence of Spreadsheet Evil" list (D1). Real
+  // false-positive class found and fixed: formats with an embedded
+  // quoted unit label (e.g. "M") are self-documenting, not hiding
+  // anything — 256 such cases on a real file were confirmed and
+  // excluded before this shipped.
+  const customFormatCheck = (() => { try { return checkCustomFormatUnitHiding(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Custom-format unit-hiding check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (customFormatCheck.applicable && customFormatCheck.findings.length > 0) {
+    const sample = customFormatCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell} (${f.scaleLabel})`).join(', ');
+    allFlagged.push({
+      id: 'T0-UNITHIDE-001',
+      label: `${customFormatCheck.findings.length} cell(s) with an unlabelled scaling number format`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${customFormatCheck.findings.length} cell(s) use a custom number format that divides the displayed value (thousands/millions) with no unit label baked into the format itself, including: ${sample}${customFormatCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${customFormatCheck.findings.length} cell(s) use an unlabelled scaling number format`,
+      corrective_action: 'Confirm the sheet or column header clearly states the display scale, or add a unit suffix directly into the number format.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Unlabelled scaling number format',
+      model_risk: 'A reviewer scanning raw displayed values without noticing the format can misread magnitude by orders of magnitude.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Number format scales the displayed value with no embedded unit label', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 40
     });
   }
 
