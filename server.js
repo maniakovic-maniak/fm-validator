@@ -36,6 +36,7 @@ const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check'
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
+const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
@@ -977,6 +978,28 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Number format scales the displayed value with no embedded unit label', escalation_flag: false,
       urgency: 'Next scheduled review', confidence: 40
+    });
+  }
+
+  // ── Revolver/cash zero-balance cross-check ───────────────────────────────
+  // Sourced from FMI's "Checking and Reviewing a Model" (D2).
+  const revCashCheck = (() => { try { return checkRevolverCashCrosscheck(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Revolver/cash cross-check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (revCashCheck.applicable && revCashCheck.findings.length > 0) {
+    const sample = revCashCheck.findings.slice(0, 5).map(f => `${f.sheet}!${f.revolverCell} (${f.pattern})`).join(', ');
+    allFlagged.push({
+      id: 'T0-REVCASH-001',
+      label: `${revCashCheck.findings.length} period(s) with an inconsistent revolver/cash pattern`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${revCashCheck.findings.length} period(s) show either an undrawn revolver with non-positive cash, or a meaningfully drawn revolver with ample cash also present, including: ${sample}.`,
+      reason: `${revCashCheck.findings.length} period(s) show an inconsistent revolver/cash relationship`,
+      corrective_action: 'Confirm the revolver draw/repayment logic correctly responds to the cash position each period.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Revolver/cash inconsistency',
+      model_risk: 'A revolver mechanism that doesn\'t correctly draw to cover a cash shortfall (or unnecessarily draws when cash is ample) misstates liquidity and interest expense.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Revolver balance and cash balance show an inconsistent relationship in the same period', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 50
     });
   }
 

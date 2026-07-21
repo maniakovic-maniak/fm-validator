@@ -119,6 +119,16 @@ const OUTPUT_CHECKS = [
   // explicitly rather than let a bare match pick whichever is found first.
   { terms: ['yield on cost (exit)', 'yield on cost'], label: 'Yield on cost (exit)', threshold: 0.50, direction: 'above', unit: 'percent',
     rationale: 'yield on cost above 50% at exit is exceptionally high and warrants challenge' },
+  // Added from ICAEW's "How to Review a Spreadsheet" (D6) analytical-
+  // review ratio examples. Same disclosed rule-of-thumb discipline as
+  // every other entry here — these thresholds vary enormously by
+  // industry (a project-finance or mining model's working-capital norms
+  // are not a retailer's), so the rationale text says so explicitly
+  // rather than implying a universal benchmark.
+  { terms: ['receivable days', 'days sales outstanding', 'debtor days'], label: 'Receivable days', threshold: 90, direction: 'above', unit: 'days',
+    rationale: 'receivable days above 90 is high for most businesses, though working-capital norms vary substantially by industry — confirm this is consistent with the actual payment terms modelled, not just a rule-of-thumb comparison' },
+  { terms: ['depreciation to gross asset value', 'depreciation / gross assets', 'depreciation rate'], label: 'Depreciation to gross asset value', threshold: 0.20, direction: 'above', unit: 'percent',
+    rationale: 'an annual depreciation rate above 20% of gross asset value implies a useful life under 5 years, which is short for most fixed-asset categories — confirm this matches the actual asset mix and depreciation policy' },
 ];
 
 function checkOutputReasonableness(workbook) {
@@ -134,9 +144,18 @@ function checkOutputReasonableness(workbook) {
     }
     if (found.length === 0) continue;
     const pick = pickModalCandidate(found);
-    const flagged = check.direction === 'above' ? pick.value >= check.threshold : pick.value <= check.threshold;
+    // FIX (found via real testing against Carlsberg): a percentage
+    // figure can legitimately be stored as either a fraction (0.26) or
+    // a whole number (26) — confirmed directly on a real file
+    // ("Depreciation Rate" on a Graphs sheet, storing 26, almost
+    // certainly meaning 26% as a chart-axis source value, not 2600%).
+    // Scoped specifically to unit === 'percent' so this can never touch
+    // a 'multiple' or 'days' check, where a value like 14 (Exit
+    // multiple) is genuinely correct and must NOT be divided by 100.
+    const normalizedValue = (check.unit === 'percent' && pick.value > 1) ? pick.value / 100 : pick.value;
+    const flagged = check.direction === 'above' ? normalizedValue >= check.threshold : normalizedValue <= check.threshold;
     results.push({
-      metric: check.label, value: pick.value, location: `${pick.sheet}!${pick.valueCell}`,
+      metric: check.label, value: normalizedValue, location: `${pick.sheet}!${pick.valueCell}`,
       threshold: check.threshold, flagged, rationale: check.rationale, unit: check.unit,
       candidateCount: found.length
     });
