@@ -142,8 +142,22 @@ def build_report(data_path, output_path):
     except Exception:
         checklist_rules=[]
 
-    # Severity → priority mapping
+    # ── P1/P2/P3 framework renewal, Tier 1 item 2 ────────────────────────────
+    # Severity alone used to decide P1/P2/P3 for every finding. Per the
+    # renewed framework: only a Confirmed Finding is eligible for a
+    # P-priority at all — a Query, Critical Query, Observation, Scope
+    # Limitation, Not Applicable, or False Positive is reported in full
+    # (still gets its own Issue Log row below) but must never be counted
+    # toward P1/P2/P3 stats, dashboard gates, or the Remediation tab.
+    # Returning the record_type string itself for non-Confirmed records is
+    # deliberate, not just a placeholder: every downstream usage of
+    # priority() already handles an unrecognised key safely (a .get(key,
+    # default) style-lookup, or a plain =='P1' comparison that's simply
+    # False for anything else) — confirmed by reading every call site
+    # before making this change, not assumed.
     def priority(f):
+        if (f.get('record_type') or 'Confirmed Finding') != 'Confirmed Finding':
+            return f.get('record_type')
         sev = (f.get('severity') or '').lower()
         if sev in ('fatal','critical'): return 'P1'
         if sev in ('high','medium'): return 'P2'
@@ -152,6 +166,7 @@ def build_report(data_path, output_path):
     p1 = [f for f in findings if priority(f)=='P1']
     p2 = [f for f in findings if priority(f)=='P2']
     p3 = [f for f in findings if priority(f)=='P3']
+    critical_queries = [f for f in findings if f.get('record_type')=='Critical Query']
 
     # Pre-compute display titles ONCE (shared by dashboard + Issue Log — was
     # previously computed only inside the Issue Log loop, so the dashboard
@@ -187,29 +202,39 @@ def build_report(data_path, output_path):
     p1_open = len(p1)
     p2_open = len(p2)
     p3_open = len(p3)
+    # ── P1/P2/P3 framework renewal, Tier 1 item 3 ────────────────────────────
+    # An unresolved Critical Query must block reliance the same way an open
+    # P1 does, even though nothing has been confirmed as a defect yet — this
+    # is the memo's own explicit principle, distinct from ordinary Queries/
+    # Observations, which do NOT gate reliance at all.
+    critical_query_open = len(critical_queries)
     # Reliance classification (V11 1.1) — component of the audit conclusion,
     # stated factually. Hard rule: a model cannot be classified reliance-ready
-    # for lender/investor use or transaction execution while any P1 item is open.
-    if p1_open > 0:
+    # for lender/investor use or transaction execution while any P1 item is
+    # open, OR while any Critical Query remains unresolved.
+    if p1_open > 0 or critical_query_open > 0:
+        _blocker_desc = (f'{p1_open} P1 item(s)' if p1_open > 0 else '') + \
+                        (' and ' if p1_open > 0 and critical_query_open > 0 else '') + \
+                        (f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open > 0 else '')
         if igReadiness >= 60:
             verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=DARK_BLUE
-            verdict_text=(f'{p1_open} P1 item(s) remain open — this model cannot be classified reliance-ready for management, lender or investor use until all P1 items are resolved and retested. '
+            verdict_text=(f'{_blocker_desc} remain open — this model cannot be classified reliance-ready for management, lender or investor use until these are resolved (or, for a Critical Query, confirmed either way) and retested. '
                           f'{igReadiness}% of planned procedures completed ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run).')
         else:
             verdict_short='NOT RELIANCE-READY'; verdict_bg=DARK_BLUE
-            verdict_text=(f'{p1_open} P1 item(s) open and {igReadiness}% of planned procedures completed. Both open P1 findings and audit coverage prevent reliance at any level. '
-                          f'Resolve P1 items and complete outstanding procedures before reassessment.')
+            verdict_text=(f'{_blocker_desc} open and {igReadiness}% of planned procedures completed. Both open reliance blockers and audit coverage prevent reliance at any level. '
+                          f'Resolve these items and complete outstanding procedures before reassessment.')
     elif igReadiness >= 95:
         verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=MID_BLUE
-        verdict_text=(f'No P1 items open and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
+        verdict_text=(f'No P1 items or unresolved Critical Queries open and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
                       f'{p2_open} P2 item(s) remain and should be resolved or formally waived as part of transaction close.')
     elif igReadiness >= 80:
         verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=MID_BLUE
-        verdict_text=(f'No P1 items open; {igReadiness}% of planned procedures completed. Outstanding items: {cov_unc} uncertain and {cov_np} not-run procedures, {p2_open} open P2 item(s). '
+        verdict_text=(f'No P1 items or unresolved Critical Queries open; {igReadiness}% of planned procedures completed. Outstanding items: {cov_unc} uncertain and {cov_np} not-run procedures, {p2_open} open P2 item(s). '
                       f'Suitable for external review with these limitations disclosed.')
     elif igReadiness >= 60:
         verdict_short='RELIANCE-READY FOR MANAGEMENT DISCUSSION'; verdict_bg=MID_BLUE
-        verdict_text=(f'No P1 items open; {igReadiness}% of planned procedures completed. Coverage gaps ({cov_np} procedures not run, {cov_unc} uncertain) limit use to internal management discussion until closed.')
+        verdict_text=(f'No P1 items or unresolved Critical Queries open; {igReadiness}% of planned procedures completed. Coverage gaps ({cov_np} procedures not run, {cov_unc} uncertain) limit use to internal management discussion until closed.')
     else:
         verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=DARK_BLUE
         verdict_text=(igCommentary or f'{igReadiness}% of planned procedures completed. Coverage is not yet sufficient for management, lender or investor reliance. {cov_np} procedures not run, {cov_unc} uncertain.')

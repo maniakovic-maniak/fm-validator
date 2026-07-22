@@ -415,6 +415,7 @@ Every result object must include:
 `condition` `criteria` `cause` `consequence` `corrective_action`
 `issue_type` `workstream` `model_risk` `key_output_impact`
 `fixable` `fix_instruction` `escalation_flag` `needs_retest`
+`record_type`
 
 Use empty string for unavailable text fields.
 Use `"unquantified"` for unknown dollar_impact.
@@ -435,6 +436,29 @@ Use `"Unknown"` for key_output_impact when this cannot be determined.
 
 Assign uncertain status when confidence falls below 60.
 
+## Record Type Classification
+
+Priority (P1/P2/P3) answers "how severe is this." `record_type` answers a
+different question first: "what kind of statement is this at all." Only
+a `Confirmed Finding` is eligible for a P1/P2/P3 priority — every other
+record type is reported in full, but stays outside the P1–P3 hierarchy
+so it is never mistaken for an established defect. Assign exactly one:
+
+| record_type | When to use it | Relationship to existing fields |
+|---|---|---|
+| `Confirmed Finding` | A defect or control weakness the available evidence actually supports | Requires status `fail` and confidence 60+ |
+| `Query` | More information or testing is needed before a defect can be confirmed either way | Typically confidence 30–59; not yet material enough to block reliance |
+| `Critical Query` | An unresolved question that COULD materially affect a key output or decision, even though nothing is confirmed yet | Use whenever a low-confidence (below 60) result touches a key output, valuation, debt, liquidity, covenant, or ownership/dilution area — do not let low confidence quietly demote a potentially material matter to an ordinary Query |
+| `Observation` | A real, noteworthy model characteristic that is not itself a defect | Complexity indicators (nested IFs, IFERROR density, long formulas, hardcoded constants) belong here unless testing shows an actual resulting error — these place a formula into a higher-attention population, they do not by themselves justify a priority |
+| `Scope Limitation` | A required procedure could not be completed — data, functionality, or evidence was unavailable | This is the same situation the Scope Limitation Protocol below already governs; use that protocol's steps and set `record_type` to this value |
+| `Not Applicable` | The test does not apply to this model's structure, purpose, or stage of development | e.g. a lease-schedule check on a model with no leases |
+| `False Positive` | The condition was investigated directly and confirmed NOT to be a defect | Distinct from Not Applicable — this means the test DID apply and WAS investigated, and the investigation cleared it |
+
+**A numerical confidence score must never manufacture a Confirmed
+Finding by itself.** A serious-looking matter with insufficient
+evidence stays a Critical Query, however material it looks, until an
+actual defect is confirmed.
+
 ## Scope Limitation Protocol
 
 When evidence is insufficient to conclude:
@@ -444,3 +468,8 @@ When evidence is insufficient to conclude:
 4. Set confidence below 60 and status to uncertain
 5. Do not use uncertain merely because data is messy —
    if available evidence reasonably indicates a defect, use fail
+
+Set `record_type` to `Scope Limitation` whenever this protocol applies —
+unless the missing evidence concerns a key output or decision, in which
+case use `Critical Query` instead, since an unresolved question that
+could be material needs to carry more weight than a routine scope gap.

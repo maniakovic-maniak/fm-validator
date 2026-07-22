@@ -34,6 +34,7 @@ const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-che
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
+const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -1575,6 +1576,11 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       }
     if (formulaDeepDive.findings && formulaDeepDive.findings.length) allFlagged.push(...formulaDeepDive.findings);
     if (vbaReview.findings && vbaReview.findings.length) allFlagged.push(...vbaReview.findings);
+
+    // ── P1/P2/P3 framework renewal, Tier 1 item 1 ──────────────────────────
+    // See the matching comment in index.js for the full rationale.
+    assignRecordTypes(allFlagged);
+
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
     const ruleResults = [...t1Results, ...t2Results].map(r => ({
