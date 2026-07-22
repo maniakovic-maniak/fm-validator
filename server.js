@@ -816,7 +816,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     allFlagged.push({
       id: 'T0-DSCRGATE-001',
       label: `${dscrGatedCheck.findings.length} distribution(s) paid with DSCR below 1.0x`,
-      severity: 'high', status: 'fail',
+      // P1/P2/P3 framework renewal, Tier 2 item 4: see the matching
+      // comment in index.js for the full rationale.
+      severity: 'critical', status: 'fail',
       sheet: '', cell: 'A1', category: 'Structure',
       condition: `${dscrGatedCheck.findings.length} period(s) show a distribution paid while DSCR reads below 1.0x, including: ${sample}. The project's own cash flow was mathematically insufficient to cover debt service in the affected period(s).`,
       reason: `${dscrGatedCheck.findings.length} distribution(s) paid despite DSCR below 1.0x`,

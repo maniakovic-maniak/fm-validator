@@ -21,9 +21,24 @@
 // and Tier 2 (Claude, via soul.md) apply the same logic even though one
 // is deterministic code and the other is semantic judgement.
 
+// P1/P2/P3 framework renewal, Tier 2 item 4: cross-checked directly
+// against the memo's own explicit P1 category list ("valuation; debt
+// and interest; liquidity or funding requirements; ownership and
+// dilution; investor returns; tax and GST; financial statements;
+// covenants; uncontrolled circularities; critical external
+// dependencies") — two categories were completely missing here:
+// "investor returns" and "financial statements". Confirmed via real
+// testing before this fix that both were silently under-escalating
+// real checks: a balance-sheet plug finding (T0-BSPLUG) and a revenue
+// double-counting finding (T0-REVDOUBLE) both classified as an
+// ordinary Query rather than a Critical Query, despite touching
+// exactly the "financial statements" category the memo names.
 const KEY_OUTPUT_CATEGORY_HINTS = [
-  'valuation', 'debt', 'liquidity', 'funding', 'covenant', 'dscr', 'dsra',
+  'valuation', 'debt', 'interest', 'liquidity', 'funding', 'covenant', 'dscr', 'dsra',
   'ownership', 'dilution', 'equity', 'tax', 'gst', 'circular', 'external',
+  'return', 'irr', 'investor',
+  'financial statement', 'balance sheet', 'income statement', 'cash flow statement',
+  'revenue', 'balancing', 'plug',
 ];
 
 function mentionsKeyOutputArea(finding) {

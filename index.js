@@ -669,7 +669,17 @@ async function run() {
     allFlagged.push({
       id: 'T0-DSCRGATE-001',
       label: `${dscrGatedCheck.findings.length} distribution(s) paid with DSCR below 1.0x`,
-      severity: 'high', status: 'fail',
+      // P1/P2/P3 framework renewal, Tier 2 item 4: upgraded from 'high'
+      // to 'critical' after reviewing against the memo's own P1
+      // category list — this touches "debt and interest," "liquidity
+      // or funding requirements," and "covenants" simultaneously, and
+      // unlike a visible #NUM!-style error, a DSCR-gated distribution
+      // violation requires actively cross-referencing two different
+      // rows across many periods to notice — exactly the kind of
+      // defect likely to remain undetected without a dedicated check
+      // (the memo's own "Control weakness" dimension), not just a
+      // category-keyword match on its own.
+      severity: 'critical', status: 'fail',
       sheet: '', cell: 'A1', category: 'Structure',
       condition: `${dscrGatedCheck.findings.length} period(s) show a distribution paid while DSCR reads below 1.0x, including: ${sample}. The project's own cash flow was mathematically insufficient to cover debt service in the affected period(s).`,
       reason: `${dscrGatedCheck.findings.length} distribution(s) paid despite DSCR below 1.0x`,

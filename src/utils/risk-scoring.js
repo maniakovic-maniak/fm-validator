@@ -20,9 +20,17 @@
 // finding that would escalate record_type also scores high on Decision
 // consequence — the two concepts are related, not independently
 // invented here.
+// P1/P2/P3 framework renewal, Tier 2 item 4: kept identical to the
+// (also just-expanded) list in record-type-classifier.js — see that
+// file's comment for the full rationale. Two categories from the
+// memo's own P1 list were missing here too: "investor returns" and
+// "financial statements".
 const KEY_OUTPUT_CATEGORY_HINTS = [
-  'valuation', 'debt', 'liquidity', 'funding', 'covenant', 'dscr', 'dsra',
+  'valuation', 'debt', 'interest', 'liquidity', 'funding', 'covenant', 'dscr', 'dsra',
   'ownership', 'dilution', 'equity', 'tax', 'gst', 'circular', 'external',
+  'return', 'irr', 'investor',
+  'financial statement', 'balance sheet', 'income statement', 'cash flow statement',
+  'revenue', 'balancing', 'plug',
 ];
 
 function mentionsKeyOutputArea(finding) {
