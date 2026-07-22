@@ -291,10 +291,24 @@ def build_report(data_path, output_path):
         'RELIANCE-READY FOR LENDER / INVESTOR REVIEW': 'Ready for lender / investor review',
         'RELIANCE-READY FOR TRANSACTION EXECUTION': 'Ready for transaction execution',
     }.get(verdict_short, verdict_short.title())
-    _reason = (f'{p1_open} open P1 finding(s) and {igReadiness}% audit completion' if p1_open>0
+    # ── P1/P2/P3 framework renewal, Tier 1 item 3 (completion) ───────────────
+    # Found via reviewing a real run: verdict_short/verdict_bg/verdict_text
+    # above were correctly updated to gate on critical_query_open, but these
+    # three separate dashboard text fields (Reason, Required action, Key
+    # Takeaway) were missed — they referenced p1_open directly and would
+    # have shown "4 open P1 finding(s)" while silently omitting 16 open
+    # Critical Queries sitting right next to that banner in the same
+    # report. Re-derived here independently (rather than assuming
+    # _blocker_desc from the branch above is in scope, which it would not
+    # be when p1_open==0 and critical_query_open==0).
+    _open_desc = (f'{p1_open} open P1 finding(s)' if p1_open>0 else '') + \
+                 (' and ' if p1_open>0 and critical_query_open>0 else '') + \
+                 (f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open>0 else '')
+    _has_blocker = p1_open>0 or critical_query_open>0
+    _reason = (f'{_open_desc} and {igReadiness}% audit completion' if _has_blocker
                else f'{igReadiness}% audit completion, {cov_unc} procedure(s) uncertain, {cov_np} not run' if igReadiness<100 or cov_unc or cov_np
-               else 'All planned procedures completed with no open P1 findings')
-    _next_step = ('Close all P1 items and complete outstanding procedures, then reassess.' if p1_open>0
+               else 'All planned procedures completed with no open P1 findings or unresolved Critical Queries')
+    _next_step = ('Close all P1 items and resolve all Critical Queries (confirming whether a defect exists either way), then complete outstanding procedures and reassess.' if _has_blocker
                   else 'Resolve remaining P2 items and complete outstanding procedures before wider reliance.' if igReadiness<95
                   else 'No further action required for this reliance level.')
     merge(ws1,f'B{r}:I{r}',f'Status:   {_verdict_display}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
@@ -308,20 +322,21 @@ def build_report(data_path, output_path):
     # detail. p1/p2/p3 are already computed above for the Work Not
     # Performed table's own logic; this just surfaces the same counts
     # more prominently, right where a reader looks first.
-    merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2 · {len(p3)} P3',sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+    merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2 · {len(p3)} P3' + (f' · {critical_query_open} Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open>0 else ''),sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
     set_row(ws1,r,20); r+=1
     set_row(ws1,r,8); r+=1
 
     # ── Key Takeaway box ──────────────────────────────────────────────────────
     _blockers=[]
     if p1_open>0: _blockers.append('open P1 findings')
+    if critical_query_open>0: _blockers.append('unresolved Critical Queries')
     if t0.get('stats',{}).get('totalExternalLinks',0)>0: _blockers.append('external workbook links')
     if len(errorScan)>0: _blockers.append('formula errors')
     if cov_unc>0: _blockers.append('incomplete audit coverage')
     if redundantIn.get('applicable') and redundantIn.get('redundantCount',0)>0: _blockers.append('redundant input assumptions')
     _takeaway = (f"The model is not currently suitable for reliance. The main blockers are {', '.join(_blockers[:4])}."
-                 if p1_open>0 or _blockers else
-                 "The model has no open P1 findings and is suitable for reliance at the level shown above.")
+                 if _has_blocker or _blockers else
+                 "The model has no open P1 findings or unresolved Critical Queries and is suitable for reliance at the level shown above.")
     merge(ws1,f'B{r}:I{r}','Key Takeaway',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left'); set_row(ws1,r,14); r+=1
     merge(ws1,f'B{r}:I{r+1}',_takeaway,sz=10,col=CHARCOAL,bg=PALE_ACCENT,wrap=True,v='center')
     fill_range(ws1,r,2,r+1,9,PALE_ACCENT); set_row(ws1,r,18); set_row(ws1,r+1,18); r+=2
