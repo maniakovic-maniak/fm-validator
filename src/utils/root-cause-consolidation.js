@@ -97,3 +97,60 @@ function buildRootCauseFields(checkId, checkResult, opts = {}) {
 }
 
 module.exports = { extractCellRef, buildRootCauseFields };
+
+/** A second, distinct shape observed across this session's checks:
+ * balance-never-negative-check.js and sign-convention-check.js return a
+ * top-level `results` array (one entry per label/group, e.g. "Cash
+ * balance" or "Capex"), where the INDIVIDUAL cell-level occurrences —
+ * if present at all — live in a NESTED sub-array on each result item
+ * (negativeInstances, positiveInstances), not in a flat top-level
+ * findings array. buildRootCauseFields (above) doesn't handle this
+ * shape; this function does, by flattening across every flagged result
+ * group's nested instance arrays.
+ *
+ * Only results where `flagged` is true are included — an unflagged
+ * group (e.g. "Revolver balance" when no negative period exists) is
+ * correctly not part of the consolidated finding at all. */
+function buildRootCauseFieldsFromResults(checkId, checkResult, opts = {}) {
+  const results = Array.isArray(checkResult && checkResult.results) ? checkResult.results : [];
+  const flagged = results.filter(r => r.flagged);
+
+  const affectedCells = [];
+  const affectedSheets = new Set();
+
+  for (const group of flagged) {
+    // Collect every nested instance array this session's checks are
+    // known to use — a group may have one or several depending on the
+    // check (balance-never-negative has only negativeInstances;
+    // sign-convention has both positiveInstances and negativeInstances).
+    const nestedArrays = [group.negativeInstances, group.positiveInstances].filter(Array.isArray);
+    for (const arr of nestedArrays) {
+      for (const item of arr) {
+        if (item.sheet && item.cell) {
+          affectedCells.push(`${item.sheet}!${item.cell}`);
+          affectedSheets.add(item.sheet);
+        }
+      }
+    }
+  }
+
+  const materialityFilter = typeof opts.materialityFilter === 'function' ? opts.materialityFilter : () => true;
+  // "Occurrences" here means individual flagged group-level findings
+  // (e.g. one occurrence per label like "Cash balance" or "Capex"),
+  // matching how these checks are actually reported as one Issue Log
+  // entry per group — not the raw count of underlying cell instances,
+  // which affected_cells already captures in full.
+  const materialOccurrenceCount = flagged.filter(materialityFilter).length;
+
+  return {
+    root_cause_id: checkId,
+    master_finding_id: checkId,
+    occurrence_count: flagged.length,
+    material_occurrence_count: materialOccurrenceCount,
+    affected_cells: affectedCells,
+    affected_sheets: [...affectedSheets],
+    common_remediation_action: opts.commonRemediationAction || '',
+  };
+}
+
+module.exports.buildRootCauseFieldsFromResults = buildRootCauseFieldsFromResults;

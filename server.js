@@ -36,6 +36,7 @@ const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check'
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
+const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -483,8 +484,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Sign-convention check failed:', e.message); return { applicable:false, flaggedCount:0, results:[] }; } })();
   if (signConventionCheck.applicable && signConventionCheck.results.length > 0) {
     signConventionCheck.results.forEach((r, i) => {
+      const id = `T0-SIGNCONV-${String(i + 1).padStart(3, '0')}`;
       allFlagged.push({
-        id: `T0-SIGNCONV-${String(i + 1).padStart(3, '0')}`,
+        id,
         label: `"${r.label}" appears with inconsistent sign across the workbook`,
         severity: 'medium', status: 'fail',
         sheet: '', cell: 'A1', category: 'Structure',
@@ -495,7 +497,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         model_risk: 'A silently inconsistent sign convention can cause a value to be added where it should be subtracted (or vice versa) wherever it is later referenced.',
         key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
         root_cause: 'Same labelled line item has inconsistent sign across the workbook', escalation_flag: false,
-        urgency: 'Before next reliance', confidence: 75
+        urgency: 'Before next reliance', confidence: 75,
+        ...buildRootCauseFieldsFromResults(id, { results: [r] }, { commonRemediationAction: 'Confirm the model\'s own sign convention for this line item and correct whichever instance(s) don\'t follow it.' })
       });
     });
   }
@@ -769,8 +772,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   if (balanceNeverNegativeCheck.applicable && balanceNeverNegativeCheck.results.length > 0) {
     for (const r of balanceNeverNegativeCheck.results) {
       const sample = r.negativeInstances.slice(0, 5).map(n => `${n.sheet}!${n.cell} (${n.value})`).join(', ');
+      const id = `T0-BALNEG-${r.label.replace(/\s+/g, '').toUpperCase().slice(0, 10)}-001`;
       allFlagged.push({
-        id: `T0-BALNEG-${r.label.replace(/\s+/g, '').toUpperCase().slice(0, 10)}-001`,
+        id,
         label: `${r.negativeCount} negative period(s) in "${r.label}"`,
         severity: 'high', status: 'fail',
         sheet: '', cell: 'A1', category: 'Structure',
@@ -781,7 +785,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         model_risk: 'A negative cash or revolver balance is not commercially achievable — its presence indicates the funding/draw mechanism is not correctly enforcing a floor.',
         key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
         root_cause: `${r.label} time series includes a negative value`, escalation_flag: false,
-        urgency: 'Before next reliance', confidence: 75
+        urgency: 'Before next reliance', confidence: 75,
+        ...buildRootCauseFieldsFromResults(id, { results: [r] }, { commonRemediationAction: 'Trace the funding/draw logic for the flagged negative period(s) — confirm why the floor was not enforced.' })
       });
     }
   }
@@ -811,7 +816,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       model_risk: 'A distribution paid while DSCR is below 1.0x understates the project\'s inability to cover its own debt service that period — a real lender-protection mechanism appears not to be enforced.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Distribution paid in a period where DSCR is below 1.0x', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 65
+      urgency: 'Before next reliance', confidence: 65,
+      ...buildRootCauseFields('T0-DSCRGATE-001', dscrGatedCheck, { commonRemediationAction: 'Trace the distribution formula\'s gating logic — confirm whether a DSCR-based lock-up test is actually wired into the calculation.' })
     });
   }
 
@@ -1145,7 +1151,14 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       model_risk: 'No material risk implied by absence alone — this is a governance observation, not a defect.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Input cells identified via font colour convention carry no Data Validation rule', escalation_flag: false,
-      urgency: 'Informational', confidence: 40
+      urgency: 'Informational', confidence: 40,
+      root_cause_id: 'T0-DATAVALID-001',
+      master_finding_id: 'T0-DATAVALID-001',
+      occurrence_count: dataValCheck.inputCells - dataValCheck.withValidation,
+      material_occurrence_count: dataValCheck.inputCells - dataValCheck.withValidation,
+      affected_cells: dataValCheck.examplesWithout || [],
+      affected_sheets: [...new Set((dataValCheck.examplesWithout || []).map(ref => ref.split('!')[0]))],
+      common_remediation_action: 'Consider adding Data Validation on key input cells if out-of-range entry is a material risk for this model.',
     });
   }
 

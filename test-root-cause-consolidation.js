@@ -55,6 +55,38 @@ function run() {
   console.log(`${emptyPass ? 'PASS' : 'FAIL'}: missing findings array handled gracefully, no crash`);
   if (!emptyPass) allPass = false;
 
+  // buildRootCauseFieldsFromResults: the results[]-shaped adapter, for
+  // sign-convention-check.js (positive+negative nested arrays) and
+  // balance-never-negative-check.js (negative-only nested arrays)
+  const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
+
+  const signConventionShape = {
+    results: [
+      { label: 'Capex', flagged: true,
+        positiveInstances: [{ sheet: 'SheetA', cell: 'A1', value: 100 }],
+        negativeInstances: [{ sheet: 'SheetB', cell: 'B2', value: -50 }] },
+      { label: 'Opex', flagged: false, positiveInstances: [], negativeInstances: [] }, // must be excluded — not flagged
+    ],
+  };
+  const rcSign = buildRootCauseFieldsFromResults('T0-SIGNCONV-001', signConventionShape);
+  const signPass = rcSign.occurrence_count === 1 // only the flagged group counts
+    && JSON.stringify(rcSign.affected_cells.sort()) === JSON.stringify(['SheetA!A1', 'SheetB!B2'])
+    && JSON.stringify(rcSign.affected_sheets.sort()) === JSON.stringify(['SheetA', 'SheetB']);
+  console.log(`${signPass ? 'PASS' : 'FAIL'}: buildRootCauseFieldsFromResults handles sign-convention shape (positive+negative nested arrays, excludes unflagged groups)`);
+  if (!signPass) allPass = false;
+
+  const balanceNeverNegShape = {
+    results: [
+      { label: 'Cash balance', flagged: true,
+        negativeInstances: [{ sheet: 'SheetC', cell: 'C10', value: -1 }, { sheet: 'SheetC', cell: 'C11', value: -2 }] },
+    ],
+  };
+  const rcBalNeg = buildRootCauseFieldsFromResults('T0-BALNEG-001', balanceNeverNegShape);
+  const balNegPass = rcBalNeg.occurrence_count === 1
+    && JSON.stringify(rcBalNeg.affected_cells) === JSON.stringify(['SheetC!C10', 'SheetC!C11']);
+  console.log(`${balNegPass ? 'PASS' : 'FAIL'}: buildRootCauseFieldsFromResults handles balance-never-negative shape (negative-only nested array)`);
+  if (!balNegPass) allPass = false;
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }

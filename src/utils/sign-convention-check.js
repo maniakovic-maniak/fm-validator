@@ -103,6 +103,13 @@ function checkSignConventions(workbook) {
         flagged: true,
         positiveCount: positives.length,
         negativeCount: negatives.length,
+        // P1/P2/P3 framework Tier 2 item 1: these two arrays already
+        // existed as local variables used only to build the prose note
+        // below — exposing them structurally costs nothing and lets
+        // root-cause-consolidation.js extract real affected_cells
+        // instead of an empty list.
+        positiveInstances: positives.map(c => ({ sheet: c.sheet, cell: c.valueCell, value: c.value })),
+        negativeInstances: negatives.map(c => ({ sheet: c.sheet, cell: c.valueCell, value: c.value })),
         note: `"${group.label}"-labelled values were found with inconsistent sign across the workbook — ${positives.length} positive instance(s) (e.g. ${posLocations}) and ${negatives.length} negative instance(s) (e.g. ${negLocations}). This may be a genuine sign error in one location, or a deliberate difference in convention between sheets — the model's own convention should be confirmed, not assumed, before treating either as wrong.`,
       });
     }
