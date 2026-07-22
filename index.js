@@ -22,6 +22,7 @@ const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
+const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -454,7 +455,8 @@ async function run() {
       model_risk: 'A single cell in an otherwise-consistent row using a different range or reference structure can silently produce a wrong value for that one period, indistinguishable at a glance from its neighbors.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Formula cell structurally deviates from its row\'s established pattern', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 60
+      urgency: 'Before next reliance', confidence: 60,
+      ...buildRootCauseFields('T0-FMLPATTERN-001', formulaPatternCheck, { commonRemediationAction: 'Confirm whether each flagged cell\'s deviation from its row is deliberate; if not, correct the range/reference to match the row\'s established pattern.' })
     });
   }
 
@@ -489,7 +491,8 @@ async function run() {
       model_risk: 'Extra, purposeless hops make a formula harder to trace and slightly increase the chance of an intermediate cell being edited or deleted without the chain being noticed.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Cell links to another cell that is itself just a link, with no other use', escalation_flag: false,
-      urgency: 'Next scheduled review', confidence: 50
+      urgency: 'Next scheduled review', confidence: 50,
+      ...buildRootCauseFields('T0-DAISYCHAIN-001', daisyChainCheck, { commonRemediationAction: 'Redirect each flagged link to reference the ultimate source directly, unless the intermediate cell serves a genuine, reused purpose.' })
     });
   }
 
@@ -569,7 +572,8 @@ async function run() {
       model_risk: 'A genuinely over-complex formula is harder to review and more error-prone, but this check cannot distinguish that from a standard nested-lookup pattern.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Formula contains 3 or more opening parentheses', escalation_flag: false,
-      urgency: 'Informational', confidence: 30
+      urgency: 'Informational', confidence: 30,
+      ...buildRootCauseFields('T0-COMPLEXFML-001', complexFormulaCheck, { commonRemediationAction: 'Review for genuine readability concerns; simplify only where testing shows an actual defect, not merely for parenthesis count.' })
     });
   }
 
@@ -593,7 +597,8 @@ async function run() {
       model_risk: 'A number stored as text is silently excluded from SUM() and most arithmetic without any visible error — a common paste-from-PDF or paste-from-web artifact.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Cell contains a numeric-looking value stored as text', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 70
+      urgency: 'Before next reliance', confidence: 70,
+      ...buildRootCauseFields('T0-NUMASTEXT-001', numberAsTextCheck, { commonRemediationAction: 'Re-enter each flagged cell as a genuine numeric value (Text to Columns, or paste-special multiply-by-1) if it feeds any calculation.' })
     });
   }
 
