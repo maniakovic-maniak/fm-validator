@@ -24,6 +24,18 @@
  * in priority order. Returns null if no recognizable cell reference is
  * present (e.g. a check that is itself sheet-level, not cell-level). */
 function extractCellRef(item) {
+  // FIX (found via real testing): revenue-double-counting-check.js's
+  // componentCell field is ALREADY a fully-formatted "Sheet!Cell"
+  // string, with no separate top-level `sheet` field on the finding
+  // item at all — the sheet-first guard below was silently rejecting
+  // every one of this check's findings, producing an empty
+  // affected_cells list despite the real cell reference being right
+  // there. Any single-cell field already containing "!" is used as-is.
+  const preformattedField = item.componentCell || item.cell;
+  if (typeof preformattedField === 'string' && preformattedField.includes('!')) {
+    return preformattedField;
+  }
+
   const sheet = item.sheet;
   if (!sheet) return null;
 

@@ -378,7 +378,8 @@ async function run() {
       model_risk: 'A period-0 investment folded into an NPV() range is discounted by one extra period, understating (or overstating, for a negative rate) the true NPV without producing any visible error.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'NPV() formula has no visible separate period-0 term', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 70
+      urgency: 'Before next reliance', confidence: 70,
+      ...buildRootCauseFields('T0-NPVP0-001', npvPeriodZeroCheck, { commonRemediationAction: 'Confirm the NPV() range starts at period 1, and add any period-0 investment as a separate term outside the NPV() call.' })
     });
   }
 
@@ -398,7 +399,8 @@ async function run() {
       model_risk: 'IRR() over a range with no negative value is mathematically undefined — Excel returns #NUM!, and a downstream formula referencing this cell may mask that with a misleading fallback value.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'IRR() range contains no negative (initial-investment) value', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 80
+      urgency: 'Before next reliance', confidence: 80,
+      ...buildRootCauseFields('T0-IRRSIGN-001', irrNegativeCashFlowCheck, { commonRemediationAction: 'Confirm whether the initial investment/outflow is genuinely missing from the IRR() range, or zero.' })
     });
   }
 
@@ -426,7 +428,8 @@ async function run() {
       model_risk: 'A total inflated by a header value (e.g. adding 2024 to a sum of dollar figures) looks plausible at a glance and can go unnoticed indefinitely.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'SUM() range appears to include a header row rather than starting at the first row of real data', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 65
+      urgency: 'Before next reliance', confidence: 65,
+      ...buildRootCauseFields('T0-AUTOSUMHDR-001', autoSumHeaderCheck, { commonRemediationAction: 'Confirm the top cell of each flagged range is genuine data; if it is a header, adjust the range to start one row lower.' })
     });
   }
 
@@ -517,7 +520,8 @@ async function run() {
       model_risk: 'A condition change (a date range shift, a flag flip, a scenario switch) can surface this error for the first time long after the model was built and reviewed, with no warning beforehand.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'IF() branch contains a literal Excel error value', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 80
+      urgency: 'Before next reliance', confidence: 80,
+      ...buildRootCauseFields('T0-IFERRLIT-001', embeddedErrorCheck, { commonRemediationAction: 'Confirm whether the error branch is genuinely unreachable under all valid model states, or replace it with correct fallback logic.' })
     });
   }
 
@@ -546,7 +550,8 @@ async function run() {
       model_risk: 'A DSRA sized below customary lender requirements may not provide adequate liquidity cover in a downside scenario, and may not match what was actually agreed in financing documents.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'DSRA target value covers fewer than the customary minimum months of debt service', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 55
+      urgency: 'Before next reliance', confidence: 55,
+      ...buildRootCauseFields('T0-DSRASIZE-001', dsraSizingCheck, { commonRemediationAction: 'Confirm whether DSRA sizing reflects actual agreed deal terms or represents genuine under-funding relative to customary practice.' })
     });
   }
 
@@ -681,7 +686,8 @@ async function run() {
       model_risk: 'Approximate matching against an unsorted range can silently return a plausible but wrong value — one of the most common, well-documented sources of silent lookup errors.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'VLOOKUP/HLOOKUP/MATCH call missing an explicit exact-match argument', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 75
+      urgency: 'Before next reliance', confidence: 75,
+      ...buildRootCauseFields('T0-LOOKUPMATCH-001', lookupExactMatchCheck, { commonRemediationAction: 'Add an explicit FALSE (VLOOKUP/HLOOKUP) or 0 (MATCH) exact-match argument.' })
     });
   }
 
@@ -706,7 +712,8 @@ async function run() {
       model_risk: 'Payment values with inconsistent signs cannot be safely summed together, silently misstating any total that combines them.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'PMT-family calls use an inconsistent pv-argument sign convention', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 70
+      urgency: 'Before next reliance', confidence: 70,
+      ...buildRootCauseFields('T0-PMTSIGN-001', pmtSignCheck, { commonRemediationAction: 'Standardize the pv argument sign across all PMT()/IPMT()/PPMT() calls.' })
     });
   }
 
@@ -737,7 +744,8 @@ async function run() {
       model_risk: 'A silent terminal-period omission (a cost category, a working-capital movement, a capex schedule) understates the model\'s later years without producing any visible error — the formula can look identical to every other period.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Row value drops suddenly to near-zero specifically in the terminal period(s)', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 55
+      urgency: 'Before next reliance', confidence: 55,
+      ...buildRootCauseFields('T0-TERMPERIOD-001', terminalPeriodCheck, { commonRemediationAction: 'Confirm whether the terminal-period drop is genuine (e.g. project/loan completion) or an upstream driver silently dropping out.' })
     });
   }
 
@@ -764,7 +772,8 @@ async function run() {
       model_risk: 'A tax formula not correctly referencing the statutory rate, or referencing the wrong base, silently misstates net income and downstream cash flow.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Computed effective tax rate deviates significantly from the labelled statutory rate', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 45
+      urgency: 'Before next reliance', confidence: 45,
+      ...buildRootCauseFields('T0-TAXRATE-001', taxEffectiveRateCheck, { commonRemediationAction: 'Confirm whether the tax-rate gap reflects a legitimate reason (losses carried forward, credits, jurisdictional rate) or a broken tax formula.' })
     });
   }
 
@@ -789,7 +798,8 @@ async function run() {
       model_risk: 'A revenue source counted in two separate totals inflates any downstream figure that combines both totals, without producing any visible error.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Revenue source cell is summed into multiple separate revenue-total aggregations', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 50
+      urgency: 'Before next reliance', confidence: 50,
+      ...buildRootCauseFields('T0-REVDOUBLE-001', revDoubleCountCheck, { commonRemediationAction: 'Confirm whether these totals are ever combined downstream; if so, remove the double-counted source from one of them.' })
     });
   }
 
@@ -813,7 +823,8 @@ async function run() {
       model_risk: 'A reviewer scanning displayed values would reasonably read this as exactly zero, potentially missing a real, small, nonzero driver.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Cell value rounds to 0% under its own number format', escalation_flag: false,
-      urgency: 'Next scheduled review', confidence: 60
+      urgency: 'Next scheduled review', confidence: 60,
+      ...buildRootCauseFields('T0-DISPLAYZERO-001', displayZeroCheck, { commonRemediationAction: 'Add a decimal place to the number format, or confirm the near-zero value is genuinely intended.' })
     });
   }
 
@@ -839,7 +850,8 @@ async function run() {
       model_risk: 'A reviewer scanning raw displayed values without noticing the format can misread magnitude by orders of magnitude.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Number format scales the displayed value with no embedded unit label', escalation_flag: false,
-      urgency: 'Next scheduled review', confidence: 40
+      urgency: 'Next scheduled review', confidence: 40,
+      ...buildRootCauseFields('T0-UNITHIDE-001', customFormatCheck, { commonRemediationAction: 'Confirm the header states the display scale, or add a unit suffix directly into the number format.' })
     });
   }
 
@@ -861,7 +873,8 @@ async function run() {
       model_risk: 'A revolver mechanism that doesn\'t correctly draw to cover a cash shortfall (or unnecessarily draws when cash is ample) misstates liquidity and interest expense.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Revolver balance and cash balance show an inconsistent relationship in the same period', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 50
+      urgency: 'Before next reliance', confidence: 50,
+      ...buildRootCauseFields('T0-REVCASH-001', revCashCheck, { commonRemediationAction: 'Confirm the revolver draw/repayment logic correctly responds to the cash position each period.' })
     });
   }
 
@@ -884,7 +897,8 @@ async function run() {
       model_risk: 'Evaluates correctly today (Excel treats a blank as 0), but any future stray value in that cell would silently flow into the opening balance with no warning.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Opening-balance formula references a genuinely blank cell rather than an explicit zero', escalation_flag: false,
-      urgency: 'Next scheduled review', confidence: 55
+      urgency: 'Next scheduled review', confidence: 55,
+      ...buildRootCauseFields('T0-BLANKBOUND-001', blankBoundaryCheck, { commonRemediationAction: 'Replace the blank-cell reference with an explicit 0.' })
     });
   }
 
@@ -910,7 +924,8 @@ async function run() {
       model_risk: 'A plug can mask a genuine error elsewhere in the model by absorbing the discrepancy into an unexplained residual line rather than surfacing it.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Cell is labelled as a balancing/plug figure and computes a residual', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 55
+      urgency: 'Before next reliance', confidence: 55,
+      ...buildRootCauseFields('T0-BSPLUG-001', plugCheck, { commonRemediationAction: 'Confirm what this line represents commercially; trace any unresolved discrepancy to its root cause instead of leaving it as a plug.' })
     });
   }
 
@@ -932,7 +947,8 @@ async function run() {
       model_risk: 'A skipped or deleted period can silently break period-over-period formulas that assume a continuous, regularly-spaced sequence.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Date/period sequence shows a gap well beyond the row\'s established spacing', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 60
+      urgency: 'Before next reliance', confidence: 60,
+      ...buildRootCauseFields('T0-PERIODGAP-001', periodGapCheck, { commonRemediationAction: 'Confirm whether a period was intentionally skipped, or a column/record was deleted without adjusting the surrounding logic.' })
     });
   }
 
@@ -954,7 +970,8 @@ async function run() {
       model_risk: 'A range containing a header, label, or boolean flag alongside real numeric data will silently distort the statistic under STDEVA/VARA, without producing any visible error.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Formula uses STDEVA()/VARA() rather than STDEV()/VAR()', escalation_flag: false,
-      urgency: 'Next scheduled review', confidence: 65
+      urgency: 'Next scheduled review', confidence: 65,
+      ...buildRootCauseFields('T0-STDEVA-001', stdevaCheck, { commonRemediationAction: 'Confirm this is intentional, not a mistyped or pasted function name.' })
     });
   }
 
@@ -1002,7 +1019,8 @@ async function run() {
       model_risk: 'An input cell locked under active protection blocks legitimate editing; a formula cell left unlocked defeats the purpose of protecting the sheet.',
       key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
       root_cause: 'Cell lock state does not match its apparent input/formula role under active sheet protection', escalation_flag: false,
-      urgency: 'Next scheduled review', confidence: 55
+      urgency: 'Next scheduled review', confidence: 55,
+      ...buildRootCauseFields('T0-CELLLOCK-001', cellLockCheck, { commonRemediationAction: 'Confirm whether the locked/unlocked state of each flagged cell is intentional.' })
     });
   }
 

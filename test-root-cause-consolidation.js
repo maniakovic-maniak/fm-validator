@@ -13,6 +13,7 @@ function run() {
     [{ sheet: 'Model', row: 30 }, 'Model!Row30', 'row-based fallback with no terminalCells'],
     [{ notASheet: 'x' }, null, 'no sheet at all -> null'],
     [{ sheet: 'Model' }, null, 'sheet present but no recognizable cell field -> null'],
+    [{ componentCell: 'P&L!B10' }, 'P&L!B10', 'ALREADY-formatted "Sheet!Cell" string with no separate sheet field (the real revenue-double-counting bug found and fixed)'],
   ];
   for (const [input, expected, desc] of cases) {
     const got = extractCellRef(input);
