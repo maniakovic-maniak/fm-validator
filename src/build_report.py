@@ -433,8 +433,17 @@ def build_report(data_path, output_path):
     set_row(ws1,r,18); r+=1
 
     _pri_rank={'P1':0,'P2':1,'P3':2}
+    # P1/P2/P3 framework renewal, Tier 2 item 3: risk_weighted_total ranks
+    # WITHIN a priority tier — the memo's own explicit ask ("a weighted
+    # score may be used to rank P2 and P3 findings... but a numerical
+    # score must not create a P1 by itself"). Placed right after the
+    # priority-tier rank, before the pre-existing key_output_impact/
+    # fscore tiebreakers, which still apply for any finding that wasn't
+    # risk-scored (e.g. a non-Confirmed-Finding record_type, by design —
+    # see risk-scoring.js's own gating).
     top5 = sorted(p1+p2+p3, key=lambda f:(
         _pri_rank.get(priority(f),3),
+        -(f.get('risk_weighted_total') or 0),
         0 if str(f.get('key_output_impact','')).lower() in ('yes','true','high') else 1,
         -(f.get('fscore') or 0)))[:5]
     _pri_style={'P1':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}

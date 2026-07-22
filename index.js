@@ -22,6 +22,7 @@ const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
+const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
 const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats } = require('./src/utils/finding-history');
@@ -1550,6 +1551,14 @@ async function run() {
   // Finding' is eligible for a P1/P2/P3 priority downstream — see
   // priority() in build_report.py (Tier 1 item 2).
   assignRecordTypes(allFlagged);
+
+  // ── P1/P2/P3 framework renewal, Tier 2 item 3 ────────────────────────────
+  // 4-dimension risk score (Decision consequence, Exposure, Propagation,
+  // Control weakness) — used only to RANK findings within their already-
+  // assigned P2/P3 tier (see the sort key in build_report.py), never to
+  // move a finding between tiers. Only record_type === 'Confirmed
+  // Finding' gets scored, consistent with Tier 1's own gating.
+  assignRiskScores(allFlagged);
 
   // ── P1/P2/P3 framework renewal, Tier 2 item 2 ────────────────────────────
   // Cross-run Closed/New/Regressed tracking. Depends directly on Tier 2

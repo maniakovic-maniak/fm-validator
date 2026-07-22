@@ -35,6 +35,7 @@ const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
+const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
 const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats } = require('./src/utils/finding-history');
@@ -1624,6 +1625,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // ── P1/P2/P3 framework renewal, Tier 1 item 1 ──────────────────────────
     // See the matching comment in index.js for the full rationale.
     assignRecordTypes(allFlagged);
+
+    // ── P1/P2/P3 framework renewal, Tier 2 item 3 ──────────────────────────
+    // See the matching comment in index.js for the full rationale.
+    assignRiskScores(allFlagged);
 
     // ── P1/P2/P3 framework renewal, Tier 2 item 2 ──────────────────────────
     // See the matching comment in index.js for the full rationale.
