@@ -37,6 +37,7 @@ const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-count
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
+const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats } = require('./src/utils/finding-history');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -484,7 +485,14 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Sign-convention check failed:', e.message); return { applicable:false, flaggedCount:0, results:[] }; } })();
   if (signConventionCheck.applicable && signConventionCheck.results.length > 0) {
     signConventionCheck.results.forEach((r, i) => {
-      const id = `T0-SIGNCONV-${String(i + 1).padStart(3, '0')}`;
+      // FIX (found while designing cross-run tracking, before it could
+      // cause silent damage): this ID was positional (T0-SIGNCONV-001,
+      // -002, ... by array index), which is NOT stable across runs — if
+      // the SET of flagged groups changes (e.g. "Cash balance" becomes
+      // newly flagged), "Capex" could shift from index 1 to index 2,
+      // breaking cross-run identity entirely. Label-derived instead,
+      // matching the convention T0-BALNEG already used correctly.
+      const id = `T0-SIGNCONV-${r.label.replace(/\s+/g, '').toUpperCase().slice(0, 10)}-001`;
       allFlagged.push({
         id,
         label: `"${r.label}" appears with inconsistent sign across the workbook`,
@@ -1617,6 +1625,23 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // See the matching comment in index.js for the full rationale.
     assignRecordTypes(allFlagged);
 
+    // ── P1/P2/P3 framework renewal, Tier 2 item 2 ──────────────────────────
+    // See the matching comment in index.js for the full rationale.
+    const crossRunStats = (() => {
+      try {
+        const priorHistory = loadFindingHistory(originalName);
+        const stats = computeCrossRunStats(allFlagged, priorHistory);
+        saveFindingHistory(originalName, stats.updatedHistory);
+        return stats;
+      } catch (e) {
+        console.error('   \u26a0\ufe0f  Cross-run tracking failed (this run\'s findings are unaffected, history for next run may not update):', e.message);
+        return { closed: [], new: [], regressed: [], stillOpen: [] };
+      }
+    })();
+    if (crossRunStats.regressed.length > 0) {
+      console.log(`   \u26a0\ufe0f  ${crossRunStats.regressed.length} previously-closed item(s) have reappeared (regressed) since a prior run`);
+    }
+
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
     const ruleResults = [...t1Results, ...t2Results].map(r => ({
@@ -1674,6 +1699,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       ruleResults,
       errorScan,
       redundantInputs,
+      crossRunStats,
       orphanSheets,
       namedRangeAudit,
       formulaDeepDive,

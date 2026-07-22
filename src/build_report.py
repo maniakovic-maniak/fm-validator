@@ -109,6 +109,7 @@ def build_report(data_path, output_path):
         return v
     findings=[{k:san(v) for k,v in f.items()} for f in d.get("findings",[])]
     t0           = d.get('tier0',{})
+    crossRunStats = d.get('crossRunStats', {'closed':[], 'new':[], 'regressed':[], 'stillOpen':[]})
     modelName    = d.get('modelName','Financial Model')
     modelType    = d.get('modelType','unknown')
     modelIndustry= d.get('modelIndustry','')
@@ -323,6 +324,26 @@ def build_report(data_path, output_path):
     # Performed table's own logic; this just surfaces the same counts
     # more prominently, right where a reader looks first.
     merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2 · {len(p3)} P3' + (f' · {critical_query_open} Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open>0 else ''),sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+    set_row(ws1,r,20); r+=1
+    # ── P1/P2/P3 framework renewal, Tier 2 item 2 ────────────────────────────
+    # Cross-run Closed/New/Regressed — previously the report only ever
+    # showed OPEN counts, giving no way to confirm what was actually fixed
+    # between runs versus what simply wasn't flagged this time for an
+    # unrelated reason. A first run (no prior history to compare against)
+    # is called out explicitly rather than silently showing "0 closed, 0
+    # regressed" in a way that could be misread as "nothing changed".
+    _crn_closed = len(crossRunStats.get('closed', []))
+    _crn_new = len(crossRunStats.get('new', []))
+    _crn_regressed = len(crossRunStats.get('regressed', []))
+    _crn_still_open = len(crossRunStats.get('stillOpen', []))
+    _is_first_run = (_crn_closed == 0 and _crn_regressed == 0 and _crn_still_open == 0 and _crn_new > 0)
+    if _is_first_run:
+        _crn_text = f'First run for this model — no prior report to compare against ({_crn_new} finding(s) established as the baseline).'
+    else:
+        _crn_text = f'{_crn_closed} closed · {_crn_new} new · {_crn_still_open} still open since the last run'
+        if _crn_regressed > 0:
+            _crn_text += f' · \u26a0 {_crn_regressed} regressed (previously closed, now reappeared)'
+    merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run:   ',_crn_text,sz=10,col=CHARCOAL,bg=(LIGHT_RED if _crn_regressed>0 else PANEL_GREY),v='center')
     set_row(ws1,r,20); r+=1
     set_row(ws1,r,8); r+=1
 

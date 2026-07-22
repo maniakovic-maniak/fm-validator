@@ -13,7 +13,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     originalName, modelType, modelIndustry, modelPurpose,
     modelSummary, tier0, auditLog, overallAssessment,
     igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets, namedRangeAudit, formulaDeepDive, reasonableness, duplicateSheets, vbaReview,
-    deepAccountingResolvedSheets
+    deepAccountingResolvedSheets, crossRunStats
   } = meta;
 
   // Enrich findings with F-score using the cell-level index built by Tier 0.
@@ -80,6 +80,11 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     // used. Falls back to an empty resolution if not supplied, so older
     // callers that don't pass this yet don't break.
     deepAccountingResolvedSheets: deepAccountingResolvedSheets || { resolvedMap: {}, unresolvedCategories: [] },
+    // P1/P2/P3 framework renewal, Tier 2 item 2 — cross-run Closed/New/
+    // Regressed tracking. Only the counts and a small sample are needed
+    // for dashboard display; the full fingerprint detail stays in the
+    // local history file, not round-tripped through the report itself.
+    crossRunStats: crossRunStats || { closed: [], new: [], regressed: [], stillOpen: [] },
     auditLog:        auditLog || []
   };
 
