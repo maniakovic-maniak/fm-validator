@@ -436,6 +436,17 @@ Use `"Unknown"` for key_output_impact when this cannot be determined.
 
 Assign uncertain status when confidence falls below 60.
 
+**A fatal- or critical-severity matter requires confidence 80+ ("strong
+direct evidence") to be recorded as a Confirmed Finding.** At 60–79 —
+persuasive but incomplete — it must be recorded as a `Critical Query`
+instead: it still blocks reliance with the same force as a P1, but is
+honestly represented as an unconfirmed serious matter rather than an
+established defect. This asymmetry is deliberate and applies to
+fatal/critical severity only — a high- or medium-severity finding at
+60–79 is still an ordinary Confirmed Finding; the stricter evidence bar
+exists specifically for the most serious claims, which carry the most
+weight when relied upon.
+
 ## Record Type Classification
 
 Priority (P1/P2/P3) answers "how severe is this." `record_type` answers a
@@ -446,7 +457,7 @@ so it is never mistaken for an established defect. Assign exactly one:
 
 | record_type | When to use it | Relationship to existing fields |
 |---|---|---|
-| `Confirmed Finding` | A defect or control weakness the available evidence actually supports | Requires status `fail` and confidence 60+ |
+| `Confirmed Finding` | A defect or control weakness the available evidence actually supports | Requires status `fail` and confidence 60+ (80+ for a fatal/critical-severity matter — see the Confidence Scoring Guide's evidence bar for serious claims) |
 | `Query` | More information or testing is needed before a defect can be confirmed either way | Typically confidence 30–59; not yet material enough to block reliance |
 | `Critical Query` | An unresolved question that COULD materially affect a key output or decision, even though nothing is confirmed yet | Use whenever a low-confidence (below 60) result touches a key output, valuation, debt, liquidity, covenant, or ownership/dilution area — do not let low confidence quietly demote a potentially material matter to an ordinary Query |
 | `Observation` | A real, noteworthy model characteristic that is not itself a defect | Complexity indicators (nested IFs, IFERROR density, long formulas, hardcoded constants) belong here unless testing shows an actual resulting error — these place a formula into a higher-attention population, they do not by themselves justify a priority |

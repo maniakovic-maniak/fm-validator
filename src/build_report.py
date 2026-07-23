@@ -143,6 +143,57 @@ def build_report(data_path, output_path):
     except Exception:
         checklist_rules=[]
 
+    # ── P1/P2/P3 framework renewal, Tier 3 ───────────────────────────────────
+    # Four named readiness gates from the memo's own "Not Ready for
+    # Reliance" list, beyond the P1/Critical-Query gates already built in
+    # Tier 1. Each is computed from data that already exists — no new
+    # per-check instrumentation was needed for any of these.
+
+    # 1. "An incomplete mandatory critical procedure" — confirmed directly
+    # against the real checklist.json (not the stale, unused duplicate at
+    # checklists/checklist.json — a separate hygiene item, noted but not
+    # fixed here): 43 rules across Tier 1+2 are tagged severity=='fatal'
+    # or sit under a "0. Fatal gate" source_section. If any of these 43
+    # specific rules has a status other than 'pass' in ruleResults, that
+    # is a distinct signal from the overall igReadiness% — even a 95%-
+    # complete audit can still have one of these unresolved.
+    _mandatory_critical_ids = {r['id'] for r in checklist_rules
+        if r.get('severity')=='fatal' or 'fatal gate' in str(r.get('source_section','')).lower()}
+    _rule_status_by_id = {r.get('id'): r.get('status') for r in ruleResults}
+    _incomplete_mandatory = [rid for rid in _mandatory_critical_ids
+        if _rule_status_by_id.get(rid) not in ('pass',)]
+    mandatory_procedure_gap = len(_incomplete_mandatory) > 0
+
+    # 2. "An unaudited critical module" — from deepAcctSheets'
+    # unresolvedCategories, filtered to only the categories that are
+    # UNIVERSALLY expected in any financial model (Balance Sheet, Cash
+    # Flow, Income Statement, Debt, Equity). Depreciation & Tax and
+    # Leases are deliberately excluded here — confirmed via real testing
+    # this session that these are commonly, legitimately not-applicable
+    # (a pre-operational development model with no depreciation schedule
+    # yet, a business with no material leases), not an audit gap.
+    _universally_critical_modules = {'Balance Sheet','Cash Flow','Income Statement','Debt','Equity'}
+    _unresolved_critical_modules = [c for c in deepAcctSheets.get('unresolvedCategories',[])
+        if c in _universally_critical_modules]
+    critical_module_gap = len(_unresolved_critical_modules) > 0
+
+    # 3. "An unreconciled key output" — any finding from the key-output
+    # dependency-chain check (T0-CHAIN-*), which traces IRR/NPV/EBITDA/
+    # DSCR/MOIC-style cells for a chain that dead-ends at a blank cell.
+    key_output_gap = any(str(f.get('id','')).startswith('T0-CHAIN') for f in findings)
+
+    # 4. "Required reviewer approval" — this tool cannot manufacture a
+    # human sign-off. Deliberately opt-in, defaulting to NOT approved:
+    # an explicit reviewerApproved=true must be supplied in the payload
+    # for this gate to clear. This is a genuine behaviour change, not
+    # just an additive signal — the highest reliance tier becomes
+    # unreachable through automation alone unless a human explicitly
+    # confirms approval, which is exactly what the memo's own exhaustive
+    # AND-clause for "Ready for Reliance" requires ("Required Reviewer
+    # Approval Is Complete" is one of eight mandatory conjuncts).
+    reviewer_approved = bool(d.get('reviewerApproved', False))
+    reviewer_approval_gap = not reviewer_approved
+
     # ── P1/P2/P3 framework renewal, Tier 1 item 2 ────────────────────────────
     # Severity alone used to decide P1/P2/P3 for every finding. Per the
     # renewed framework: only a Confirmed Finding is eligible for a
@@ -209,14 +260,24 @@ def build_report(data_path, output_path):
     # is the memo's own explicit principle, distinct from ordinary Queries/
     # Observations, which do NOT gate reliance at all.
     critical_query_open = len(critical_queries)
+    # ── P1/P2/P3 framework renewal, Tier 3 ───────────────────────────────────
+    # The three substantive named gates (mandatory critical procedure,
+    # critical module, key output) block reliance with the SAME severity
+    # as an open P1 or unresolved Critical Query — the memo lists all of
+    # these together under "Not Ready for Reliance", not as a lesser tier.
+    other_gates_open = mandatory_procedure_gap or critical_module_gap or key_output_gap
     # Reliance classification (V11 1.1) — component of the audit conclusion,
     # stated factually. Hard rule: a model cannot be classified reliance-ready
     # for lender/investor use or transaction execution while any P1 item is
     # open, OR while any Critical Query remains unresolved.
-    if p1_open > 0 or critical_query_open > 0:
-        _blocker_desc = (f'{p1_open} P1 item(s)' if p1_open > 0 else '') + \
-                        (' and ' if p1_open > 0 and critical_query_open > 0 else '') + \
-                        (f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open > 0 else '')
+    if p1_open > 0 or critical_query_open > 0 or other_gates_open:
+        _blocker_parts = []
+        if p1_open > 0: _blocker_parts.append(f'{p1_open} P1 item(s)')
+        if critical_query_open > 0: _blocker_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}')
+        if mandatory_procedure_gap: _blocker_parts.append(f'{len(_incomplete_mandatory)} incomplete mandatory critical procedure(s)')
+        if critical_module_gap: _blocker_parts.append(f'{len(_unresolved_critical_modules)} unaudited critical module(s) ({", ".join(_unresolved_critical_modules)})')
+        if key_output_gap: _blocker_parts.append('an unreconciled key output')
+        _blocker_desc = ', '.join(_blocker_parts)
         if igReadiness >= 60:
             verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=DARK_BLUE
             verdict_text=(f'{_blocker_desc} remain open — this model cannot be classified reliance-ready for management, lender or investor use until these are resolved (or, for a Critical Query, confirmed either way) and retested. '
@@ -225,10 +286,22 @@ def build_report(data_path, output_path):
             verdict_short='NOT RELIANCE-READY'; verdict_bg=DARK_BLUE
             verdict_text=(f'{_blocker_desc} open and {igReadiness}% of planned procedures completed. Both open reliance blockers and audit coverage prevent reliance at any level. '
                           f'Resolve these items and complete outstanding procedures before reassessment.')
-    elif igReadiness >= 95:
+    elif igReadiness >= 95 and not reviewer_approval_gap:
         verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=MID_BLUE
-        verdict_text=(f'No P1 items or unresolved Critical Queries open and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
+        verdict_text=(f'No P1 items, unresolved Critical Queries, or other reliance blockers open, reviewer approval recorded, and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
                       f'{p2_open} P2 item(s) remain and should be resolved or formally waived as part of transaction close.')
+    elif igReadiness >= 95 and reviewer_approval_gap:
+        # ── P1/P2/P3 framework renewal, Tier 3 ─────────────────────────────
+        # The memo's own exhaustive AND-clause for the highest reliance
+        # tier explicitly includes "Required Reviewer Approval Is
+        # Complete" as one of eight mandatory conjuncts. This tool cannot
+        # manufacture a human sign-off, so this tier is deliberately
+        # capped one level down until an explicit reviewerApproved=true
+        # is supplied — a genuine, disclosed behaviour change, not a
+        # silent one.
+        verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=MID_BLUE
+        verdict_text=(f'All automated gates pass and {igReadiness}% of planned procedures completed ({cov_pass} passed), but required reviewer approval has not yet been recorded — '
+                      f'this caps the model one tier below Transaction Execution readiness until a reviewer explicitly signs off. {p2_open} P2 item(s) remain.')
     elif igReadiness >= 80:
         verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=MID_BLUE
         verdict_text=(f'No P1 items or unresolved Critical Queries open; {igReadiness}% of planned procedures completed. Outstanding items: {cov_unc} uncertain and {cov_np} not-run procedures, {p2_open} open P2 item(s). '
@@ -302,16 +375,24 @@ def build_report(data_path, output_path):
     # report. Re-derived here independently (rather than assuming
     # _blocker_desc from the branch above is in scope, which it would not
     # be when p1_open==0 and critical_query_open==0).
-    _open_desc = (f'{p1_open} open P1 finding(s)' if p1_open>0 else '') + \
-                 (' and ' if p1_open>0 and critical_query_open>0 else '') + \
-                 (f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open>0 else '')
-    _has_blocker = p1_open>0 or critical_query_open>0
+    # Tier 3 extension of the same fix: the three new named gates
+    # (mandatory procedure, critical module, key output) must appear in
+    # these fields too, or the Reason line would silently omit a gate
+    # the verdict banner right above it is blocking on.
+    _open_parts = []
+    if p1_open>0: _open_parts.append(f'{p1_open} open P1 finding(s)')
+    if critical_query_open>0: _open_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}')
+    if mandatory_procedure_gap: _open_parts.append(f'{len(_incomplete_mandatory)} incomplete mandatory critical procedure(s)')
+    if critical_module_gap: _open_parts.append(f'{len(_unresolved_critical_modules)} unaudited critical module(s)')
+    if key_output_gap: _open_parts.append('an unreconciled key output')
+    _open_desc = ', '.join(_open_parts)
+    _has_blocker = p1_open>0 or critical_query_open>0 or other_gates_open
     _reason = (f'{_open_desc} and {igReadiness}% audit completion' if _has_blocker
                else f'{igReadiness}% audit completion, {cov_unc} procedure(s) uncertain, {cov_np} not run' if igReadiness<100 or cov_unc or cov_np
                else 'All planned procedures completed with no open P1 findings or unresolved Critical Queries')
-    _next_step = ('Close all P1 items and resolve all Critical Queries (confirming whether a defect exists either way), then complete outstanding procedures and reassess.' if _has_blocker
+    _next_step = ('Close all P1 items, resolve all Critical Queries (confirming whether a defect exists either way), and clear any incomplete mandatory procedures, unaudited critical modules, and unreconciled key outputs — then complete outstanding procedures and reassess.' if _has_blocker
                   else 'Resolve remaining P2 items and complete outstanding procedures before wider reliance.' if igReadiness<95
-                  else 'No further action required for this reliance level.')
+                  else ('Record reviewer approval to reach Transaction Execution readiness.' if reviewer_approval_gap else 'No further action required for this reliance level.'))
     merge(ws1,f'B{r}:I{r}',f'Status:   {_verdict_display}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
     fill_range(ws1,r,2,r,9,verdict_bg); set_row(ws1,r,26); r+=1
     merge_bold_prefix(ws1,f'B{r}:I{r}','Reason:   ',_reason,sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
@@ -351,6 +432,9 @@ def build_report(data_path, output_path):
     _blockers=[]
     if p1_open>0: _blockers.append('open P1 findings')
     if critical_query_open>0: _blockers.append('unresolved Critical Queries')
+    if mandatory_procedure_gap: _blockers.append('incomplete mandatory critical procedures')
+    if critical_module_gap: _blockers.append('unaudited critical modules')
+    if key_output_gap: _blockers.append('an unreconciled key output')
     if t0.get('stats',{}).get('totalExternalLinks',0)>0: _blockers.append('external workbook links')
     if len(errorScan)>0: _blockers.append('formula errors')
     if cov_unc>0: _blockers.append('incomplete audit coverage')

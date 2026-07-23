@@ -74,6 +74,26 @@ function classifyRecordType(finding) {
     return mentionsKeyOutputArea(finding) ? 'Critical Query' : 'Query';
   }
 
+  // ── P1/P2/P3 framework renewal, Tier 3 ─────────────────────────────
+  // The memo's evidence-quality principle, applied to the P1 tier
+  // specifically: "a potentially serious matter supported by
+  // insufficient evidence should normally remain a Critical Query
+  // until confirmed." A fatal/critical-severity finding whose
+  // confidence sits at 60-79 — "persuasive but incomplete evidence"
+  // per soul.md's own Confidence Scoring Guide — must not become a
+  // P1-eligible Confirmed Finding on that evidence; it demotes to
+  // Critical Query, which still blocks reliance with the same force
+  // as a P1 (Tier 1 item 3's gate), but honestly represents the
+  // matter as unconfirmed rather than established. Only 80+ ("strong
+  // direct evidence") supports the P1 tier. Deliberately scoped to
+  // fatal/critical ONLY: a high/medium-severity finding at 60-79 still
+  // becomes an ordinary P2 Confirmed Finding — the memo's principle is
+  // specifically about SERIOUS matters needing stronger evidence, not
+  // about raising the bar for every finding.
+  if ((severity === 'fatal' || severity === 'critical') && confidence < 80) {
+    return 'Critical Query';
+  }
+
   // Confidence 60+ with a real severity assigned is treated as a
   // Confirmed Finding — matching how these checks have been built and
   // tested all session (a real synthetic + real-file verification

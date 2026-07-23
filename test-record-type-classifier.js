@@ -11,6 +11,12 @@ function run() {
     ['high confidence, real severity -> Confirmed Finding', { confidence: 80, severity: 'high' }, 'Confirmed Finding'],
     ['high confidence, low severity -> Confirmed Finding', { confidence: 100, severity: 'low' }, 'Confirmed Finding'],
     ['no severity, high confidence -> Observation (fallback)', { confidence: 90 }, 'Observation'],
+    // Tier 3: P1-severity confidence demotion — the memo's evidence-quality
+    // principle applied to the P1 tier specifically
+    ['critical severity at marginal confidence (60-79) -> Critical Query, NOT P1-eligible', { confidence: 65, severity: 'critical' }, 'Critical Query'],
+    ['fatal severity at marginal confidence -> Critical Query', { confidence: 70, severity: 'fatal' }, 'Critical Query'],
+    ['critical severity at strong confidence (80+) -> Confirmed Finding', { confidence: 80, severity: 'critical' }, 'Confirmed Finding'],
+    ['high severity at the same marginal confidence stays Confirmed Finding (demotion is scoped to fatal/critical only)', { confidence: 65, severity: 'high' }, 'Confirmed Finding'],
   ];
 
   let allPass = true;
