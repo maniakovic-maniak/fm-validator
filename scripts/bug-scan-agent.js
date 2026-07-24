@@ -341,7 +341,11 @@ const SELF_RETRACTION_PATTERNS = [
   /\bno\s+real\s+issue\b/i,
   /\bskipping\b/i,
   /\bretracted\b/i,
-  /\bnot\s+flagging\b/i,
+  // FIX: found via a real run — this only matched the gerund form "not
+  // flagging", not the past-participle form "not flagged [as...]" that
+  // an actual self-retracted finding used ("not flagged as the primary
+  // bug"), which slipped through undetected.
+  /\bnot\s+flagg(?:ing|ed)\b/i,
   /\bself-correction\b/i,
 ];
 

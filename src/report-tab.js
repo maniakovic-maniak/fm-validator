@@ -84,7 +84,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     // Regressed tracking. Only the counts and a small sample are needed
     // for dashboard display; the full fingerprint detail stays in the
     // local history file, not round-tripped through the report itself.
-    crossRunStats: crossRunStats || { closed: [], new: [], regressed: [], stillOpen: [] },
+    crossRunStats: crossRunStats || { closed: [], new: [], regressed: [], stillOpen: [], isFirstRun: true },
     auditLog:        auditLog || []
   };
 

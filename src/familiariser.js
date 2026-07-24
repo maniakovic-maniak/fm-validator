@@ -185,7 +185,11 @@ async function familiariseModel(parsed) {
   }
   {
     const e = lastError;
-    // Return a minimal fallback so the pipeline continues
+    // Return a minimal fallback so the pipeline continues. Include the
+    // terminal failure reason directly in validation_focus — previously
+    // captured into e but never actually used anywhere below, so the
+    // final reason after all retries were exhausted was discarded
+    // beyond the per-attempt console.error during the loop.
     return {
       model_purpose: 'Unknown — familiarisation failed',
       model_type: 'generic',
@@ -198,7 +202,7 @@ async function familiariseModel(parsed) {
       sheet_map: {},
       immediate_observations: [],
       data_quality: 'low',
-      validation_focus: 'Full validation required — model type could not be determined'
+      validation_focus: `Full validation required — model type could not be determined (familiarisation failed after ${MAX_ATTEMPTS} attempt(s): ${e ? e.message : 'unknown error'})`
     };
   }
 }

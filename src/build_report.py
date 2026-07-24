@@ -109,7 +109,7 @@ def build_report(data_path, output_path):
         return v
     findings=[{k:san(v) for k,v in f.items()} for f in d.get("findings",[])]
     t0           = d.get('tier0',{})
-    crossRunStats = d.get('crossRunStats', {'closed':[], 'new':[], 'regressed':[], 'stillOpen':[]})
+    crossRunStats = d.get('crossRunStats', {'closed':[], 'new':[], 'regressed':[], 'stillOpen':[], 'isFirstRun': True})
     modelName    = d.get('modelName','Financial Model')
     modelType    = d.get('modelType','unknown')
     modelIndustry= d.get('modelIndustry','')
@@ -417,9 +417,19 @@ def build_report(data_path, output_path):
     _crn_new = len(crossRunStats.get('new', []))
     _crn_regressed = len(crossRunStats.get('regressed', []))
     _crn_still_open = len(crossRunStats.get('stillOpen', []))
-    _is_first_run = (_crn_closed == 0 and _crn_regressed == 0 and _crn_still_open == 0 and _crn_new > 0)
+    # FIX: found via a real bug-scan run. Previously inferred from the
+    # counts above (new>0, everything else 0) — but a genuine first run
+    # on a perfectly clean model has ZERO findings of every kind, which
+    # is indistinguishable from a later run where everything got fixed
+    # using counts alone. Uses the real signal (was there any prior
+    # history at all) when present; falls back to the old inference only
+    # for a payload predating this field, for backward compatibility.
+    _is_first_run = crossRunStats.get('isFirstRun',
+        _crn_closed == 0 and _crn_regressed == 0 and _crn_still_open == 0 and _crn_new > 0)
     if _is_first_run:
-        _crn_text = f'First run for this model — no prior report to compare against ({_crn_new} finding(s) established as the baseline).'
+        _crn_text = (f'First run for this model — no prior report to compare against ({_crn_new} finding(s) established as the baseline).'
+                     if _crn_new > 0 else
+                     'First run for this model — no prior report to compare against. No findings on this run.')
     else:
         _crn_text = f'{_crn_closed} closed · {_crn_new} new · {_crn_still_open} still open since the last run'
         if _crn_regressed > 0:
@@ -463,6 +473,30 @@ def build_report(data_path, output_path):
         for cc in range(2,10): ws1.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(ws1,_lbl_row,16); set_row(ws1,_val_row,26); r=_val_row+1
     set_row(ws1,r,10); r+=1
+
+    # ── KPI cards — Row A2: Since Last Run (Closed/New/Still Open/Regressed) ──
+    # P1/P2/P3 framework renewal, Tier 2 item 2 (visibility upgrade): closed
+    # issues previously lived only in a single prose line ("Since last run:
+    # 6 closed · 0 new..."), with none of the prominence given to Open
+    # issues above. Given the same big-number KPI-card treatment here —
+    # closed movement is exactly the kind of good-news signal that should
+    # be as easy to spot at a glance as an open P1. Skipped entirely on a
+    # genuine first run, where these numbers (0 closed, 0 regressed, 0
+    # still open) would be meaningless rather than informative — the
+    # existing "Since last run:" text line below already covers that case
+    # with its own explicit "no prior report to compare against" message.
+    if not _is_first_run:
+        merge(ws1,f'B{r}:I{r}','Since Last Run',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')
+        set_row(ws1,r,14); r+=1
+        _crn_lbl_row, _crn_val_row = r, r+1
+        kpi_card(ws1,_crn_lbl_row,_crn_val_row,2,3,'CLOSED',_crn_closed,fmt='#,##0;[Red](#,##0);-',val_col=(GREEN if _crn_closed>0 else CHARCOAL))
+        kpi_card(ws1,_crn_lbl_row,_crn_val_row,4,5,'NEW',_crn_new,fmt='#,##0;[Red](#,##0);-',val_col=(AMBER if _crn_new>0 else CHARCOAL))
+        kpi_card(ws1,_crn_lbl_row,_crn_val_row,6,7,'STILL OPEN',_crn_still_open,fmt='#,##0;[Red](#,##0);-',val_col=CHARCOAL)
+        kpi_card(ws1,_crn_lbl_row,_crn_val_row,8,9,'REGRESSED',_crn_regressed,fmt='#,##0;[Red](#,##0);-',val_col=(RED if _crn_regressed>0 else CHARCOAL))
+        for rr in (_crn_lbl_row,_crn_val_row):
+            for cc in range(2,10): ws1.cell(rr,cc).border=B(col=PANEL_BORDER)
+        set_row(ws1,_crn_lbl_row,16); set_row(ws1,_crn_val_row,26); r=_crn_val_row+1
+        set_row(ws1,r,10); r+=1
 
     # ── KPI cards — Row B: Formula complexity (5×1col) + Input control (3col) ─
     merge(ws1,f'B{r}:F{r}','Formula Complexity',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')

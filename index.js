@@ -183,7 +183,15 @@ async function run() {
   const allFlagged = [];
   const allFixes   = [];
   for (const f of [...t1Failures, ...t2Failures]) {
-    const key = `${f.id}-${f.sheet || ""}`;
+    // FIX: found via a real bug-scan run — when f.id is undefined (a
+    // check that omits it), the key collapsed to "undefined-SheetName",
+    // and two different findings from different checks with no id set
+    // could collide on that same key, silently dropping one from the
+    // report. Falls back to the finding's own reason/label text (still
+    // not perfectly unique, but far less likely to collide than a
+    // constant "undefined" for every id-less finding) rather than
+    // relying on id being present.
+    const key = `${f.id || f.reason || f.label || JSON.stringify(f)}-${f.sheet || ""}`;
     if (!seenKeys.has(key)) { seenKeys.add(key); allFlagged.push(f); }
   }
   // Captured here, before any T0-* deterministic findings (redundant inputs,
@@ -1611,17 +1619,28 @@ async function run() {
   }
 
 
+  // FIX: found via a real bug-scan run — '129 rules' and the '141'
+  // denominator below had both silently drifted from the actual
+  // checklist (confirmed directly: 18 Tier 1 + 141 Tier 2 = 159 total —
+  // '129' was stale entirely, and '141' is actually just the Tier 2
+  // count, not the full checklist total it was being used as). Derived
+  // from the same authoritative source used everywhere else instead of
+  // a second, independently-drifting hardcoded copy.
+  const _checklistCounts = require('./config/checklist.json');
+  const _tier2RuleCount = _checklistCounts.tier2.length;
+  const _totalRuleCount = _checklistCounts.tier1.length + _checklistCounts.tier2.length;
+
   // Build audit log
   const auditLog = [
     { timestamp: new Date().toISOString().substr(11,8), step: 'Parse', action: `Parsed ${parsed.sheetNames.length} sheets`, artifact: originalName, result: '✓ Pass', duration: '', notes: `${parsed.sheetNames.length} sheets` },
     { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 0', action: 'Formula scan', artifact: 'All sheets', result: '✓ Pass', duration: tier0.elapsed || '', notes: `${tier0.stats.uniqueFormulaCount} unique formulas` },
     { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: originalName, result: '✓ Pass', duration: '', notes: modelType },
     { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Pass} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: '' },
-    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: '3 batches · 129 rules', artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` },
+    { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `3 batches · ${_tier2RuleCount} rules`, artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Pass} pass · ${t2Failures.length} issues` },
     { timestamp: new Date().toISOString().substr(11,8), step: 'VBA Review', action: 'Macro extraction + risk scan', artifact: vbaReview.hasVbaProject ? `${vbaReview.moduleCount} module(s)` : 'No VBA project', result: !vbaReview.applicable ? '⚠ Skipped' : (vbaReview.findings && vbaReview.findings.length ? '⚠ Issues' : '✓ Pass'), duration: '', notes: vbaReview.note || '' }
   ];
   const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
-  const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - checklistFindingCount) / 141) * 100);
+  const auditCompletion = t2Meta.audit_completion_percent || Math.round(((_totalRuleCount - checklistFindingCount) / _totalRuleCount) * 100);
   const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
   const overallAssessment = 'audit_complete';
   const igReadiness = auditCompletion;

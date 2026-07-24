@@ -117,7 +117,16 @@ function computeCrossRunStats(findings, history) {
     }
   }
 
-  return { closed, new: newOnes, regressed, stillOpen, updatedHistory };
+  // FIX: found via a real bug-scan run. The caller previously inferred
+  // "is this a first run" from the current run's own finding counts
+  // (new > 0, everything else 0) — but a genuine first run on a
+  // perfectly clean model has ZERO findings of every kind, which looks
+  // identical to a later run where everything happened to get fixed.
+  // Derived directly from whether any prior history existed at all,
+  // which is the actual, unambiguous signal.
+  const isFirstRun = Object.keys(history).length === 0;
+
+  return { closed, new: newOnes, regressed, stillOpen, updatedHistory, isFirstRun };
 }
 
 module.exports = { loadHistory, saveHistory, currentFingerprints, computeCrossRunStats, historyFilePath };

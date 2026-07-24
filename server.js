@@ -1668,6 +1668,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     }
 
 
+    // FIX: see the matching comment in index.js for the full rationale
+    // — derives the real rule counts from config/checklist.json instead
+    // of the hardcoded '129'/'141' literals that had silently drifted.
+    const _checklistCounts = require('./config/checklist.json');
+    const _tier2RuleCount = _checklistCounts.tier2.length;
+    const _totalRuleCount = _checklistCounts.tier1.length + _checklistCounts.tier2.length;
+
     // Build audit log for report
     const auditLog = [
       { timestamp: new Date().toISOString().substr(11,8), step: 'Parse', action: `Parsed ${parsed.sheetNames.length} sheets via exceljs`, artifact: originalName, result: '✓ Pass', duration: '', notes: `${parsed.sheetNames.length} sheets found` },
@@ -1675,13 +1682,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       { timestamp: new Date().toISOString().substr(11,8), step: 'Familiarise', action: 'Claude read all sheets', artifact: '~' + Math.round(JSON.stringify(modelSummary).length/3) + ' tokens', result: '✓ Pass', duration: '', notes: `${modelType} · ${modelSummary.currency || ''} · ${modelSummary.periodicity || ''}` },
       { timestamp: new Date().toISOString().substr(11,8), step: 'Classify', action: 'Model type derived', artifact: domain.file + ' loaded', result: '✓ Pass', duration: '', notes: `Model type: ${modelType}` },
       { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 1', action: `${t1Results.length} code checks`, artifact: `${t1Results.filter(r=>r.status==='pass').length} pass · ${t1Failures.length} fail`, result: t1Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: t1Failures.map(f=>f.id).join(', ') || 'All passed' },
-      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `Claude — 3 batches · 129 rules`, artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Results.filter(r=>r.status==='pass').length} pass · ${t2Failures.length} issues` },
+      { timestamp: new Date().toISOString().substr(11,8), step: 'Tier 2', action: `Claude — 3 batches · ${_tier2RuleCount} rules`, artifact: 'Batches 1-3', result: t2Failures.length > 0 ? '⚠ Issues' : '✓ Pass', duration: '', notes: `${t2Results.filter(r=>r.status==='pass').length} pass · ${t2Failures.length} issues` },
       { timestamp: new Date().toISOString().substr(11,8), step: 'VBA Review', action: 'Macro extraction + risk scan', artifact: vbaReview.hasVbaProject ? `${vbaReview.moduleCount} module(s)` : 'No VBA project', result: !vbaReview.applicable ? '⚠ Skipped' : (vbaReview.findings && vbaReview.findings.length ? '⚠ Issues' : '✓ Pass'), duration: '', notes: vbaReview.note || '' }
     ];
 
     // Extract overall assessment from Tier 2 meta
     const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
-    const auditCompletion = t2Meta.audit_completion_percent || Math.round(((141 - checklistFindingCount) / 141) * 100);
+    const auditCompletion = t2Meta.audit_completion_percent || Math.round(((_totalRuleCount - checklistFindingCount) / _totalRuleCount) * 100);
     const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
     const overallAssessment = 'audit_complete';
     const igReadiness = auditCompletion;

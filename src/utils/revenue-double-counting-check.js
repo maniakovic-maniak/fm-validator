@@ -59,9 +59,11 @@ function splitTopLevelArgs(argsText) {
 
 // Expands each top-level SUM() argument into individual "Sheet!Cell"
 // component addresses — handles a contiguous range (A1:A5) or a bare
-// cell (A1); a nested function call as an argument is skipped rather
-// than guessed at (matches this project's established discipline).
-const RANGE_ARG_RE = /^\$?([A-Z]{1,3})\$?(\d+)(?::\$?([A-Z]{1,3})\$?(\d+))?$/i;
+// cell (A1), each optionally qualified with a sheet name (Sheet1!A1,
+// or 'My Sheet'!A1 for a name containing spaces) — a nested function
+// call as an argument is skipped rather than guessed at (matches this
+// project's established discipline).
+const RANGE_ARG_RE = /^(?:(?:'([^']+)'|([A-Za-z_][\w. ]*))!)?\$?([A-Z]{1,3})\$?(\d+)(?::\$?([A-Z]{1,3})\$?(\d+))?$/i;
 const MAX_RANGE_CELLS = 500;
 
 function expandSumComponents(formula, currentSheet) {
@@ -80,16 +82,21 @@ function expandSumComponents(formula, currentSheet) {
   for (const arg of args) {
     const rm = RANGE_ARG_RE.exec(arg.trim());
     if (!rm) return null; // a non-simple argument (a nested function, an expression) — skip the whole formula rather than guess
-    const [, col1, row1, col2, row2] = rm;
+    const [, sheetQuoted, sheetBare, col1, row1, col2, row2] = rm;
+    // FIX: found via a real bug-scan run. An explicit sheet qualifier
+    // on the argument (either form) is used in place of currentSheet;
+    // an unqualified reference still correctly means the current sheet,
+    // matching normal Excel semantics.
+    const argSheet = sheetQuoted || sheetBare || currentSheet;
     if (col2 && row2) {
       const c1 = colToNum(col1), c2 = colToNum(col2);
       const r1 = parseInt(row1, 10), r2 = parseInt(row2, 10);
       const cLo = Math.min(c1, c2), cHi = Math.max(c1, c2);
       const rLo = Math.min(r1, r2), rHi = Math.max(r1, r2);
       if ((cHi - cLo + 1) * (rHi - rLo + 1) > MAX_RANGE_CELLS) return null;
-      for (let c = cLo; c <= cHi; c++) for (let r = rLo; r <= rHi; r++) components.add(`${currentSheet}!${numToCol(c)}${r}`);
+      for (let c = cLo; c <= cHi; c++) for (let r = rLo; r <= rHi; r++) components.add(`${argSheet}!${numToCol(c)}${r}`);
     } else {
-      components.add(`${currentSheet}!${col1.toUpperCase()}${row1}`);
+      components.add(`${argSheet}!${col1.toUpperCase()}${row1}`);
     }
   }
   return components;

@@ -68,7 +68,7 @@ function checkDsraSizing(workbook) {
         debtServiceCell: pick.valueCell,
         debtServiceValue: pick.value,
         monthsCovered: Math.round(monthsCovered * 10) / 10,
-        note: `${dsra.sheet}!${dsra.valueCell} ("${dsra.labelText}") of ${dsra.value} covers approximately ${Math.round(monthsCovered * 10) / 10} months of debt service, based on ${pick.sheet}!${pick.debtServiceCell || pick.valueCell} ("${pick.labelText}") of ${pick.value} — below the customary "at least six months" convention cited by both Ofgem's Cap and Floor Financial Model Handbook and the World Bank/PPIAF Greenfield Mining Transport Infrastructure report. Confirm whether this reflects the deal's actual agreed DSRA sizing (deal terms vary) or an under-funded reserve.`,
+        note: `${dsra.sheet}!${dsra.valueCell} ("${dsra.labelText}") of ${dsra.value} covers approximately ${Math.round(monthsCovered * 10) / 10} months of debt service, based on ${pick.sheet}!${pick.valueCell} ("${pick.labelText}") of ${pick.value} — below the customary "at least six months" convention cited by both Ofgem's Cap and Floor Financial Model Handbook and the World Bank/PPIAF Greenfield Mining Transport Infrastructure report. Confirm whether this reflects the deal's actual agreed DSRA sizing (deal terms vary) or an under-funded reserve.`,
       });
     }
   }

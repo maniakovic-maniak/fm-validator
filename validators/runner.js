@@ -167,12 +167,39 @@ class ValidatorRunner {
    */
   checkNoFormulaErrors(workbook, check) {
     const errors = [];
-    const errorPatterns = [/#REF!/, /#NAME?/, /#VALUE!/, /#DIV\/0!/, /#NUM!/, /#N\/A/, /#NULL!/];
+    // FIX: was /#NAME?/ -- '?' is a regex quantifier, unescaped it makes
+    // the preceding 'E' optional rather than matching a literal '?'
+    // character, so this pattern actually matched "#NAM" (with or
+    // without a trailing 'E'), not the literal Excel error string
+    // "#NAME?". Confirmed real across every bug-scan run this session.
+    const errorPatterns = [/#REF!/, /#NAME\?/, /#VALUE!/, /#DIV\/0!/, /#NUM!/, /#N\/A/, /#NULL!/];
+
+    // FIX: found via a real bug-scan run. ExcelJS represents a formula
+    // cell that evaluates to an error as an object (e.g.
+    // { formula, result: { error: '#DIV/0!' } }), not a plain string —
+    // String(cell.value) on such an object previously produced the
+    // literal text "[object Object]", so a real formula error in a
+    // formula cell was never actually detected here; this check only
+    // ever caught an error that happened to be typed as literal text.
+    // Mirrors src/parser.js's own established cellErrorValue() helper
+    // (kept self-contained here rather than importing across
+    // directories, since this module isn't wired into the active
+    // pipeline and isn't meant to depend on src/).
+    const extractCellText = (cell) => {
+      const v = cell.value;
+      if (v && typeof v === 'object' && !(v instanceof Date)) {
+        if (typeof v.error === 'string') return v.error;
+        if (v.result && typeof v.result === 'object' && typeof v.result.error === 'string') return v.result.error;
+        if (typeof v.result === 'string') return v.result;
+        return ''; // some other object shape (e.g. a hyperlink) -- not a formula-error, don't stringify it as "[object Object]"
+      }
+      return v ? String(v) : '';
+    };
 
     workbook.worksheets.forEach(worksheet => {
       worksheet.eachRow((row) => {
         row.eachCell((cell) => {
-          const cellValue = cell.value ? String(cell.value) : '';
+          const cellValue = extractCellText(cell);
           errorPatterns.forEach(pattern => {
             if (pattern.test(cellValue)) {
               errors.push({ sheet: worksheet.name, cell: cell.address, value: cellValue });

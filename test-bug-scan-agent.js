@@ -148,6 +148,14 @@ function run() {
     });
   }
 
+  // FIX regression: a later run found a self-retracted finding that
+  // slipped through the original filter — "not flagged as the primary
+  // bug" used the past-participle form ("not flagged"), which the
+  // original /\bnot\s+flagging\b/i only matched as a gerund.
+  const slippedThroughDescription = "...this is benign in this exact form, so not flagged as the primary bug.";
+  check('isSelfRetracted now catches the real "not flagged as" phrase that previously slipped through',
+    isSelfRetracted({ description: slippedThroughDescription }));
+
   // Real GENUINE bug descriptions from the same run -- must NOT be
   // filtered out (no false positives).
   const realGenuineDescriptions = [

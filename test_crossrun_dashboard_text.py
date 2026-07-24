@@ -8,9 +8,19 @@ def compute_crn_text(crossRunStats):
     _crn_new = len(crossRunStats.get('new', []))
     _crn_regressed = len(crossRunStats.get('regressed', []))
     _crn_still_open = len(crossRunStats.get('stillOpen', []))
-    _is_first_run = (_crn_closed == 0 and _crn_regressed == 0 and _crn_still_open == 0 and _crn_new > 0)
+    # FIX: found via a real bug-scan run. Previously inferred purely
+    # from the counts (new>0, everything else 0) -- but a genuine first
+    # run on a perfectly clean model has ZERO findings of every kind,
+    # indistinguishable from a later "everything fixed" run using counts
+    # alone. Uses the real isFirstRun signal when present (derived,
+    # JS-side, from whether any prior history existed at all).
+    _is_first_run = crossRunStats.get('isFirstRun',
+        _crn_closed == 0 and _crn_regressed == 0 and _crn_still_open == 0 and _crn_new > 0)
     if _is_first_run:
-        return f'First run for this model — no prior report to compare against ({_crn_new} finding(s) established as the baseline).'
+        if _crn_new > 0:
+            return f'First run for this model — no prior report to compare against ({_crn_new} finding(s) established as the baseline).'
+        else:
+            return 'First run for this model — no prior report to compare against. No findings on this run.'
     else:
         text = f'{_crn_closed} closed · {_crn_new} new · {_crn_still_open} still open since the last run'
         if _crn_regressed > 0:
@@ -42,5 +52,24 @@ text4 = compute_crn_text({'closed': [1,2,3], 'new': [], 'regressed': [], 'stillO
 print('Everything fixed:', text4)
 assert '3 closed' in text4 and '0 new' in text4 and '0 still open' in text4
 print('PASS: fully-clean run displays correctly, not mistaken for a first run\n')
+
+# The real bug found via a bug-scan run: a genuine first run on a
+# perfectly clean model has ALL FOUR counts at zero (closed=new=
+# regressed=stillOpen=0) -- the old inference (new>0 required) would
+# have wrongly fallen through to the normal branch and shown the exact
+# misleading "0 closed · 0 new · 0 still open" message the feature was
+# built to avoid. isFirstRun is the real signal that fixes this.
+text5 = compute_crn_text({'closed': [], 'new': [], 'regressed': [], 'stillOpen': [], 'isFirstRun': True})
+print('Genuine first run, zero findings:', text5)
+assert 'First run for this model' in text5 and 'No findings on this run' in text5
+print('PASS: a genuine first run with ALL FOUR counts at zero is correctly shown as a first run, not "0 closed · 0 new..."\n')
+
+# The identical zero-counts shape, but genuinely NOT a first run
+# (isFirstRun=False, e.g. history existed and this run happens to also
+# have nothing to report) -- must show the normal message, not "first run".
+text6 = compute_crn_text({'closed': [], 'new': [], 'regressed': [], 'stillOpen': [], 'isFirstRun': False})
+print('Same zero-counts shape, but NOT a first run:', text6)
+assert 'First run' not in text6 and '0 closed' in text6
+print('PASS: the identical zero-counts shape is correctly NOT shown as a first run when isFirstRun=False\n')
 
 print('ALL TESTS PASSED')

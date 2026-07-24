@@ -11,8 +11,14 @@
 //   4. Starts-with / contains match (normalized)
 
 function normalize(name) {
-  // Blank or whitespace-only sheet names must not match anything
-  if (typeof name === 'string' && name.trim() === '') return '__BLANK__';
+  // FIX: found via a real bug-scan run. Blank/whitespace-only names
+  // must never match ANYTHING, including each other — the previous
+  // sentinel string '__BLANK__' was itself a matchable value, so two
+  // different blank/whitespace-only names (or a whitespace-only target
+  // against an actually-blank sheet name) would incorrectly resolve as
+  // equal at Level 3/4. Returns null instead; every comparison site
+  // below explicitly guards against a null result on either side.
+  if (typeof name === 'string' && name.trim() === '') return null;
   return String(name || '')
     .toLowerCase()
     .replace(/[\s\-_\.]+/g, '')
@@ -33,14 +39,18 @@ function resolveSheetName(target, sheetNames) {
 
   // Level 3 — normalized (strip spaces, dashes, underscores, dots)
   const normTarget = normalize(target);
-  const normalized = sheetNames.find(n => normalize(n) === normTarget);
+  const normalized = normTarget !== null
+    ? sheetNames.find(n => { const nn = normalize(n); return nn !== null && nn === normTarget; })
+    : undefined;
   if (normalized) return normalized;
 
   // Level 4 — starts-with or contains (normalized)
-  const startsWith = sheetNames.find(n =>
-    normalize(n).startsWith(normTarget) ||
-    normTarget.startsWith(normalize(n))
-  );
+  const startsWith = normTarget !== null
+    ? sheetNames.find(n => {
+        const nn = normalize(n);
+        return nn !== null && (nn.startsWith(normTarget) || normTarget.startsWith(nn));
+      })
+    : undefined;
   if (startsWith) return startsWith;
 
   // No match

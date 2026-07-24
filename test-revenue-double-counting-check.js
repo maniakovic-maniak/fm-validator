@@ -55,10 +55,28 @@ async function main() {
   const r4 = checkRevenueDoubleCounting(wb4);
   console.log('applicable:', r4.applicable, '| flaggedCount:', r4.flaggedCount, '| note:', r4.note);
 
+  console.log('\n=== Case 5: cross-sheet SUM() reference -- must be caught, not silently skipped ===');
+  // FIX regression test: found via a real bug-scan run. A revenue source
+  // on one sheet, summed into two totals where one total's SUM() uses an
+  // explicit cross-sheet reference to that source -- must still detect
+  // the double count, not silently skip the whole formula.
+  const wb5 = new ExcelJS.Workbook();
+  const wsSrc = wb5.addWorksheet('Segment A');
+  wsSrc.getCell('B10').value = 500;
+  const wsGroup = wb5.addWorksheet('Group P&L');
+  wsGroup.getCell('A20').value = 'Total Revenue (Segment A)';
+  wsGroup.getCell('B20').value = { formula: "SUM('Segment A'!B10:B10)", result: 500 };
+  wsGroup.getCell('A21').value = 'Total Revenue (Group)';
+  wsGroup.getCell('B21').value = { formula: "SUM('Segment A'!B10:B10)", result: 500 };
+  const r5 = checkRevenueDoubleCounting(wb5);
+  console.log('applicable:', r5.applicable, '| flaggedCount:', r5.flaggedCount);
+  if (r5.flaggedCount > 0) console.log('  componentCell:', r5.findings[0].componentCell);
+
   const pass = r1.applicable && r1.flaggedCount === 1
     && r2.applicable && r2.flaggedCount === 0
     && r3.applicable && r3.flaggedCount === 0
-    && r4.flaggedCount === 0;
+    && r4.flaggedCount === 0
+    && r5.applicable && r5.flaggedCount === 1 && r5.findings[0].componentCell === 'Segment A!B10';
   console.log('\n' + (pass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!pass) process.exit(1);
 }

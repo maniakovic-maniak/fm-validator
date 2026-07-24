@@ -59,6 +59,22 @@ function run() {
   console.log(`${run4Pass ? 'PASS' : 'FAIL'}: run 4 -- everything fixed, all 3 currently-open items correctly closed`);
   if (!run4Pass) allPass = false;
 
+  // --- isFirstRun: the real bug found via a bug-scan run. A genuine
+  // first run on a perfectly clean model (zero findings) has the exact
+  // same counts (0 closed, 0 new, 0 regressed, 0 stillOpen) as run 4
+  // above ("everything fixed") -- these must be distinguishable, and
+  // isFirstRun is the field that does it, derived from whether any
+  // prior history existed at all, not from the counts. ---
+  const cleanFirstRunStats = computeCrossRunStats([], {}); // truly empty history = genuine first run
+  const isFirstRunPass = cleanFirstRunStats.isFirstRun === true
+    && cleanFirstRunStats.closed.length === 0 && cleanFirstRunStats.new.length === 0;
+  console.log(`${isFirstRunPass ? 'PASS' : 'FAIL'}: a genuine first run with zero findings is correctly flagged isFirstRun=true`);
+  if (!isFirstRunPass) allPass = false;
+
+  const notFirstRunPass = stats4.isFirstRun === false;
+  console.log(`${notFirstRunPass ? 'PASS' : 'FAIL'}: run 4 ("everything fixed"), despite having the identical zero-findings shape, is correctly flagged isFirstRun=false (real history existed)`);
+  if (!notFirstRunPass) allPass = false;
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }

@@ -15,19 +15,31 @@ async function downloadFile(fileId) {
   const originalName = meta.data.name || `${fileId}.xlsx`;
   const destPath = path.join(process.cwd(), 'processed', originalName);
 
+  // FIX (found via a real bug-scan run, two related issues in the same
+  // function): the previous version called drive.files.get with a
+  // Node-style (params, options, callback) signature, a less reliable
+  // pattern than the Promise form the metadata call just above already
+  // uses successfully — a rejection from the get() call itself (not
+  // just a stream error) had no path to reach the outer Promise's
+  // reject, which could leave this hanging indefinitely rather than
+  // erroring. And separately: the promise resolved on the SOURCE
+  // stream's 'end' event, not the destination write stream's 'finish'
+  // event — piping is asynchronous, so the destination could still have
+  // buffered/unflushed data when the source finishes, letting this
+  // function return a path to a file that parseWorkbook() then reads
+  // before it's fully written to disk. Both fixed together: the
+  // Promise-based call form (any rejection propagates naturally through
+  // the awaited call), and resolving specifically on dest's own
+  // 'finish' event.
   const dest = fs.createWriteStream(destPath);
+  const mediaRes = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
   await new Promise((resolve, reject) => {
     let settled = false;
     const settle = (fn) => (arg) => { if (!settled) { settled = true; fn(arg); } };
+    dest.on('finish', settle(resolve));
     dest.on('error', settle(reject));
-    drive.files.get(
-      { fileId, alt: 'media' },
-      { responseType: 'stream' },
-      (err, res) => {
-        if (err) return settle(reject)(err);
-        res.data.on('end', settle(resolve)).on('error', settle(reject)).pipe(dest);
-      }
-    );
+    mediaRes.data.on('error', settle(reject));
+    mediaRes.data.pipe(dest);
   });
   return destPath;
 }

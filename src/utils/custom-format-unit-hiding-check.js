@@ -41,10 +41,6 @@ function hasEmbeddedUnitLabel(numFmt) {
   return QUOTED_LABEL_AFTER_COMMAS_RE.test(numFmt || '');
 }
 
-function hasEmbeddedUnitLabel(numFmt) {
-  return QUOTED_LABEL_AFTER_COMMAS_RE.test(numFmt || '');
-}
-
 function checkCustomFormatUnitHiding(workbook) {
   const findings = [];
 
