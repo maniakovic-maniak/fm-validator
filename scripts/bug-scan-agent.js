@@ -5,6 +5,14 @@
 // anything automatically. A fix is only ever applied via a separate,
 // explicit `--apply <N>` invocation, which shows the exact diff and
 // asks for a plain y/n confirmation before touching any file.
+
+require('dotenv').config(); // FIX: index.js/server.js both do this at
+// startup so ANTHROPIC_API_KEY (and anything else in .env) is available
+// to the rest of the pipeline — this script runs standalone via a git
+// hook or directly from the shell, neither of which sources .env on
+// its own, so without this line the key was only ever picked up if it
+// happened to already be exported in the shell's own environment.
+// Found via a real run: "Could not resolve authentication method."
 //
 // Usage:
 //   node scripts/bug-scan-agent.js              — scan the last commit's changed files
