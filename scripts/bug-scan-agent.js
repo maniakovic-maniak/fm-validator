@@ -269,26 +269,53 @@ ${fileBlocks}`;
 // scanAllFiles (potentially many batches).
 async function reviewFileBatch(client, files, graph) {
   const prompt = buildReviewPrompt(files, graph);
+  // FIX: a real run's batch 19 showed a second, distinct failure mode
+  // from the thinking-truncation one above — stop_reason 'end_turn'
+  // (not truncated at all), content block types 'thinking, text', but
+  // the text block was natural-language prose analysis ("Looking
+  // through all these test files carefully...") instead of the
+  // requested JSON, despite the prompt explicitly saying "ONLY a JSON
+  // object... no other text". Prefilling the assistant turn with the
+  // JSON's own opening is a standard, reliable way to force the model
+  // to continue in that format rather than choosing prose — the API
+  // only returns the continuation, so the prefill is prepended back on
+  // before parsing.
+  const jsonPrefill = '{\n  "bugs": [';
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
-    // FIX: was 8000. A real run showed 18 of 20 batches returning an
-    // empty rawText (not malformed JSON — genuinely nothing printed
-    // where the raw output should have been), which is consistent with
-    // the response being cut off before any actual text content was
-    // produced. Raised substantially to rule this out as the cause.
+    // FIX: a real --all run showed the actual root cause via the
+    // diagnostics added in the previous fix — stop_reason: 'max_tokens',
+    // content block types: 'thinking' (sometimes 'thinking' alone, no
+    // 'text' block at all), rawText length: 0. Extended thinking was
+    // consuming the ENTIRE budget before generating any of the actual
+    // requested JSON output, in the large majority of batches. Raising
+    // max_tokens alone (the previous fix, 8000 -> 16000) did not
+    // resolve this, since thinking has no inherent bound tied to that
+    // number. Explicitly disabling thinking removes the failure mode
+    // deterministically rather than hoping a larger budget happens to
+    // leave enough room — verified against the installed SDK's own
+    // type definitions (ThinkingConfigDisabled), not guessed.
+    thinking: { type: 'disabled' },
     max_tokens: 16000,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [
+      { role: 'user', content: prompt },
+      { role: 'assistant', content: jsonPrefill },
+    ],
   });
 
   const rawText = response.content
     .filter(b => b.type === 'text')
     .map(b => b.text)
     .join('');
+  // The prefill isn't echoed back by the API — only the continuation
+  // is. Prepend it so the combined text is the complete JSON document.
+  const fullText = jsonPrefill + rawText;
 
   try {
-    // Claude may wrap the JSON in a code fence despite instructions --
-    // strip that defensively rather than fail the whole scan over it.
-    const cleaned = rawText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    // Claude may still wrap the JSON in a code fence or add stray
+    // whitespace despite the prefill — stripped defensively rather
+    // than fail the whole batch over it.
+    const cleaned = fullText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned);
     return Array.isArray(parsed.bugs) ? parsed.bugs : [];
   } catch (e) {
@@ -299,7 +326,7 @@ async function reviewFileBatch(client, files, graph) {
     console.error('   \u26a0\ufe0f  Could not parse the review response as JSON for this batch — diagnostics below, continuing with remaining batches:');
     console.error(`     stop_reason: ${response.stop_reason}`);
     console.error(`     content block types: ${response.content.map(b => b.type).join(', ') || '(none)'}`);
-    console.error(`     rawText length: ${rawText.length}`);
+    console.error(`     rawText length (continuation only, before prefill): ${rawText.length}`);
     if (rawText.length > 0) {
       console.error(`     rawText (first 500 chars): ${rawText.slice(0, 500)}`);
     }

@@ -82,6 +82,37 @@ function run() {
   check('prompt omits the dependency section entirely when no graph is supplied (no crash, no empty section either)',
     !promptNoGraph.includes('Dependency relationships among these files'));
 
+  // ── Prefill-prepending JSON parsing (replicated in isolation, since
+  // the real logic lives inside reviewFileBatch which needs a live API
+  // call) — simulates what the API actually returns: only the
+  // CONTINUATION after the prefill, never the prefill itself. ──
+  const jsonPrefill = '{\n  "bugs": [';
+  function parseWithPrefill(continuationText) {
+    const fullText = jsonPrefill + continuationText;
+    const cleaned = fullText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    return JSON.parse(cleaned);
+  }
+
+  // Case: model continues cleanly with zero bugs
+  const emptyResult = parseWithPrefill(']\n}');
+  check('prefill + empty continuation correctly parses to zero bugs',
+    Array.isArray(emptyResult.bugs) && emptyResult.bugs.length === 0);
+
+  // Case: model continues with one real bug object
+  const oneBugContinuation = `
+    {
+      "file": "x.js",
+      "severity": "high",
+      "description": "d",
+      "old_code": "a",
+      "new_code": "b"
+    }
+  ]
+}`;
+  const oneBugResult = parseWithPrefill(oneBugContinuation);
+  check('prefill + a real bug continuation parses correctly into a complete bug object',
+    oneBugResult.bugs.length === 1 && oneBugResult.bugs[0].file === 'x.js');
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }
