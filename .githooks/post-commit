@@ -1,0 +1,27 @@
+#!/bin/sh
+# .githooks/post-commit — OPTIONAL. Not installed automatically.
+#
+# Runs the bug-scan agent (scripts/bug-scan-agent.js) right after every
+# commit, reviewing just the files that commit changed and listing any
+# genuine bugs it finds. It never fixes anything automatically — see
+# that script's own header for how the separate, explicit --apply step
+# works. This hook shares the same opt-in mechanism as pre-push; if you
+# already ran the one-time setup for that hook, this one is ALREADY
+# active with no further action needed, since both live in this same
+# .githooks directory.
+#
+# To opt in (skip if you already did this for pre-push):
+#   git config core.hooksPath .githooks
+#   chmod +x .githooks/post-commit
+#
+# To opt back out:
+#   git config --unset core.hooksPath
+#
+# Note: this runs synchronously as part of `git commit` — your commit
+# will appear to pause for a few seconds while the review runs, since it
+# calls the Claude API. It never blocks or fails the commit itself (the
+# commit has already happened by the time this hook runs); it only
+# prints findings.
+
+node scripts/bug-scan-agent.js
+exit 0
