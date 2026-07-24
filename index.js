@@ -11,6 +11,9 @@ const { checkAutoSumHeaderInclusion } = require('./src/utils/autosum-header-chec
 const { checkFormulaPatternConsistency } = require('./src/utils/formula-pattern-consistency-check');
 const { checkDaisyChains } = require('./src/utils/daisy-chain-check');
 const { checkEmbeddedErrorBranches } = require('./src/utils/embedded-error-branch-check');
+const { checkErrorLiteralInFormula } = require('./src/utils/error-literal-in-formula-check');
+const { checkTwoDigitYearExtraction } = require('./src/utils/two-digit-year-check');
+const { checkConstantFormulaCells } = require('./src/utils/constant-formula-check');
 const { checkDsraSizing } = require('./src/utils/dsra-sizing-check');
 const { checkComplexFormulas } = require('./src/utils/complex-formula-check');
 const { checkNumbersStoredAsText } = require('./src/utils/number-as-text-check');
@@ -584,6 +587,107 @@ async function run() {
       root_cause: 'IF() branch contains a literal Excel error value', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 80,
       ...buildRootCauseFields('T0-IFERRLIT-001', embeddedErrorCheck, { commonRemediationAction: 'Confirm whether the error branch is genuinely unreachable under all valid model states, or replace it with correct fallback logic.' })
+    });
+  }
+
+  // ── Bare error literal in formula text (book-mining) ────────────────────
+  // Sourced from the Operis Analysis Kit manual's "Error constants"
+  // section, found in a book-mining pass — most commonly the result of
+  // a formula referencing a range that was later deleted, which Excel
+  // silently rewrites to a literal error token. Deliberately
+  // complementary to the IF-branch check above: excludes the exact
+  // case where the literal is the entire content of an IF() branch
+  // (already covered there) and catches everything else — an
+  // arithmetic term, a function argument, anywhere else in the
+  // formula. Real-file testing on Carlsberg found a genuine broken
+  // cross-sheet reference (a deleted 'Scenario analysis' range,
+  // repeated across multiple period columns via INDEX()).
+  const errorLiteralCheck = (() => { try { return checkErrorLiteralInFormula(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Error literal in formula check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (errorLiteralCheck.applicable && errorLiteralCheck.findings.length > 0) {
+    const sample = errorLiteralCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-ERRLITERAL-001',
+      label: `${errorLiteralCheck.findings.length} formula(s) with a bare error literal in their text`,
+      severity: 'high', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${errorLiteralCheck.findings.length} formula(s) contain a bare Excel error literal directly in their text, including: ${sample}${errorLiteralCheck.findings.length > 8 ? ' and others' : ''}. Most commonly left behind when a referenced range was deleted.`,
+      reason: `${errorLiteralCheck.findings.length} formula(s) contain a bare error literal`,
+      corrective_action: 'Confirm whether each flagged reference should point somewhere else (the range it originally referenced was likely deleted) and correct it.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Bare error literal in formula',
+      model_risk: 'A stale reference to a deleted range silently produces an error wherever it feeds into a calculation, and can be masked further downstream by IFERROR or similar.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula contains a bare Excel error literal, most likely from a deleted range reference', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 75,
+      ...buildRootCauseFields('T0-ERRLITERAL-001', errorLiteralCheck, { commonRemediationAction: 'Confirm the correct reference and update the formula.' })
+    });
+  }
+
+  // ── Unguarded 2-digit year extraction (book-mining) ──────────────────────
+  // Sourced from Patrick O'Beirne's "Excel 2013 Spreadsheet Inquire"
+  // review (EuSpRIG 2013), found in a book-mining pass — the review's
+  // own table of Excel's built-in error-checking rules names "Cells
+  // containing years represented as 2 digits" as a pattern "Not
+  // reported" by any tool, including Microsoft's own Inquire add-in.
+  // Deliberately scoped to a precise formula signal (VALUE(RIGHT(x,2)))
+  // rather than guessing from raw values. Real-file testing found the
+  // overwhelming majority of raw matches (197 of 199 on one real model)
+  // were the model safely restoring the century explicitly (e.g.
+  // 2000+VALUE(RIGHT(x,2))) — those are excluded; only genuinely
+  // unguarded extractions, especially ones subtracted/compared against
+  // each other, are flagged.
+  const twoDigitYearCheck = (() => { try { return checkTwoDigitYearExtraction(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Two-digit year extraction check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (twoDigitYearCheck.applicable && twoDigitYearCheck.findings.length > 0) {
+    const sample = twoDigitYearCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-2DIGITYEAR-001',
+      label: `${twoDigitYearCheck.findings.length} formula(s) extract a 2-digit year without restoring the century`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${twoDigitYearCheck.findings.length} formula(s) use VALUE(RIGHT(x,2)) to extract a 2-digit year without an explicit century-restoring addition nearby, including: ${sample}${twoDigitYearCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${twoDigitYearCheck.findings.length} formula(s) extract a 2-digit year without a century guard`,
+      corrective_action: 'Confirm whether this model\'s date range could ever cross a century boundary; if so, restore the full 4-digit year explicitly rather than comparing raw 2-digit extractions.',
+      workstream: 'Structure', category: 'Structure', issue_type: '2-digit year extraction',
+      model_risk: 'If the extracted 2-digit values ever span a century boundary (e.g. "99" vs "05"), arithmetic on them silently produces a wrong result with no visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula extracts a 2-digit year via RIGHT() without restoring the century', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 45,
+      ...buildRootCauseFields('T0-2DIGITYEAR-001', twoDigitYearCheck, { commonRemediationAction: 'Restore the full 4-digit year explicitly rather than comparing raw 2-digit extractions.' })
+    });
+  }
+
+  // ── Constant formula cells (book-mining) ─────────────────────────────────
+  // Sourced from the Operis Analysis Kit manual's "Search | Constant
+  // formula cells" command, found in a book-mining pass — a formula
+  // with zero cell references that combines literal numbers via an
+  // operator or function (e.g. =10+40) may really be a hidden input,
+  // not a genuine calculation, and so escapes the checking a real
+  // input cell would get. Real-file testing found and fixed two
+  // genuine bugs: whole-row/whole-column references (5:5, A:A) weren't
+  // recognized, and a bare literal placeholder (=0) was being flagged
+  // even though it isn't deriving anything. Also found a genuinely
+  // valuable real pattern: a descriptive range label ("3-5%") that
+  // Excel silently interpreted as arithmetic, computing 2.95 instead
+  // of storing the intended text — a real, silent data-entry error.
+  const constantFormulaCheck = (() => { try { return checkConstantFormulaCells(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Constant formula cells check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (constantFormulaCheck.applicable && constantFormulaCheck.findings.length > 0) {
+    const sample = constantFormulaCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-CONSTFORMULA-001',
+      label: `${constantFormulaCheck.findings.length} formula(s) with no cell references, possibly hiding an input`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${constantFormulaCheck.findings.length} formula(s) reference no other cells at all, computing their result purely from literal numbers, including: ${sample}${constantFormulaCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${constantFormulaCheck.findings.length} formula(s) may be hiding an input as a "constant formula"`,
+      corrective_action: 'Confirm whether the numbers in each flagged formula should be split out onto the face of the worksheet as an explicit input, and check for a data-entry error where descriptive text may have been silently interpreted as arithmetic.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Constant formula cell',
+      model_risk: 'A numeric assumption buried in a formula (rather than a visible input cell) escapes normal input-checking against documentation, and — as found on a real model — descriptive text can be silently misinterpreted as arithmetic with no visible error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula has zero cell references and combines literal numbers via an operator or function', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 40,
+      ...buildRootCauseFields('T0-CONSTFORMULA-001', constantFormulaCheck, { commonRemediationAction: 'Split the buried number out as an explicit input, or confirm the formula is correctly capturing the intended value.' })
     });
   }
 
