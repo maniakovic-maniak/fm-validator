@@ -9,10 +9,29 @@ function escHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-// dotenv is loaded once by the entry point (server.js / index.js)
-const resend = new Resend(process.env.RESEND_API_KEY);
+
+// FIX: found via a real run — new Resend(process.env.RESEND_API_KEY) used
+// to run unconditionally at module-load time (top-level code), so simply
+// require()-ing this file crashed the entire process the instant
+// RESEND_API_KEY wasn't set, before any actual validation work ran at
+// all — notification is an ancillary feature that fires only after the
+// real work is already done, and its absence should never be able to
+// block the core pipeline. Constructed lazily instead, only when a
+// notification is actually about to be sent.
+let _resend = null;
+function getResendClient() {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 
 async function sendNotification(outcome) {
+  // FIX: graceful skip instead of a crash when notifications aren't
+  // configured — logs a clear, one-line reason rather than an
+  // unhandled exception with a stack trace pointing into node_modules.
+  if (!process.env.RESEND_API_KEY) {
+    console.log('   (Skipping email notification — RESEND_API_KEY not set in .env. The report itself was still built and uploaded normally.)');
+    return;
+  }
   const {
     originalName,
     outputName,
@@ -57,7 +76,7 @@ async function sendNotification(outcome) {
     </div>
   `;
 
-  await resend.emails.send({
+  await getResendClient().emails.send({
     from: 'FM Validator <onboarding@resend.dev>',
     to: process.env.NOTIFY_EMAIL,
     subject,
