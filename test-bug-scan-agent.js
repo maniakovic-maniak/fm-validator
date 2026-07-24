@@ -99,7 +99,7 @@ function run() {
   const realBugResponse = {
     stop_reason: 'tool_use',
     content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [
-      { file: 'x.js', severity: 'high', description: 'd', old_code: 'a', new_code: 'b' },
+      { file: 'x.js', severity: 'high', description: 'd', old_code: 'a', new_code: 'b', confirmed_genuine: true },
     ] } }],
   };
   const extracted = extractBugsFromResponse(realBugResponse);
@@ -219,18 +219,39 @@ function run() {
     });
   }
 
-  // extractBugsFromResponse must apply the filter end-to-end, not just
-  // the standalone predicate.
+  // extractBugsFromResponse must apply BOTH filters end-to-end: the
+  // new primary structural filter (confirmed_genuine), and the
+  // existing regex-based secondary backstop (in case the structured
+  // field and the free-text description ever disagree).
   const mixedResponse = {
     stop_reason: 'tool_use',
     content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [
-      { file: 'real.js', severity: 'high', description: 'A genuine race condition in the write path.', old_code: 'a', new_code: 'b' },
-      { file: 'fake.js', severity: 'medium', description: 'On reflection this is not a bug, skipping.', old_code: 'c', new_code: 'd' },
+      { file: 'real.js', severity: 'high', description: 'A genuine race condition in the write path.', old_code: 'a', new_code: 'b', confirmed_genuine: true },
+      // confirmed_genuine: true here on purpose -- tests that the
+      // SECONDARY regex backstop still catches a self-retracted
+      // description even if the structured field disagreed with it.
+      { file: 'fake.js', severity: 'medium', description: 'On reflection this is not a bug, skipping.', old_code: 'c', new_code: 'd', confirmed_genuine: true },
     ] } }],
   };
   const filteredResult = extractBugsFromResponse(mixedResponse);
-  check('extractBugsFromResponse end-to-end: keeps the genuine bug, drops the self-retracted one',
+  check('extractBugsFromResponse end-to-end: keeps the genuine bug, drops the self-retracted one (secondary backstop)',
     filteredResult.length === 1 && filteredResult[0].file === 'real.js');
+
+  // FIX regression: the new PRIMARY filter, tested directly -- an
+  // entry explicitly marked confirmed_genuine: false must be dropped,
+  // even with a description that reads like a genuine bug and contains
+  // none of the regex-matched self-retraction language. Added after a
+  // fourth real self-retraction slipped through the regex-only
+  // approach with yet another new phrasing ("no code change is
+  // warranted... rather than a functional bug").
+  const notConfirmedResponse = {
+    stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [
+      { file: 'maybe.js', severity: 'low', description: 'A minor style inconsistency in variable naming.', old_code: 'x', new_code: 'y', confirmed_genuine: false },
+    ] } }],
+  };
+  check('extractBugsFromResponse drops an entry explicitly marked confirmed_genuine: false, even with an innocuous-looking description (the new primary, structural filter)',
+    extractBugsFromResponse(notConfirmedResponse).length === 0);
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);

@@ -243,7 +243,7 @@ function buildReviewPrompt(files, graph) {
 ${dependencySection}
 If you find nothing wrong, return an empty bugs array — do not invent minor nitpicks to seem useful. It is normal and expected for most scans to return zero bugs.
 
-If you investigate something that looks suspicious and conclude it is NOT actually a bug, do not add it to the array at all — not even with a description explaining why it turned out to be fine. A real run of this tool showed the array ending up with entries whose own description said things like "this is not a bug", "skipping", or "retracted" — those entries should never have been added in the first place. The bugs array must contain ONLY entries you are confident are genuine, confirmed bugs. Work through your reasoning before deciding, then only call the tool with the bugs that survive that reasoning.
+If you investigate something that looks suspicious and conclude it is NOT actually a bug, do not add it to the array at all — not even with a description explaining why it turned out to be fine. The bugs array must contain ONLY entries you are confident are genuine, confirmed bugs. Work through your reasoning before deciding, then only call the tool with the bugs that survive that reasoning. Each entry has a required confirmed_genuine field — set it to true only for something you are actually confident is a real bug after your own analysis; if you're not sure, or your reasoning concluded it's a false positive or benign, leave the entry out entirely rather than including it with confirmed_genuine set to false.
 
 For each genuine bug found, you MUST provide old_code as an EXACT, VERBATIM, UNIQUE substring of the file it comes from (copy it exactly, whitespace and all) — this will be used for an automated, literal string-replacement fix, so it must match the file's actual content precisely and must not appear more than once in that file. old_code and new_code must both come from the SAME file (the one named in "file") — a cross-file bug still gets fixed one file at a time.
 
@@ -261,6 +261,21 @@ ${fileBlocks}`;
 // The JSON schema report_bugs' input must match — kept as a single
 // source of truth rather than duplicated between the tool definition
 // and any manual validation.
+// FIX: after FOUR separate real occurrences of a self-retracted
+// finding slipping through the regex-based isSelfRetracted filter below
+// (each with a new, previously-unseen phrasing — "not a bug", "not
+// flagged as the primary bug", "retracting... not a genuine, confirmed
+// bug", "No actual bug here... skip.", and now "no code change is
+// warranted... rather than a functional bug"), it's clear that trying
+// to catch every way a model might phrase "I decided this isn't real"
+// in free-text prose is fundamentally a losing, unbounded game — each
+// fix has only ever closed the exact phrasing already observed, not
+// the underlying class. Added a structural fix instead: a required
+// boolean field the model must explicitly, discretely commit to,
+// which is far harder to leak the same ambiguity through than open
+// prose reasoning. The regex filter below is KEPT as a secondary
+// backstop (defense in depth), not removed — this is the new PRIMARY
+// mechanism.
 const REPORT_BUGS_SCHEMA = {
   type: 'object',
   properties: {
@@ -274,8 +289,12 @@ const REPORT_BUGS_SCHEMA = {
           description: { type: 'string', description: "What the bug is and why it's a problem" },
           old_code: { type: 'string', description: 'Exact, verbatim, unique substring of the file to replace' },
           new_code: { type: 'string', description: 'The corrected replacement' },
+          confirmed_genuine: {
+            type: 'boolean',
+            description: 'Set this to true ONLY if you are confident, after your own analysis, that this is a real, confirmed bug. If your own reasoning concluded this is NOT a bug, is a false positive, is benign, or you are not fully confident — do not add this entry to the array at all. Do not add an entry with this set to false; simply omit it.',
+          },
         },
-        required: ['file', 'severity', 'description', 'old_code', 'new_code'],
+        required: ['file', 'severity', 'description', 'old_code', 'new_code', 'confirmed_genuine'],
       },
     },
   },
@@ -377,11 +396,25 @@ function extractBugsFromResponse(response) {
   const toolUseBlock = response.content.find(b => b.type === 'tool_use' && b.name === 'report_bugs');
   if (toolUseBlock && Array.isArray(toolUseBlock.input && toolUseBlock.input.bugs)) {
     const allBugs = toolUseBlock.input.bugs;
-    const retracted = allBugs.filter(isSelfRetracted);
-    if (retracted.length > 0) {
-      console.error(`   \u26a0\ufe0f  Filtered ${retracted.length} self-retracted entr${retracted.length === 1 ? 'y' : 'ies'} whose own description said it wasn't actually a bug (${retracted.map(b => b.file).join(', ')})`);
+
+    // PRIMARY filter: the model's own explicit, structural commitment.
+    // Far more robust than parsing prose for self-contradiction, since
+    // it's a discrete field the model must set, not free text it can
+    // phrase in unlimited ways.
+    const notConfirmed = allBugs.filter(b => b.confirmed_genuine !== true);
+    if (notConfirmed.length > 0) {
+      console.error(`   \u26a0\ufe0f  Filtered ${notConfirmed.length} entr${notConfirmed.length === 1 ? 'y' : 'ies'} not marked confirmed_genuine (${notConfirmed.map(b => b.file).join(', ')})`);
     }
-    return allBugs.filter(b => !isSelfRetracted(b));
+    const structurallyConfirmed = allBugs.filter(b => b.confirmed_genuine === true);
+
+    // SECONDARY backstop: the original regex-based filter, kept in
+    // place rather than removed — defense in depth in case the
+    // structured field and the free-text description ever disagree.
+    const retracted = structurallyConfirmed.filter(isSelfRetracted);
+    if (retracted.length > 0) {
+      console.error(`   \u26a0\ufe0f  Filtered ${retracted.length} self-retracted entr${retracted.length === 1 ? 'y' : 'ies'} whose own description said it wasn't actually a bug, despite confirmed_genuine being true (${retracted.map(b => b.file).join(', ')})`);
+    }
+    return structurallyConfirmed.filter(b => !isSelfRetracted(b));
   }
 
   // A forced tool_choice should make this path unreachable in normal
