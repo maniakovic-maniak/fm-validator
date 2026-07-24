@@ -166,6 +166,23 @@ function run() {
   check('isSelfRetracted now catches "not a genuine, confirmed bug" (multiple adjectives)',
     isSelfRetracted({ description: "On reflection this is not a genuine, confirmed bug." }));
 
+  // FIX regression: a third real run found two more gaps -- "No actual
+  // bug here" (the modifier word list only allowed "real"/"genuine",
+  // not "actual") and bare "skip." at the end of a description (only
+  // "skipping"/"skipped" were covered before).
+  const thirdRunDescription = "This is not itself a bug, but comparing the two shows index.js's block was only ever wired up here. No actual bug here upon inspection; skip.";
+  check('isSelfRetracted now catches "No actual bug here" (any single modifying word, not an enumerated list)',
+    isSelfRetracted({ description: thirdRunDescription }));
+  check('isSelfRetracted now catches bare "skip." at the end of a description',
+    isSelfRetracted({ description: "Confirmed harmless behavior; skip." }));
+
+  // The specific false-positive risk the end-anchored skip pattern was
+  // designed to avoid: a genuine bug description that happens to use
+  // the word "skip" mid-sentence, describing real program behavior,
+  // must NOT be filtered just because the word "skip" appears somewhere.
+  check('a genuine description using "skip" to describe real program behavior (not at the end) is NOT filtered',
+    !isSelfRetracted({ description: "The loop will skip stale entries whose timestamp is older than the retention window, which silently drops valid recent entries too due to an off-by-one in the comparison." }));
+
   // Real GENUINE bug descriptions from the same run -- must NOT be
   // filtered out (no false positives).
   const realGenuineDescriptions = [

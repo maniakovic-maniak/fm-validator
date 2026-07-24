@@ -343,13 +343,23 @@ const SELF_RETRACTION_PATTERNS = [
   // and excludes periods specifically so this can't accidentally span
   // two unrelated sentences.
   /\bnot\s+a\b[^.]{0,40}\bbug\b/i,
-  /\bno\s+(?:real\s+|genuine\s+)?(?:bug|issue)(?:s)?\s+(?:found|reported|here)\b/i,
-  // FIX: broadened from "skipping" alone to also catch "skipped" (past
-  // tense) — kept to the self-retraction sense of the word specifically
-  // (not bare "skip"/"skips", which legitimately appears in ordinary
-  // bug descriptions of program behavior, e.g. "the loop will skip
-  // stale entries" — that must NOT be filtered).
+  // FIX: broadened from a fixed list of adjectives ("real"/"genuine")
+  // to any single modifying word — found via a real run where "No
+  // actual bug here" slipped through, since "actual" wasn't in the
+  // enumerated list. Enumerating adjectives one at a time is exactly
+  // the whack-a-mole pattern that has already failed twice; a generic
+  // single-word wildcard closes the whole class at once instead of
+  // waiting for the next adjective to slip through.
+  /\bno\s+(?:\w+\s+)?(?:bug|issue)(?:s)?\s+(?:found|reported|here)\b/i,
+  // FIX: broadened from "skipping"/"skipped" to also catch bare "skip"
+  // specifically at the END of a description — found via the same real
+  // run ("...upon inspection; skip."). Anchored to end-of-string rather
+  // than matched anywhere, so this stays safe against the genuine "the
+  // loop will skip stale entries" case (which continues past "skip"
+  // with what's being skipped, so it never matches this end-anchored
+  // pattern) while still catching the terse self-retraction sign-off.
   /\bskip(?:ping|ped)\b/i,
+  /\bskip\.?\s*$/i,
   // FIX: broadened from "retracted" alone to also catch "retracting"
   // (gerund) — found via a real run using this exact form.
   /\bretract(?:ed|ing)\b/i,
