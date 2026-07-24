@@ -34,6 +34,9 @@ const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-che
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
+const { checkBlankCellReferences } = require('./src/utils/blank-cell-reference-check');
+const { checkCrossCasting } = require('./src/utils/cross-cast-check');
+const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
@@ -630,6 +633,42 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     });
   }
 
+  // ── Column-direction formula pattern consistency (book-mining) ──────────
+  // The column-direction sibling to the row-direction check above,
+  // explicitly named in that check's own note as "a deliberate,
+  // documented gap for a future pass, not silently ignored." Sourced
+  // from Clermont, Hanin & Mittermeir's field-audit paper (EuSpRIG),
+  // found in a book-mining pass — a "logical equivalence class" of
+  // formulas distributed DOWN a column, not just across a row, caught
+  // real errors across a 3.03% cell error rate in 78 audited
+  // spreadsheets. Reuses normalizeFormula directly rather than
+  // duplicating it. Real-file testing surfaced and fixed three genuine
+  // false-positive classes: a date-metadata block mixed with unrelated
+  // numeric cells, a checks-register sheet where every row is a
+  // deliberately different named check, and a real bug in the fix for
+  // the first case (a wrapper-object/raw-cell shape mismatch that
+  // silently defeated the whole segmentation).
+  const columnPatternCheck = (() => { try { return checkColumnPatternConsistency(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Column pattern consistency check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (columnPatternCheck.applicable && columnPatternCheck.findings.length > 0) {
+    const sample = columnPatternCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-COLPATTERN-001',
+      label: `${columnPatternCheck.findings.length} formula cell(s) differ from their column's dominant pattern`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${columnPatternCheck.findings.length} formula cell(s) have a different structure than the majority pattern used by the rest of their column, including: ${sample}${columnPatternCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${columnPatternCheck.findings.length} formula cell(s) show a column-pattern inconsistency`,
+      corrective_action: 'Review each flagged cell against the rest of its column — confirm whether the difference is deliberate or an unintended range/reference not extended consistently (e.g. as the model\'s timeline was widened).',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Formula pattern inconsistency (column)',
+      model_risk: 'A single cell in an otherwise-consistent column using a different range or reference structure can silently produce a wrong value, indistinguishable at a glance from its neighbors.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula cell structurally deviates from its column\'s established pattern', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 55,
+      ...buildRootCauseFields('T0-COLPATTERN-001', columnPatternCheck, { commonRemediationAction: 'Confirm whether each flagged cell\'s deviation from its column is deliberate; if not, correct the range/reference to match the column\'s established pattern.' })
+    });
+  }
+
   // ── Daisy-chain / link-to-link detection ────────────────────────────────
   // Sourced from THREE independent standards: FAST 3.06-02, PwC Global
   // Financial Modeling Guidelines (D1), and ICAEW's "How to Review a
@@ -946,6 +985,71 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       root_cause: 'Computed effective tax rate deviates significantly from the labelled statutory rate', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 45,
       ...buildRootCauseFields('T0-TAXRATE-001', taxEffectiveRateCheck, { commonRemediationAction: 'Confirm whether the tax-rate gap reflects a legitimate reason (losses carried forward, credits, jurisdictional rate) or a broken tax formula.' })
+    });
+  }
+
+  // ── Cross-casting (book-mining) ──────────────────────────────────────────
+  // Sourced from "Spreadsheet Modelling Best Practice" (ICAEW-published,
+  // Business Dynamics / Coopers & Lybrand, 1999), found in a book-mining
+  // pass. The book's own worked example: a grid with a "Total" row and
+  // a "Total" column should arrive at the same grand total when summed
+  // independently — a missing line item in one aggregation range breaks
+  // this without producing any visible error. Deliberately conservative:
+  // requires a confidently-identified Total row/column pair with at
+  // least 2 real data points on each side, within a bounded distance.
+  const crossCastCheck = (() => { try { return checkCrossCasting(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Cross-cast check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (crossCastCheck.applicable && crossCastCheck.findings.length > 0) {
+    const sample = crossCastCheck.findings.slice(0, 5).map(f => f.cell).join(', ');
+    allFlagged.push({
+      id: 'T0-CROSSCAST-001',
+      label: `${crossCastCheck.findings.length} grid(s) where the totals row and totals column disagree`,
+      severity: 'high', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${crossCastCheck.findings.length} grid(s) have a "Total" row and "Total" column that arrive at different grand totals when summed independently, including: ${sample}.`,
+      reason: `${crossCastCheck.findings.length} grid(s) fail a cross-cast: two independent paths to the same grand total disagree`,
+      corrective_action: 'Check both aggregation ranges (the totals row and the totals column) for a missing or extra line item, row, or column.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Cross-cast mismatch',
+      model_risk: 'Two independently-computed grand totals disagreeing usually means one aggregation range is incomplete — a real, silent numerical error, not a display issue.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Totals row and totals column sum to different grand totals', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 65,
+      ...buildRootCauseFields('T0-CROSSCAST-001', crossCastCheck, { commonRemediationAction: 'Check both aggregation ranges for a missing or extra line item.' })
+    });
+  }
+
+  // ── Blank cell references (book-mining) ──────────────────────────────────
+  // Sourced from three independent corroborating sources found in a
+  // book-mining pass: Clermont, Hanin & Mittermeir's field-audit paper
+  // (EuSpRIG) — "reference to empty cell" was one of five named error
+  // categories found across 78 real client spreadsheets; Patrick
+  // O'Beirne's "Excel 2013 Spreadsheet Inquire" review (EuSpRIG 2013),
+  // listing "Formulas referring to empty cells" among Excel's own
+  // built-in error-checking rules; and the Operis Analysis Kit manual's
+  // "Search | References to blank cell" command. Deliberately scoped to
+  // bare single-cell references only, never a cell inside a multi-cell
+  // range — all three sources warn that intentional range padding is
+  // common and must not be flagged. A real-file test run also
+  // surfaced a genuine false-positive class (a structural spacer/label
+  // column with low overall population) which is now filtered too.
+  const blankCellRefCheck = (() => { try { return checkBlankCellReferences(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Blank cell reference check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (blankCellRefCheck.applicable && blankCellRefCheck.findings.length > 0) {
+    const sample = blankCellRefCheck.findings.slice(0, 5).map(f => f.cell).join(', ');
+    allFlagged.push({
+      id: 'T0-BLANKCELLREF-001',
+      label: `${blankCellRefCheck.findings.length} formula(s) with a bare reference to a genuinely blank cell`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${blankCellRefCheck.findings.length} formula(s) contain a bare single-cell reference to a genuinely blank cell, including: ${sample}.`,
+      reason: `${blankCellRefCheck.findings.length} formula(s) reference a blank cell rather than an explicit value`,
+      corrective_action: 'Confirm whether the reference is intentional (delete it if not needed) or the referenced cell should contain a formula or input value.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Reference to blank cell',
+      model_risk: 'Excel evaluates a blank reference as 0 today with no visible error — but a stray value later landing in that cell would silently flow into the calculation with no warning.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula contains a bare reference to a cell with no value or formula', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 40,
+      ...buildRootCauseFields('T0-BLANKCELLREF-001', blankCellRefCheck, { commonRemediationAction: 'Confirm whether the reference is intentional; delete it or populate the referenced cell as appropriate.' })
     });
   }
 
