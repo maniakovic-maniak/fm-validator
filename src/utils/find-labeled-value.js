@@ -14,7 +14,25 @@
 
 function cellText(v) {
   if (v == null) return '';
-  if (typeof v === 'object') return v.richText ? v.richText.map(t => t.text).join('') : (v.text || '');
+  if (typeof v === 'object') {
+    // FIX: found via a real pipeline run — a hyperlink-shaped cell
+    // value whose .text is a non-string truthy value (e.g. a numeric
+    // display text like { text: 12345, hyperlink: '...' }) was
+    // returned as-is by (v.text || ''), not coerced to a string. Every
+    // caller immediately does cellText(cell.value).toLowerCase(),
+    // which then threw "cellText(...).toLowerCase is not a function" —
+    // confirmed by reproducing the exact error with this cell shape.
+    // This shared utility feeds 8 different checks (DSRA sizing,
+    // DSCR-gated distributions, balance-never-negative, sign
+    // convention, tax effective-rate, revolver/cash cross-check,
+    // key-output chain, reasonableness checks), so the one fix here
+    // resolves all 8 failures at once. Explicit String() coercion also
+    // fixes a smaller, related correctness issue: a genuinely present
+    // text value of 0 (falsy) was previously treated as empty by the
+    // old (v.text || '') short-circuit; now correctly returned as "0".
+    if (v.richText) return v.richText.map(t => String(t.text != null ? t.text : '')).join('');
+    return v.text != null ? String(v.text) : '';
+  }
   return String(v);
 }
 
@@ -125,4 +143,4 @@ function findLabeledRowSeries(workbook, labelTerms, opts = {}) {
   return results;
 }
 
-module.exports = { findLabeledValues, findLabeledRowSeries };
+module.exports = { findLabeledValues, findLabeledRowSeries, cellText };
