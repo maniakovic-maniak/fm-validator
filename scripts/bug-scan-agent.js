@@ -336,16 +336,25 @@ async function reviewFileBatch(client, files, graph) {
 // place, but this filter is a deterministic backstop that doesn't
 // depend on the model reliably following that instruction every time.
 const SELF_RETRACTION_PATTERNS = [
-  /\bnot\s+a\s+(?:genuine\s+|real\s+)?bug\b/i,
-  /\bno\s+bug(?:s)?\s+(?:found|reported)\b/i,
-  /\bno\s+real\s+issue\b/i,
-  /\bskipping\b/i,
-  /\bretracted\b/i,
-  // FIX: found via a real run — this only matched the gerund form "not
-  // flagging", not the past-participle form "not flagged [as...]" that
-  // an actual self-retracted finding used ("not flagged as the primary
-  // bug"), which slipped through undetected.
+  // FIX: broadened to tolerate any number of adjectives/commas between
+  // "not a" and "bug" (e.g. "not a genuine, confirmed bug") instead of
+  // only a single optional adjective — found via a real run where this
+  // exact phrasing slipped through. The [^.]{0,40} window stays bounded
+  // and excludes periods specifically so this can't accidentally span
+  // two unrelated sentences.
+  /\bnot\s+a\b[^.]{0,40}\bbug\b/i,
+  /\bno\s+(?:real\s+|genuine\s+)?(?:bug|issue)(?:s)?\s+(?:found|reported|here)\b/i,
+  // FIX: broadened from "skipping" alone to also catch "skipped" (past
+  // tense) — kept to the self-retraction sense of the word specifically
+  // (not bare "skip"/"skips", which legitimately appears in ordinary
+  // bug descriptions of program behavior, e.g. "the loop will skip
+  // stale entries" — that must NOT be filtered).
+  /\bskip(?:ping|ped)\b/i,
+  // FIX: broadened from "retracted" alone to also catch "retracting"
+  // (gerund) — found via a real run using this exact form.
+  /\bretract(?:ed|ing)\b/i,
   /\bnot\s+flagg(?:ing|ed)\b/i,
+  /\bnot\s+the\s+(?:main|primary)\s+(?:issue|bug)\b/i,
   /\bself-correction\b/i,
 ];
 

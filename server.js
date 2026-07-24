@@ -341,7 +341,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const allFailures  = [...t1Failures, ...t2Failures];
     const existingKeys = new Set();
     for (const f of allFailures) {
-      const key = `${f.id}-${f.sheet || ""}`;
+      // FIX: found via a real bug-scan run — server.js still had the old
+      // version of this key, which collapsed to "undefined-SheetName"
+      // when f.id was missing, letting two different id-less findings
+      // collide and silently drop one. Mirrors the same fix already
+      // applied to index.js.
+      const key = `${f.id || f.reason || f.label || JSON.stringify(f)}-${f.sheet || ""}`;
       if (!existingKeys.has(key)) {
         existingKeys.add(key);
         allFlagged.push(f);

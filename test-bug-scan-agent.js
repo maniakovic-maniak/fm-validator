@@ -156,6 +156,16 @@ function run() {
   check('isSelfRetracted now catches the real "not flagged as" phrase that previously slipped through',
     isSelfRetracted({ description: slippedThroughDescription }));
 
+  // FIX regression: a second real run found TWO more self-retracted
+  // phrases that slipped through -- "retracting" (gerund, only
+  // "retracted" was matched before) and "not a genuine, confirmed bug"
+  // (multiple adjectives, only a single optional adjective was matched
+  // before).
+  const secondSlipDescription = "This is a minor edge case, not the main issue -- retracting this entry as not a genuine, confirmed bug.";
+  check('isSelfRetracted now catches "retracting" (gerund form)', isSelfRetracted({ description: secondSlipDescription }));
+  check('isSelfRetracted now catches "not a genuine, confirmed bug" (multiple adjectives)',
+    isSelfRetracted({ description: "On reflection this is not a genuine, confirmed bug." }));
+
   // Real GENUINE bug descriptions from the same run -- must NOT be
   // filtered out (no false positives).
   const realGenuineDescriptions = [
@@ -169,6 +179,26 @@ function run() {
   if (!noneFalsePositive) {
     realGenuineDescriptions.forEach((d, i) => {
       if (isSelfRetracted({ description: d })) console.log(`  FALSE POSITIVE: [${i}] ${d.slice(0, 80)}`);
+    });
+  }
+
+  // Stress test: the broadened "not a...bug" window must NOT produce
+  // false positives against genuine descriptions that happen to contain
+  // both "not a" and "bug" without actually being a self-retraction --
+  // plus every other real genuine (non-retracted) description seen
+  // across multiple runs this session.
+  const widerGenuineDescriptions = [
+    ...realGenuineDescriptions,
+    "The regex is not a simple literal match — it treats '?' as a quantifier, so #NAME? formula errors go undetected by this bug-prone pattern.",
+    "downloadFile calls drive.files.get twice for the same file: once to fetch metadata, and a second time via a callback form that is not a reliable pattern for this client library version.",
+    "The key is built as `${f.id}-${f.sheet || \"\"}` with no fallback when f.id is undefined, silently dropping one of two colliding findings from the report.",
+    "A whitespace-only sheet name and an actually-blank sheet name both normalize to the same sentinel, so they incorrectly resolve as equal to each other.",
+  ];
+  const noFalsePositivesWider = widerGenuineDescriptions.every(d => !isSelfRetracted({ description: d }));
+  check('the broadened patterns still produce zero false positives across a wider set of real genuine descriptions', noFalsePositivesWider);
+  if (!noFalsePositivesWider) {
+    widerGenuineDescriptions.forEach((d, i) => {
+      if (isSelfRetracted({ description: d })) console.log(`  FALSE POSITIVE: [${i}] ${d.slice(0, 90)}`);
     });
   }
 
