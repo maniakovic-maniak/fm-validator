@@ -1749,10 +1749,28 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       ? 100
       : Math.round(((totalChecked - checklistFindingCount) / totalChecked) * 100);
     // KPMG risk rating
-    const p1Count = allFlagged.filter(f => f.priority === 'P1' || f.severity === 'fatal' || f.severity === 'critical').length;
-    const p2Count = allFlagged.filter(f => f.priority === 'P2' || f.severity === 'high').length;
-    const p3Count = allFlagged.filter(f => f.priority === 'P3' || (!f.priority && f.severity === 'low')).length;
-    const riskRating = `P1: ${p1Count} · P2: ${p2Count} · P3: ${p3Count}`;
+    // FIX: found via a real review of the upload-screen UI — f.priority
+    // was checked here, but that field is never set anywhere in the JS
+    // pipeline (priority is only computed by build_report.py's own
+    // priority() function, Python-side, from record_type + severity).
+    // The check silently fell through to raw severity every time,
+    // completely bypassing the record_type framework: a Query,
+    // Observation, or Critical Query with severity 'critical' was still
+    // counted toward p1Count here, even though the real report
+    // correctly excludes anything that isn't a Confirmed Finding from
+    // the P1-P3 hierarchy. Critical Query also had no representation at
+    // all in riskRating, despite blocking reliance with the same force
+    // as an open P1 — a model whose only problem was 16 unresolved
+    // Critical Queries would have shown a falsely clean-looking summary
+    // here. This mirrors build_report.py's actual priority() logic
+    // instead of duplicating the old, disconnected one.
+    const isConfirmed = f => (f.record_type || 'Confirmed Finding') === 'Confirmed Finding';
+    const p1Count = allFlagged.filter(f => isConfirmed(f) && (f.severity === 'fatal' || f.severity === 'critical')).length;
+    const p2Count = allFlagged.filter(f => isConfirmed(f) && (f.severity === 'high' || f.severity === 'medium')).length;
+    const p3Count = allFlagged.filter(f => isConfirmed(f) && !['fatal','critical','high','medium'].includes(f.severity)).length;
+    const criticalQueryCount = allFlagged.filter(f => f.record_type === 'Critical Query').length;
+    const riskRating = `P1: ${p1Count} · P2: ${p2Count} · P3: ${p3Count}` +
+      (criticalQueryCount > 0 ? ` · Critical Query: ${criticalQueryCount}` : '');
 
     console.log(`\n✅ Complete in ${duration}s — flagged: ${allFlagged.length}`);
 
@@ -1775,6 +1793,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         riskRating,
         p1Count,
         p2Count,
+        p3Count,
+        criticalQueryCount,
         domainSkill: domain.file,
         tier0Stats: tier0.stats,
         duration

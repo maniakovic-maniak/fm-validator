@@ -706,7 +706,9 @@
     document.getElementById('report-passed').textContent = stats.total ?? total;
     document.getElementById('report-failed').textContent = stats.needsAttention ?? 0;
     const riskEl = document.getElementById('report-score');
-    riskEl.textContent = stats.riskRating || `P1: ${stats.p1Count||0} · P2: ${stats.p2Count||0}`;
+    riskEl.textContent = stats.riskRating ||
+      `P1: ${stats.p1Count||0} · P2: ${stats.p2Count||0} · P3: ${stats.p3Count||0}` +
+      (stats.criticalQueryCount ? ` · Critical Query: ${stats.criticalQueryCount}` : '');
     riskEl.style.color = '#1F4E79';
     riskEl.style.fontSize = '14px';
 
