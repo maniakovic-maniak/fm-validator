@@ -29,6 +29,8 @@ const { checkTwoDigitYearExtraction } = require('./src/utils/two-digit-year-chec
 const { checkConstantFormulaCells } = require('./src/utils/constant-formula-check');
 const { checkOverflowError } = require('./src/utils/overflow-error-check');
 const { checkMixedReferences } = require('./src/utils/mixed-reference-check');
+const { checkWhitespaceSheetNames } = require('./src/utils/whitespace-sheet-name-check');
+const { checkHiddenFormulas } = require('./src/utils/hidden-formula-check');
 const { checkDsraSizing } = require('./src/utils/dsra-sizing-check');
 const { checkComplexFormulas } = require('./src/utils/complex-formula-check');
 const { checkNumbersStoredAsText } = require('./src/utils/number-as-text-check');
@@ -901,6 +903,66 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       root_cause: 'Range reference mixes absolute and relative addressing between its two endpoints', escalation_flag: false,
       urgency: 'Next scheduled review', confidence: 35,
       ...buildRootCauseFields('T0-MIXEDREF-001', mixedRefCheck, { commonRemediationAction: 'Confirm the range is growing or shrinking as intended.' })
+    });
+  }
+
+  // ── Whitespace in sheet names (book-mining) ──────────────────────────────
+  // Sourced from Patrick O'Beirne's "Excel 2013 Spreadsheet Inquire"
+  // review (EuSpRIG 2013), found in a book-mining pass — directly
+  // relevant given this session's own real bug: sheet-resolver.js needed
+  // a fix earlier this session because two blank/whitespace-only sheet
+  // NAMES could incorrectly resolve as equal to each other. A leading or
+  // trailing space in an otherwise-real sheet name is invisible on the
+  // tab itself but is exactly the same class of subtle reference-
+  // matching failure — a visual review would never catch it.
+  const whitespaceSheetCheck = (() => { try { return checkWhitespaceSheetNames(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Whitespace sheet name check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (whitespaceSheetCheck.applicable && whitespaceSheetCheck.findings.length > 0) {
+    const sample = whitespaceSheetCheck.findings.slice(0, 8).map(f => `"${f.sheet}"`).join(', ');
+    allFlagged.push({
+      id: 'T0-WSSHEETNAME-001',
+      label: `${whitespaceSheetCheck.findings.length} sheet name(s) have leading or trailing whitespace`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${whitespaceSheetCheck.findings.length} sheet name(s) have leading or trailing whitespace, invisible on the tab itself, including: ${sample}.`,
+      reason: `${whitespaceSheetCheck.findings.length} sheet name(s) have leading or trailing whitespace`,
+      corrective_action: 'Rename each flagged sheet to remove the leading/trailing space, and confirm any formulas or named ranges referencing it still resolve correctly afterward.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Whitespace in sheet name',
+      model_risk: 'A formula or named range referencing the sheet without the space (as it visually appears) may not resolve the way a reviewer expects — a subtle reference-matching failure invisible on a normal visual review.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Sheet name has leading or trailing whitespace', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 60,
+      ...buildRootCauseFields('T0-WSSHEETNAME-001', whitespaceSheetCheck, { commonRemediationAction: 'Rename the sheet to remove the leading/trailing space.' })
+    });
+  }
+
+  // ── Hidden formulas under sheet protection (book-mining) ─────────────────
+  // Sourced from Patrick O'Beirne's "Excel 2013 Spreadsheet Inquire"
+  // review (EuSpRIG 2013), found in a book-mining pass — Excel's own
+  // per-cell "Hidden" protection attribute, distinct from row/column/
+  // sheet hiding: it specifically hides a formula from the formula bar
+  // once sheet protection is enabled, while the computed value stays
+  // fully visible. No reviewer, even one with full file access, can
+  // inspect the logic behind such a cell. Only meaningful when sheet
+  // protection is actually active — the attribute is inert otherwise.
+  const hiddenFormulaCheck = (() => { try { return checkHiddenFormulas(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Hidden formula check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (hiddenFormulaCheck.applicable && hiddenFormulaCheck.findings.length > 0) {
+    const sample = hiddenFormulaCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-HIDDENFORMULA-001',
+      label: `${hiddenFormulaCheck.findings.length} formula(s) hidden from the formula bar under sheet protection`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${hiddenFormulaCheck.findings.length} formula(s) are hidden from the formula bar under active sheet protection — the computed value is visible but the calculation itself cannot be inspected, including: ${sample}.`,
+      reason: `${hiddenFormulaCheck.findings.length} formula(s) have their logic hidden from any reviewer`,
+      corrective_action: 'Confirm whether hiding each flagged formula is genuinely intentional; if not, clear the Hidden protection attribute so the calculation can be reviewed.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Formula hidden under protection',
+      model_risk: 'A hidden formula\'s logic cannot be verified by any reviewer, including one with full access to the file — this is a materially different, more opaque situation than ordinary row/column/sheet hiding.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula is hidden from the formula bar under active sheet protection', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 65,
+      ...buildRootCauseFields('T0-HIDDENFORMULA-001', hiddenFormulaCheck, { commonRemediationAction: 'Confirm whether hiding this formula is intentional; clear the Hidden attribute if not.' })
     });
   }
 
