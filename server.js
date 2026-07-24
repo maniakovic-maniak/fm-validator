@@ -46,7 +46,7 @@ const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
-const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats } = require('./src/utils/finding-history');
+const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats, normalizeModelIdentity } = require('./src/utils/finding-history');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -1937,12 +1937,15 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     assignRiskScores(allFlagged);
 
     // ── P1/P2/P3 framework renewal, Tier 2 item 2 ──────────────────────────
-    // See the matching comment in index.js for the full rationale.
+    // See the matching comment in index.js for the full rationale,
+    // including the fix for exact-filename matching not surviving
+    // routine re-dating/re-labelling between revisions of the same model.
     const crossRunStats = (() => {
       try {
-        const priorHistory = loadFindingHistory(originalName);
+        const modelIdentity = normalizeModelIdentity(originalName);
+        const priorHistory = loadFindingHistory(modelIdentity);
         const stats = computeCrossRunStats(allFlagged, priorHistory);
-        saveFindingHistory(originalName, stats.updatedHistory);
+        saveFindingHistory(modelIdentity, stats.updatedHistory);
         return stats;
       } catch (e) {
         console.error('   \u26a0\ufe0f  Cross-run tracking failed (this run\'s findings are unaffected, history for next run may not update):', e.message);

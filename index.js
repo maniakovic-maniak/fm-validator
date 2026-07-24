@@ -33,7 +33,7 @@ const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
-const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats } = require('./src/utils/finding-history');
+const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats, normalizeModelIdentity } = require('./src/utils/finding-history');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -1885,14 +1885,30 @@ async function run() {
   // Cross-run Closed/New/Regressed tracking. Depends directly on Tier 2
   // item 1's structured affected_cells — without a real per-cell list,
   // there'd be nothing reliable to fingerprint across runs. Persisted
-  // locally, keyed by the model's original filename; a run against a
-  // renamed file starts fresh history rather than silently mismatching
-  // against an unrelated model, which is the safer failure mode.
+  // locally, keyed by a NORMALIZED model identity (dates and common
+  // revision/status words stripped), not the raw filename.
+  //
+  // FIX: found via a real production run — keying on the exact,
+  // literal filename meant "Financial_Model_The_Bend_12_7_2026.xlsx"
+  // and "Financial_Model_The_Bend_13_7_2026_Audited.xlsx" (genuinely
+  // the same underlying model, one day and one audit pass apart) were
+  // tracked as two completely unrelated models, always showing "First
+  // run for this model" no matter how many real prior runs existed —
+  // exact-filename matching doesn't survive the ordinary case of a
+  // model being re-dated or re-labelled between revisions. Normalizing
+  // trades one risk for a different, smaller one: two genuinely
+  // different models that happen to share a stripped-down base name
+  // (e.g. two unrelated clients' files both just called "Model.xlsx")
+  // would now be incorrectly treated as the same model. There's no way
+  // to eliminate this risk with filename heuristics alone — only
+  // content-based or explicitly-provided identity could — but this is
+  // a better tradeoff than failing on the common case.
   const crossRunStats = (() => {
     try {
-      const priorHistory = loadFindingHistory(originalName);
+      const modelIdentity = normalizeModelIdentity(originalName);
+      const priorHistory = loadFindingHistory(modelIdentity);
       const stats = computeCrossRunStats(allFlagged, priorHistory);
-      saveFindingHistory(originalName, stats.updatedHistory);
+      saveFindingHistory(modelIdentity, stats.updatedHistory);
       return stats;
     } catch (e) {
       console.error('   \u26a0\ufe0f  Cross-run tracking failed (this run\'s findings are unaffected, history for next run may not update):', e.message);

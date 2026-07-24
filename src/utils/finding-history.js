@@ -31,6 +31,60 @@ const path = require('path');
 const HISTORY_DIR = path.join(__dirname, '..', '..', 'logs', 'finding-history');
 if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
 
+// FIX: found via a real production run — "Since last run" was keyed on
+// the exact, literal filename, so "Financial_Model_The_Bend_12_7_2026.xlsx"
+// and "Financial_Model_The_Bend_13_7_2026_Audited.xlsx" (genuinely the
+// same underlying model, one day and one audit pass apart) were tracked
+// as two completely unrelated models, always showing "First run for
+// this model" no matter how many real prior runs existed. Filenames
+// change between revisions in normal use — a new date, an "_Audited"
+// or "_v2" suffix — so exact matching was never going to hold up.
+//
+// Strips date-shaped number sequences and a deliberately narrow list of
+// common revision/status words, then lowercases and collapses
+// whitespace/separators, to get a stable identity that survives routine
+// re-naming across revisions of the same file.
+//
+// Deliberately conservative on the strip list — every entry is a word
+// that describes a REVISION STATE (audited, draft, final, validated,
+// a version number, a parenthesized copy-number), not a word that could
+// be part of a genuinely distinguishing model name. This is a real,
+// inherent tradeoff: two DIFFERENT models that happen to share a
+// stripped-down base name (e.g. two unrelated "Project A" files from
+// different clients) would be incorrectly treated as the same model.
+// There is no way to eliminate this risk with filename heuristics alone
+// — only content-based or explicitly-provided identity could — but the
+// strip list here is narrow enough that this is an edge case, not the
+// common case, and it's a better tradeoff than the previous behavior,
+// which failed on the ordinary case of a model simply being re-dated.
+const DATE_PATTERN_RE = /\b\d{1,4} \d{1,2} \d{1,4}\b/g; // e.g. 12 7 2026, 2026 07 13 (after separators are normalized to spaces below)
+const REVISION_WORD_RE = /\b(audited|validated|draft|final|reviewed|approved|updated|revised|checked|copy|backup|old|new|latest)\b/gi;
+const PAREN_VERSION_RE = /\(\d+\)/g; // (1), (2) -- needs literal parens, checked before separator normalization
+const V_VERSION_RE = /\bv\d+\b/gi; // v1, v2 -- needs a real \b, checked after separator normalization
+
+function normalizeModelIdentity(filename) {
+  let s = String(filename || '');
+  s = s.replace(/\.(xlsx|xlsm|xls|csv)$/i, ''); // drop the file extension first, so it never survives into the identity
+  // Paren-form version suffix must be checked BEFORE parens are
+  // stripped as plain separators below, since it needs the literal
+  // "(1)"/"(2)" shape.
+  s = s.replace(PAREN_VERSION_RE, ' ');
+  // FIX: found via testing — \b word-boundaries don't behave as
+  // expected immediately adjacent to an underscore, since underscore
+  // counts as a "word character" in regex (same class as letters and
+  // digits), so "_12_7_2026", "_Audited", and "_v2" never actually
+  // matched their \b-anchored patterns at all. Separators are
+  // normalized to real spaces FIRST, so the boundary-based regexes
+  // below then match against genuine word boundaries.
+  s = s.replace(/[_\-.()]+/g, ' ');
+  s = s.replace(DATE_PATTERN_RE, ' ');
+  s = s.replace(V_VERSION_RE, ' ');
+  s = s.replace(REVISION_WORD_RE, ' ');
+  s = s.toLowerCase();
+  s = s.replace(/\s+/g, ' ').trim();
+  return s || String(filename || '').toLowerCase(); // never return an empty identity — fall back to the raw (lowercased) filename if normalization strips everything
+}
+
 function historyFilePath(modelKey) {
   const safe = String(modelKey).replace(/[^a-zA-Z0-9._-]/g, '_');
   return path.join(HISTORY_DIR, `${safe}.json`);
@@ -129,4 +183,4 @@ function computeCrossRunStats(findings, history) {
   return { closed, new: newOnes, regressed, stillOpen, updatedHistory, isFirstRun };
 }
 
-module.exports = { loadHistory, saveHistory, currentFingerprints, computeCrossRunStats, historyFilePath };
+module.exports = { loadHistory, saveHistory, currentFingerprints, computeCrossRunStats, historyFilePath, normalizeModelIdentity };
