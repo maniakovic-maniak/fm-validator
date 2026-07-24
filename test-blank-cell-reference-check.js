@@ -1,4 +1,4 @@
-const { checkBlankCellReferences } = require('./src/utils/blank-cell-reference-check.js');
+const { checkBlankCellReferences, groupBlankCellReferencesByTarget } = require('./src/utils/blank-cell-reference-check.js');
 const ExcelJS = require('exceljs');
 
 async function main() {
@@ -69,6 +69,36 @@ async function main() {
   check('a string literal resembling a cell reference is NOT matched', !result.findings.some(f => f.cell === 'M1'));
   check('a blank cell in a structurally sparse column is correctly excluded (the real bug found via real-file testing)', !result.findings.some(f => f.cell === 'O1'));
   check('exactly 3 genuine findings (C1, L1) -- no false positives, no false negatives', result.flaggedCount === 2);
+
+  // ── groupBlankCellReferencesByTarget: found necessary via
+  // investigating a real production run — 27 genuinely distinct target
+  // patterns were hidden inside one undifferentiated 200-item cap,
+  // including a materially significant one (145 references to a
+  // completely blank "Lease Cash Outgoings" row) getting the same
+  // visibility as a single one-off reference. ──
+  const wsGroup = wb.addWorksheet('GroupTest');
+  for (let r = 1; r <= 30; r++) wsGroup.getCell('A' + r).value = r; // dense column so B stays "real" once populated
+  for (let r = 1; r <= 30; r++) wsGroup.getCell('B' + r).value = r * 2; // dense column, C10 stays genuinely blank
+  wsGroup.getCell('B10').value = undefined;
+  // 5 formulas referencing the SAME blank target (B10) -- one systematic pattern
+  for (let r = 1; r <= 5; r++) wsGroup.getCell('C' + r).value = { formula: 'A' + r + '+B10', result: r };
+  // 1 formula referencing a DIFFERENT blank target (B20) -- a distinct, separate pattern
+  wsGroup.getCell('B20').value = undefined;
+  wsGroup.getCell('D1').value = { formula: 'A1+B20', result: 1 };
+
+  const groupResult = checkBlankCellReferences(wb);
+  const groups = groupBlankCellReferencesByTarget(groupResult.findings.filter(f => f.sheet === 'GroupTest'));
+
+  check('groupBlankCellReferencesByTarget produces exactly 2 distinct groups for 2 distinct target cells',
+    groups.length === 2);
+  check('groups are sorted by occurrence count descending (the 5-occurrence B10 group comes first)',
+    groups[0].targetCell === 'GroupTest!B10' && groups[0].count === 5);
+  check('the smaller, distinct pattern (B20) still gets its own separate group, not merged with B10',
+    groups.some(g => g.targetCell === 'GroupTest!B20' && g.count === 1));
+  check('each group has a unique groupId',
+    new Set(groups.map(g => g.groupId)).size === groups.length);
+  check('total occurrences across all groups reconciles exactly with the raw finding count (no data loss in grouping)',
+    groups.reduce((sum, g) => sum + g.count, 0) === groupResult.findings.filter(f => f.sheet === 'GroupTest').length);
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);

@@ -78,7 +78,15 @@ function colLettersToNum(letters) {
 
 function checkBlankCellReferences(workbook) {
   const findings = [];
-  const MAX_FINDINGS = 200; // this check can fire often on a large, sparse model — cap and note rather than flood the report
+  // FIX: raised from 200 — now that the wiring layer (index.js/
+  // server.js) groups these findings by distinct target row rather
+  // than dumping them into one undifferentiated bucket, the original
+  // reason for a low cap (avoiding a flooded, undifferentiated report)
+  // no longer applies. A real production run hit the 200 cap exactly,
+  // meaning individual pattern occurrence counts were themselves
+  // potentially undercounted — which matters now that those counts
+  // drive confidence/severity scaling per distinct pattern.
+  const MAX_FINDINGS = 3000; // this check can fire often on a large, sparse model — cap and note rather than run unbounded on a pathological case
   const densityCache = new Map(); // sheet name -> Map(colNum -> density), built lazily per sheet
 
   workbook.eachSheet(ws => {
@@ -134,4 +142,34 @@ function checkBlankCellReferences(workbook) {
   };
 }
 
-module.exports = { checkBlankCellReferences };
+module.exports = { checkBlankCellReferences, groupBlankCellReferencesByTarget };
+
+// Groups raw findings by their target cell's sheet+row (stripping the
+// column), so genuinely distinct root causes — a specific blank row
+// referenced many times — surface as separate findings instead of
+// being bundled into one undifferentiated bucket. Found necessary via
+// investigating a real production run: 27 distinct target-row patterns
+// were hidden inside one 200-item cap, including a materially
+// significant one (145 references to a completely blank, labeled
+// "Lease Cash Outgoings" row) that was getting the exact same
+// visibility as a single one-off reference. Sorted by occurrence count
+// descending, so the most systematic (and most likely material)
+// patterns surface first.
+function groupBlankCellReferencesByTarget(findings) {
+  const groups = new Map(); // "Sheet!row" -> findings[]
+  for (const f of findings) {
+    const [refSheet, refCellAddr] = f.referencedCell.split('!');
+    const refRow = refCellAddr.replace(/[A-Z]+/g, '');
+    const key = `${refSheet}!row${refRow}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([key, groupFindings], idx) => ({
+      groupId: `T0-BLANKCELLREF-${String(idx + 1).padStart(3, '0')}`,
+      targetCell: groupFindings[0].referencedCell,
+      count: groupFindings.length,
+      findings: groupFindings,
+    }));
+}

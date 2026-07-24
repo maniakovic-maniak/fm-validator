@@ -14,6 +14,8 @@ const { checkEmbeddedErrorBranches } = require('./src/utils/embedded-error-branc
 const { checkErrorLiteralInFormula } = require('./src/utils/error-literal-in-formula-check');
 const { checkTwoDigitYearExtraction } = require('./src/utils/two-digit-year-check');
 const { checkConstantFormulaCells } = require('./src/utils/constant-formula-check');
+const { checkOverflowError } = require('./src/utils/overflow-error-check');
+const { checkMixedReferences } = require('./src/utils/mixed-reference-check');
 const { checkDsraSizing } = require('./src/utils/dsra-sizing-check');
 const { checkComplexFormulas } = require('./src/utils/complex-formula-check');
 const { checkNumbersStoredAsText } = require('./src/utils/number-as-text-check');
@@ -24,7 +26,7 @@ const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-che
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
 const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-counting-check');
-const { checkBlankCellReferences } = require('./src/utils/blank-cell-reference-check');
+const { checkBlankCellReferences, groupBlankCellReferencesByTarget } = require('./src/utils/blank-cell-reference-check');
 const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
@@ -691,6 +693,73 @@ async function run() {
     });
   }
 
+  // ── Overflow error (book-mining) ─────────────────────────────────────────
+  // Sourced from Patrick O'Beirne's "Excel 2013 Spreadsheet Inquire"
+  // review (EuSpRIG 2013), found in a book-mining pass — named
+  // explicitly as a gap: "an overflow error, such as a negative or
+  // excessive date value, is not reported... but as a real date...
+  // rather than the ##### error value." Real-file testing on The Bend
+  // model confirmed two distinct real causes for the same symptom:
+  // genuine date-arithmetic overflow, and — the more common case found —
+  // a dashboard cell pulling a dollar figure through a bare reference
+  // while still carrying a stale date-style number format, producing
+  // an absurd multi-millennium "date" on screen. Also found and fixed a
+  // real crash: an actually-invalid Date object (not just implausible)
+  // threw on .toISOString() rather than being handled.
+  const overflowErrorCheck = (() => { try { return checkOverflowError(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Overflow error check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (overflowErrorCheck.applicable && overflowErrorCheck.findings.length > 0) {
+    const sample = overflowErrorCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-OVERFLOW-001',
+      label: `${overflowErrorCheck.findings.length} cell(s) show an implausible or invalid date`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${overflowErrorCheck.findings.length} formula cell(s) evaluate to a date far outside any plausible range (or an actually invalid date), including: ${sample}${overflowErrorCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${overflowErrorCheck.findings.length} cell(s) show a nonsensical date with no visible error`,
+      corrective_action: 'Check whether the underlying calculation is genuinely producing a wrong date, or whether the cell simply has a stale date-style number format applied to an unrelated value — correct whichever applies.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Overflow / implausible date',
+      model_risk: 'A nonsensical date displays as ordinary-looking content rather than a visible error, and can be easily missed on a quick review.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Formula result is a date far outside any plausible range, or is invalid', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 35,
+      ...buildRootCauseFields('T0-OVERFLOW-001', overflowErrorCheck, { commonRemediationAction: 'Correct the underlying calculation, or fix the cell\'s number format if the value itself is correct.' })
+    });
+  }
+
+  // ── Mixed absolute/relative range references (book-mining) ──────────────
+  // Sourced from the Operis Analysis Kit manual's "Cell reference
+  // profligacy" section, found in a book-mining pass — Operis's own
+  // example: "=SUM($A1:C1)... evaluate to ranges of different size as
+  // they are copied." Real-file testing on The Bend model found this
+  // is very often a deliberate pattern (a running/cumulative total
+  // with one boundary anchored to a fixed starting point, the other
+  // growing as the formula is copied across periods), not a mistake —
+  // but per Operis's own stated view, even a deliberate mixed reference
+  // "merits careful examination" since, unlike an ordinary copied
+  // formula, its correctness can't be inferred from a neighbouring
+  // cell being correct.
+  const mixedRefCheck = (() => { try { return checkMixedReferences(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Mixed reference check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (mixedRefCheck.applicable && mixedRefCheck.findings.length > 0) {
+    const sample = mixedRefCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-MIXEDREF-001',
+      label: `${mixedRefCheck.findings.length} range reference(s) mix absolute and relative addressing`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${mixedRefCheck.findings.length} range reference(s) mix absolute and relative addressing between their two endpoints, so their effective size changes depending on where the formula is copied to, including: ${sample}${mixedRefCheck.findings.length > 8 ? ' and others' : ''}.`,
+      reason: `${mixedRefCheck.findings.length} range reference(s) mix absolute and relative addressing`,
+      corrective_action: 'Confirm the range is growing (or shrinking) as intended — often a deliberate running/cumulative total, but worth a quick check since its correctness can\'t be inferred from a neighbouring cell the way an ordinary copied formula\'s can.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Mixed absolute/relative range reference',
+      model_risk: 'A range whose size changes as it\'s copied behaves differently from cell to cell in a way that isn\'t visible just by looking at the formula bar for one cell.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Range reference mixes absolute and relative addressing between its two endpoints', escalation_flag: false,
+      urgency: 'Next scheduled review', confidence: 35,
+      ...buildRootCauseFields('T0-MIXEDREF-001', mixedRefCheck, { commonRemediationAction: 'Confirm the range is growing or shrinking as intended.' })
+    });
+  }
+
   // ── DSRA target sizing ───────────────────────────────────────────────────
   // Sourced from TWO independent references citing the same customary
   // practice: Ofgem's Cap and Floor Financial Model Handbook (D4) and
@@ -1000,24 +1069,50 @@ async function run() {
   // common and must not be flagged. A real-file test run also
   // surfaced a genuine false-positive class (a structural spacer/label
   // column with low overall population) which is now filtered too.
+  //
+  // FIX: found via investigating a real production run — 27 genuinely
+  // distinct target-row patterns were hidden inside one undifferentiated
+  // 200-item cap, all sharing a single low-severity finding ID. The
+  // largest (94 references to a completely blank, labeled "Lease Cash
+  // Outgoings" row — a real, material cost category potentially missing
+  // from the entire model) was getting the exact same visibility as a
+  // single one-off reference. Grouped by distinct target sheet+row
+  // instead, so each real pattern surfaces as its own finding, with
+  // confidence scaled by occurrence count — a pattern repeating across
+  // many periods is a stronger signal of a systematic issue than an
+  // isolated reference.
   const blankCellRefCheck = (() => { try { return checkBlankCellReferences(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Blank cell reference check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   if (blankCellRefCheck.applicable && blankCellRefCheck.findings.length > 0) {
-    const sample = blankCellRefCheck.findings.slice(0, 5).map(f => f.cell).join(', ');
-    allFlagged.push({
-      id: 'T0-BLANKCELLREF-001',
-      label: `${blankCellRefCheck.findings.length} formula(s) with a bare reference to a genuinely blank cell`,
-      severity: 'low', status: 'fail',
-      sheet: '', cell: 'A1', category: 'Structure',
-      condition: `${blankCellRefCheck.findings.length} formula(s) contain a bare single-cell reference to a genuinely blank cell, including: ${sample}.`,
-      reason: `${blankCellRefCheck.findings.length} formula(s) reference a blank cell rather than an explicit value`,
-      corrective_action: 'Confirm whether the reference is intentional (delete it if not needed) or the referenced cell should contain a formula or input value.',
-      workstream: 'Structure', category: 'Structure', issue_type: 'Reference to blank cell',
-      model_risk: 'Excel evaluates a blank reference as 0 today with no visible error — but a stray value later landing in that cell would silently flow into the calculation with no warning.',
-      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
-      root_cause: 'Formula contains a bare reference to a cell with no value or formula', escalation_flag: false,
-      urgency: 'Next scheduled review', confidence: 40,
-      ...buildRootCauseFields('T0-BLANKCELLREF-001', blankCellRefCheck, { commonRemediationAction: 'Confirm whether the reference is intentional; delete it or populate the referenced cell as appropriate.' })
+    const groups = groupBlankCellReferencesByTarget(blankCellRefCheck.findings);
+    groups.forEach(({ groupId, targetCell, count, findings: groupFindings }) => {
+      const sample = groupFindings.slice(0, 5).map(f => f.cell).join(', ');
+      // Larger, more systematic patterns get more confidence and
+      // severity — repeating across many periods is a stronger signal
+      // than a single isolated reference.
+      const isSystematic = count >= 10;
+      allFlagged.push({
+        id: groupId,
+        label: `${count} formula(s) reference the genuinely blank cell ${targetCell}`,
+        severity: isSystematic ? 'medium' : 'low', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: `${count} formula(s) contain a bare reference to ${targetCell}, which is genuinely blank across the cells checked, including: ${sample}.`,
+        reason: `${count} formula(s) reference the blank cell ${targetCell}`,
+        corrective_action: `Confirm whether ${targetCell} and the row it's part of should contain real data — this pattern repeats across ${count} formula(s), which is a stronger signal of a systematic gap than an isolated reference.`,
+        workstream: 'Structure', category: 'Structure', issue_type: 'Reference to blank cell',
+        model_risk: isSystematic
+          ? `A row referenced ${count} times but never populated is a strong signal of a genuinely missing line item — Excel evaluates the blank reference as 0 with no visible error, so this can silently omit a real cost, revenue, or other figure across the entire model.`
+          : 'Excel evaluates a blank reference as 0 today with no visible error — but a stray value later landing in that cell would silently flow into the calculation with no warning.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: `Formula(s) reference the blank cell ${targetCell}`, escalation_flag: false,
+        urgency: isSystematic ? 'Before next reliance' : 'Next scheduled review',
+        confidence: isSystematic ? 55 : 40,
+        root_cause_id: groupId, master_finding_id: groupId,
+        occurrence_count: count, material_occurrence_count: count,
+        affected_cells: groupFindings.map(f => `${f.sheet}!${f.cell}`),
+        affected_sheets: [...new Set(groupFindings.map(f => f.sheet))],
+        common_remediation_action: 'Confirm whether the reference is intentional; delete it or populate the referenced cell as appropriate.',
+      });
     });
   }
 
