@@ -243,6 +243,8 @@ function buildReviewPrompt(files, graph) {
 ${dependencySection}
 If you find nothing wrong, return an empty bugs array — do not invent minor nitpicks to seem useful. It is normal and expected for most scans to return zero bugs.
 
+If you investigate something that looks suspicious and conclude it is NOT actually a bug, do not add it to the array at all — not even with a description explaining why it turned out to be fine. A real run of this tool showed the array ending up with entries whose own description said things like "this is not a bug", "skipping", or "retracted" — those entries should never have been added in the first place. The bugs array must contain ONLY entries you are confident are genuine, confirmed bugs. Work through your reasoning before deciding, then only call the tool with the bugs that survive that reasoning.
+
 For each genuine bug found, you MUST provide old_code as an EXACT, VERBATIM, UNIQUE substring of the file it comes from (copy it exactly, whitespace and all) — this will be used for an automated, literal string-replacement fix, so it must match the file's actual content precisely and must not appear more than once in that file. old_code and new_code must both come from the SAME file (the one named in "file") — a cross-file bug still gets fixed one file at a time.
 
 Report your findings using the report_bugs tool.
@@ -325,10 +327,38 @@ async function reviewFileBatch(client, files, graph) {
 // Pulled out as a standalone function specifically so it's testable
 // against a mocked response object without needing a live API call —
 // see test-bug-scan-agent.js.
+// FIX: a real --all run showed ~34% of reported "bugs" (10 of 29) were
+// the model investigating a candidate mid-description, concluding it
+// wasn't actually a bug, and leaving the entry in the array anyway --
+// descriptions literally containing phrases like "this is not a bug",
+// "skipping", "retracted", "no bug found here". The prompt instruction
+// was strengthened to say these should never be added in the first
+// place, but this filter is a deterministic backstop that doesn't
+// depend on the model reliably following that instruction every time.
+const SELF_RETRACTION_PATTERNS = [
+  /\bnot\s+a\s+(?:genuine\s+|real\s+)?bug\b/i,
+  /\bno\s+bug(?:s)?\s+(?:found|reported)\b/i,
+  /\bno\s+real\s+issue\b/i,
+  /\bskipping\b/i,
+  /\bretracted\b/i,
+  /\bnot\s+flagging\b/i,
+  /\bself-correction\b/i,
+];
+
+function isSelfRetracted(bug) {
+  const text = String(bug && bug.description || '');
+  return SELF_RETRACTION_PATTERNS.some(re => re.test(text));
+}
+
 function extractBugsFromResponse(response) {
   const toolUseBlock = response.content.find(b => b.type === 'tool_use' && b.name === 'report_bugs');
   if (toolUseBlock && Array.isArray(toolUseBlock.input && toolUseBlock.input.bugs)) {
-    return toolUseBlock.input.bugs;
+    const allBugs = toolUseBlock.input.bugs;
+    const retracted = allBugs.filter(isSelfRetracted);
+    if (retracted.length > 0) {
+      console.error(`   \u26a0\ufe0f  Filtered ${retracted.length} self-retracted entr${retracted.length === 1 ? 'y' : 'ies'} whose own description said it wasn't actually a bug (${retracted.map(b => b.file).join(', ')})`);
+    }
+    return allBugs.filter(b => !isSelfRetracted(b));
   }
 
   // A forced tool_choice should make this path unreachable in normal
@@ -528,5 +558,5 @@ module.exports = {
   getChangedFiles, getAllReviewableFiles,
   parseLocalRequires, buildDependencyGraph, orderByDependencyProximity,
   describeInBatchDependencies, batchFiles, buildReviewPrompt,
-  extractBugsFromResponse,
+  extractBugsFromResponse, isSelfRetracted,
 };
