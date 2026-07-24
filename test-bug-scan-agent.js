@@ -1,6 +1,7 @@
 const {
   parseLocalRequires, buildDependencyGraph, orderByDependencyProximity,
   describeInBatchDependencies, batchFiles, buildReviewPrompt,
+  extractBugsFromResponse,
 } = require('./scripts/bug-scan-agent.js');
 
 function run() {
@@ -82,36 +83,46 @@ function run() {
   check('prompt omits the dependency section entirely when no graph is supplied (no crash, no empty section either)',
     !promptNoGraph.includes('Dependency relationships among these files'));
 
-  // ── Prefill-prepending JSON parsing (replicated in isolation, since
-  // the real logic lives inside reviewFileBatch which needs a live API
-  // call) — simulates what the API actually returns: only the
-  // CONTINUATION after the prefill, never the prefill itself. ──
-  const jsonPrefill = '{\n  "bugs": [';
-  function parseWithPrefill(continuationText) {
-    const fullText = jsonPrefill + continuationText;
-    const cleaned = fullText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-    return JSON.parse(cleaned);
-  }
+  // ── extractBugsFromResponse: the tool-use response parser ──────────────
+  // Replaces the earlier assistant-prefill approach, which the API
+  // rejected outright with a real error ("This model does not support
+  // assistant message prefill"). Tested here against mocked response
+  // objects matching the real SDK's content-block shape.
 
-  // Case: model continues cleanly with zero bugs
-  const emptyResult = parseWithPrefill(']\n}');
-  check('prefill + empty continuation correctly parses to zero bugs',
-    Array.isArray(emptyResult.bugs) && emptyResult.bugs.length === 0);
+  const emptyBugsResponse = {
+    stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [] } }],
+  };
+  check('extractBugsFromResponse correctly returns an empty array for a clean tool_use response',
+    JSON.stringify(extractBugsFromResponse(emptyBugsResponse)) === '[]');
 
-  // Case: model continues with one real bug object
-  const oneBugContinuation = `
-    {
-      "file": "x.js",
-      "severity": "high",
-      "description": "d",
-      "old_code": "a",
-      "new_code": "b"
-    }
-  ]
-}`;
-  const oneBugResult = parseWithPrefill(oneBugContinuation);
-  check('prefill + a real bug continuation parses correctly into a complete bug object',
-    oneBugResult.bugs.length === 1 && oneBugResult.bugs[0].file === 'x.js');
+  const realBugResponse = {
+    stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [
+      { file: 'x.js', severity: 'high', description: 'd', old_code: 'a', new_code: 'b' },
+    ] } }],
+  };
+  const extracted = extractBugsFromResponse(realBugResponse);
+  check('extractBugsFromResponse correctly extracts a real bug object, already parsed (no JSON.parse needed)',
+    extracted.length === 1 && extracted[0].file === 'x.js' && extracted[0].severity === 'high');
+
+  // A response with a thinking block ALONGSIDE the tool_use block --
+  // the extractor must find the tool_use block specifically, not be
+  // confused by other block types being present too.
+  const withThinkingResponse = {
+    stop_reason: 'tool_use',
+    content: [
+      { type: 'thinking', thinking: 'reasoning about the code...' },
+      { type: 'tool_use', name: 'report_bugs', input: { bugs: [] } },
+    ],
+  };
+  check('extractBugsFromResponse correctly finds the tool_use block even alongside a thinking block',
+    JSON.stringify(extractBugsFromResponse(withThinkingResponse)) === '[]');
+
+  // Malformed / unexpected response -- must not throw, must return []
+  const malformedResponse = { stop_reason: 'end_turn', content: [{ type: 'text', text: 'unexpected prose' }] };
+  check('extractBugsFromResponse handles a missing tool_use block gracefully (no crash, returns [])',
+    JSON.stringify(extractBugsFromResponse(malformedResponse)) === '[]');
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);

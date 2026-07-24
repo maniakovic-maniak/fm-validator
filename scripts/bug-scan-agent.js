@@ -245,18 +245,7 @@ If you find nothing wrong, return an empty bugs array — do not invent minor ni
 
 For each genuine bug found, you MUST provide old_code as an EXACT, VERBATIM, UNIQUE substring of the file it comes from (copy it exactly, whitespace and all) — this will be used for an automated, literal string-replacement fix, so it must match the file's actual content precisely and must not appear more than once in that file. old_code and new_code must both come from the SAME file (the one named in "file") — a cross-file bug still gets fixed one file at a time.
 
-Respond with ONLY a JSON object in this exact shape, no other text:
-{
-  "bugs": [
-    {
-      "file": "path/as/shown/above",
-      "severity": "high" | "medium" | "low",
-      "description": "what the bug is and why it's a problem",
-      "old_code": "exact verbatim unique substring to replace",
-      "new_code": "the corrected replacement"
-    }
-  ]
-}
+Report your findings using the report_bugs tool.
 
 Files to review:
 
@@ -267,71 +256,90 @@ ${fileBlocks}`;
 // bugs array (or null on a parse failure, already logged). Shared by
 // both scanChangedFiles (always exactly one small batch) and
 // scanAllFiles (potentially many batches).
+// The JSON schema report_bugs' input must match — kept as a single
+// source of truth rather than duplicated between the tool definition
+// and any manual validation.
+const REPORT_BUGS_SCHEMA = {
+  type: 'object',
+  properties: {
+    bugs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          file: { type: 'string', description: 'Repo-relative path exactly as shown in the reviewed files' },
+          severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+          description: { type: 'string', description: "What the bug is and why it's a problem" },
+          old_code: { type: 'string', description: 'Exact, verbatim, unique substring of the file to replace' },
+          new_code: { type: 'string', description: 'The corrected replacement' },
+        },
+        required: ['file', 'severity', 'description', 'old_code', 'new_code'],
+      },
+    },
+  },
+  required: ['bugs'],
+};
+
 async function reviewFileBatch(client, files, graph) {
   const prompt = buildReviewPrompt(files, graph);
-  // FIX: a real run's batch 19 showed a second, distinct failure mode
-  // from the thinking-truncation one above — stop_reason 'end_turn'
-  // (not truncated at all), content block types 'thinking, text', but
-  // the text block was natural-language prose analysis ("Looking
-  // through all these test files carefully...") instead of the
-  // requested JSON, despite the prompt explicitly saying "ONLY a JSON
-  // object... no other text". Prefilling the assistant turn with the
-  // JSON's own opening is a standard, reliable way to force the model
-  // to continue in that format rather than choosing prose — the API
-  // only returns the continuation, so the prefill is prepended back on
-  // before parsing.
-  const jsonPrefill = '{\n  "bugs": [';
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
     // FIX: a real --all run showed the actual root cause via the
-    // diagnostics added in the previous fix — stop_reason: 'max_tokens',
+    // diagnostics added in an earlier fix — stop_reason: 'max_tokens',
     // content block types: 'thinking' (sometimes 'thinking' alone, no
     // 'text' block at all), rawText length: 0. Extended thinking was
     // consuming the ENTIRE budget before generating any of the actual
     // requested JSON output, in the large majority of batches. Raising
-    // max_tokens alone (the previous fix, 8000 -> 16000) did not
-    // resolve this, since thinking has no inherent bound tied to that
-    // number. Explicitly disabling thinking removes the failure mode
-    // deterministically rather than hoping a larger budget happens to
-    // leave enough room — verified against the installed SDK's own
-    // type definitions (ThinkingConfigDisabled), not guessed.
+    // max_tokens alone did not resolve this, since thinking has no
+    // inherent bound tied to that number. Explicitly disabling thinking
+    // removes the failure mode deterministically — verified against the
+    // installed SDK's own type definitions (ThinkingConfigDisabled).
     thinking: { type: 'disabled' },
     max_tokens: 16000,
-    messages: [
-      { role: 'user', content: prompt },
-      { role: 'assistant', content: jsonPrefill },
-    ],
+    // FIX: a second real failure (batch 19 of the same run) showed the
+    // model producing natural-language prose instead of JSON even
+    // though it wasn't truncated — the prompt's own "respond with ONLY
+    // JSON" instruction was sometimes ignored. The original fix for
+    // this (prefilling the assistant turn with the JSON's opening) was
+    // REJECTED outright by the API with a real, unambiguous error:
+    // "This model does not support assistant message prefill. The
+    // conversation must end with a user message." Tool use with a
+    // forced tool_choice is the correct mechanism for this model
+    // instead — it doesn't just work around the prose-vs-JSON
+    // ambiguity, it eliminates it: the tool_use block's `input` is
+    // already a parsed object matching the schema below, never raw
+    // text requiring a JSON.parse (and its associated code-fence-
+    // stripping, prefill-prepending, etc.) at all.
+    tools: [{
+      name: 'report_bugs',
+      description: 'Reports the genuine bugs found in the reviewed files, or an empty list if none were found.',
+      input_schema: REPORT_BUGS_SCHEMA,
+    }],
+    tool_choice: { type: 'tool', name: 'report_bugs' },
+    messages: [{ role: 'user', content: prompt }],
   });
 
-  const rawText = response.content
-    .filter(b => b.type === 'text')
-    .map(b => b.text)
-    .join('');
-  // The prefill isn't echoed back by the API — only the continuation
-  // is. Prepend it so the combined text is the complete JSON document.
-  const fullText = jsonPrefill + rawText;
+  return extractBugsFromResponse(response);
+}
 
-  try {
-    // Claude may still wrap the JSON in a code fence or add stray
-    // whitespace despite the prefill — stripped defensively rather
-    // than fail the whole batch over it.
-    const cleaned = fullText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-    const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed.bugs) ? parsed.bugs : [];
-  } catch (e) {
-    // FIX: this branch previously only printed rawText itself, which
-    // showed as a blank line when rawText was empty — no way to tell
-    // WHY. Print real diagnostics so a future failure is diagnosable
-    // on the first occurrence rather than requiring another guess.
-    console.error('   \u26a0\ufe0f  Could not parse the review response as JSON for this batch — diagnostics below, continuing with remaining batches:');
-    console.error(`     stop_reason: ${response.stop_reason}`);
-    console.error(`     content block types: ${response.content.map(b => b.type).join(', ') || '(none)'}`);
-    console.error(`     rawText length (continuation only, before prefill): ${rawText.length}`);
-    if (rawText.length > 0) {
-      console.error(`     rawText (first 500 chars): ${rawText.slice(0, 500)}`);
-    }
-    return [];
+// Pulled out as a standalone function specifically so it's testable
+// against a mocked response object without needing a live API call —
+// see test-bug-scan-agent.js.
+function extractBugsFromResponse(response) {
+  const toolUseBlock = response.content.find(b => b.type === 'tool_use' && b.name === 'report_bugs');
+  if (toolUseBlock && Array.isArray(toolUseBlock.input && toolUseBlock.input.bugs)) {
+    return toolUseBlock.input.bugs;
   }
+
+  // A forced tool_choice should make this path unreachable in normal
+  // operation, but printing real diagnostics rather than silently
+  // returning [] means a genuine future failure is still diagnosable
+  // on the first occurrence, the same lesson learned from the two
+  // failures above.
+  console.error('   \u26a0\ufe0f  Expected a report_bugs tool_use block but did not get one for this batch — diagnostics below, continuing with remaining batches:');
+  console.error(`     stop_reason: ${response.stop_reason}`);
+  console.error(`     content block types: ${response.content.map(b => b.type).join(', ') || '(none)'}`);
+  return [];
 }
 
 async function scanChangedFiles(sinceRef) {
@@ -520,4 +528,5 @@ module.exports = {
   getChangedFiles, getAllReviewableFiles,
   parseLocalRequires, buildDependencyGraph, orderByDependencyProximity,
   describeInBatchDependencies, batchFiles, buildReviewPrompt,
+  extractBugsFromResponse,
 };
