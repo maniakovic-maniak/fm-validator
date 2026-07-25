@@ -1,7 +1,7 @@
 {
-  "version": 7.0,
+  "version": 7.1,
   "name": "checklist-full-v7",
-  "description": "Reliance-grade audit checklist \u2014 159 rules across 13 sections. Source-traceable to Checklist_21_6_2026. Covers automatable subset only \u2014 diagnostics accelerate review but do not replace human judgment, source-document review or commercial omission testing.",
+  "description": "Reliance-grade audit checklist \u2014 165 rules across 13 sections. Source-traceable to Checklist_21_6_2026 (v7) plus a 2026-07-25 gap-analysis addition (v7.1, 6 rules: reverse stress testing, combined downside stress, sources-and-uses sufficiency, interest rate stress, post-opening ramp-up stress, qualitative risk mapping). Covers automatable subset only \u2014 diagnostics accelerate review but do not replace human judgment, source-document review or commercial omission testing.",
   "source_document": "Checklist_21_6_2026__Accounting_checks_added.xlsx",
   "source_standard": "ICAEW FMC + FAST + PwC GMG + ASIC RG170 + ASAE3450 (v7: ICAEW FMC gap-fill pass)",
   "active": true,
@@ -2011,6 +2011,78 @@
       "fix_instruction": "Calculation formulas reference cells on other sheets directly, several layers deep, rather than importing the value once via a single local 'call-up' cell on the calculating sheet. Add a local reference cell for each externally-sourced value and have downstream formulas reference that local cell, so formulas can be read without a sheet qualifier and without navigating away.",
       "requires_formula_text": true,
       "mode_a_note": "This test cannot be reliably completed in Mode A (cell values only). Return uncertain with confidence capped at 30 and state that formula text inspection is required."
+    },
+    {
+      "id": "T2-S8-009",
+      "section": "8.3",
+      "label": "Reverse stress test / breakeven analysis exists for covenant compliance",
+      "source_id": "GAP-001",
+      "source_section": "Financial_Model_Audit_Procedures_Missing_From_Original_Audit.txt / what_was_missed_in_last_model_review.txt (gap-analysis review, 2026-07-25)",
+      "test": "reverse_stress_test_exists",
+      "severity": "high",
+      "manual_only": false,
+      "fixable": false,
+      "fix_instruction": "Build a schedule that solves for the revenue or EBITDA decline required to breach the tightest covenant (e.g. DSCR), rather than only showing headroom at the base case."
+    },
+    {
+      "id": "T2-S8-010",
+      "section": "8.3",
+      "label": "A combined, multi-variable downside case exists \u2014 not only single-variable stress tests",
+      "source_id": "GAP-002",
+      "source_section": "Financial_Model_Audit_Procedures_Missing_From_Original_Audit.txt / what_was_missed_in_last_model_review.txt (gap-analysis review, 2026-07-25)",
+      "test": "combined_downside_stress",
+      "severity": "high",
+      "manual_only": false,
+      "fixable": false,
+      "fix_instruction": "Build a combined downside case applying lower revenue, lower margin, higher costs and delayed opening together, not only as isolated single-variable sensitivities."
+    },
+    {
+      "id": "T2-S8-011",
+      "section": "8.3",
+      "label": "Sources and uses reconciles and funding sufficiency is demonstrated under stress",
+      "source_id": "GAP-003",
+      "source_section": "Financial_Model_Audit_Procedures_Missing_From_Original_Audit.txt / what_was_missed_in_last_model_review.txt (gap-analysis review, 2026-07-25)",
+      "test": "sources_and_uses_sufficiency",
+      "severity": "high",
+      "manual_only": false,
+      "fixable": false,
+      "fix_instruction": "Build a period-by-period sources and uses check and confirm the model shows an explicit funding gap or additional equity requirement under stress, rather than a silent negative cash balance or plug."
+    },
+    {
+      "id": "T2-S8-012",
+      "section": "8.3",
+      "label": "Interest rate stress test exists with correctly directional impact",
+      "source_id": "GAP-004",
+      "source_section": "Financial_Model_Audit_Procedures_Missing_From_Original_Audit.txt / what_was_missed_in_last_model_review.txt (gap-analysis review, 2026-07-25)",
+      "test": "interest_rate_stress_test",
+      "severity": "medium",
+      "manual_only": false,
+      "fixable": false,
+      "fix_instruction": "Confirm interest rate assumptions can be stressed and that DSCR, cash flow and covenant outputs respond directionally correctly."
+    },
+    {
+      "id": "T2-S8-013",
+      "section": "8.3",
+      "label": "Delayed post-opening ramp-up (distinct from delayed start) is stress-tested",
+      "source_id": "GAP-005",
+      "source_section": "Financial_Model_Audit_Procedures_Missing_From_Original_Audit.txt / what_was_missed_in_last_model_review.txt (gap-analysis review, 2026-07-25)",
+      "test": "delayed_rampup_stress",
+      "severity": "medium",
+      "manual_only": false,
+      "fixable": false,
+      "fix_instruction": "Test a slower demand/utilisation ramp-up curve after opening, separately from a delayed opening date \u2014 the two represent different real-world risks and should not be assumed to be covered by the same test."
+    },
+    {
+      "id": "T2-S12-011",
+      "section": "12.10",
+      "label": "Named qualitative business risks are mapped to specific model assumptions or scenarios",
+      "source_id": "GAP-006",
+      "source_section": "Financial_Model_Audit_Procedures_Missing_From_Original_Audit.txt / what_was_missed_in_last_model_review.txt (gap-analysis review, 2026-07-25)",
+      "test": "qualitative_risk_mapping",
+      "severity": "medium",
+      "manual_only": false,
+      "fixable": false,
+      "fix_instruction": "Map material qualitative risks (e.g. single-asset concentration, key-person dependency, execution/ramp-up risk) to the specific assumption or scenario meant to represent them, and note explicitly where a risk cannot be reliably modelled."
     }
   ]
 }

@@ -66,7 +66,7 @@ const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwn
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
-const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness } = require('./src/utils/reasonableness-checks');
+const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
@@ -255,9 +255,11 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const reasonableness = (() => { try { return {
     waccOverride: checkWaccOverride(parsed._raw),
     terminalValue: checkTerminalValueConcentration(parsed._raw),
-    outputs: checkOutputReasonableness(parsed._raw)
+    outputs: checkOutputReasonableness(parsed._raw),
+    revenuePerUnit: checkRevenuePerUnitMetric(parsed._raw),
+    terminalValueCrossCheck: checkTerminalValueCrossCheck(parsed._raw)
   }; } catch (e) { console.error('   \u26a0\ufe0f  Reasonableness checks failed:', e.message);
-    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false} }; } })();
+    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false} }; } })();
   const duplicateSheets = (() => { try { return detectDuplicateSheets(parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
   const formulaDeepDive = wantsDeepDive
@@ -1971,6 +1973,37 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
           model_risk: 'A model can be perfectly wired and still produce commercially unrealistic outputs — these are not automatically wrong, but require named, specific challenge before reliance.',
           key_output_impact: 'Yes', method: 'automated', needs_retest: false, root_cause: 'Aggressive underlying assumptions',
           escalation_flag: false, urgency: 'Before external circulation', confidence: 75
+        });
+      }
+      // ── Revenue-per-unit reasonableness metric existence (2026-07-25
+      // gap-analysis review) — absence of evidence is a weaker signal
+      // than the positive-match checks above (the metric could exist
+      // under wording this check's term list didn't anticipate), so
+      // confidence is calibrated lower and framed as a query, not a
+      // confirmed defect.
+      if (reasonableness.revenuePerUnit.applicable && reasonableness.revenuePerUnit.found === false) {
+        allFlagged.push({
+          id: 'T0-RSN-004', label: 'No revenue-per-unit reasonableness metric found in this workbook',
+          severity: 'medium', status: 'fail', sheet: '', cell: 'A1',
+          category: 'Reasonableness', condition: reasonableness.revenuePerUnit.note, reason: reasonableness.revenuePerUnit.note,
+          corrective_action: 'Add a revenue-per-unit metric (e.g. per event-night, per patron, per capacity unit, per tonne) that a reviewer can benchmark against comparable-business evidence.',
+          workstream: 'Valuation', issue_type: 'Revenue reasonableness',
+          model_risk: 'Without any per-unit revenue figure, the overall revenue build has no benchmarkable anchor a reviewer can sanity-check against market or comparable-operator evidence.',
+          key_output_impact: 'Unknown', method: 'automated', needs_retest: false, root_cause: 'No revenue-per-unit metric built',
+          escalation_flag: false, urgency: 'Next scheduled review', confidence: 40
+        });
+      }
+      // ── Terminal value alternate cross-check existence (same review) ──
+      if (reasonableness.terminalValueCrossCheck.applicable && reasonableness.terminalValueCrossCheck.found === false) {
+        allFlagged.push({
+          id: 'T0-RSN-005', label: 'Terminal value has no independent cross-check',
+          severity: 'medium', status: 'fail', sheet: '', cell: 'A1',
+          category: 'Reasonableness', condition: reasonableness.terminalValueCrossCheck.note, reason: reasonableness.terminalValueCrossCheck.note,
+          corrective_action: 'Add a second, independent cross-check for the terminal value assumption (implied buyer return, implied yield, replacement cost, or revenue multiple) alongside the exit multiple already used.',
+          workstream: 'Valuation', issue_type: 'Terminal value reasonableness',
+          model_risk: 'Terminal value is often the largest single driver of total return — resting it on one unchallenged exit multiple, with no independent method corroborating it, is a real gap even where the multiple itself looks reasonable.',
+          key_output_impact: 'Yes', method: 'automated', needs_retest: false, root_cause: 'No independent terminal value cross-check',
+          escalation_flag: false, urgency: 'Before external circulation', confidence: 40
         });
       }
       if (duplicateSheets.applicable && duplicateSheets.flaggedCount > 0) {

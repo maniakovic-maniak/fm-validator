@@ -168,4 +168,87 @@ function checkOutputReasonableness(workbook) {
   };
 }
 
-module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness };
+// ── Revenue-per-unit reasonableness metric existence ────────────────────
+// Sourced from a 2026-07-25 gap-analysis review of a real prior model
+// review: "No detailed bridge from capacity, event nights, attendance,
+// ticket price and ancillary spend to revenue... No implied revenue per
+// event-night, per patron, or per available capacity unit." Unlike the
+// checks above, there is no universal numeric benchmark here — revenue
+// per event-night varies enormously by venue type, location, and scale.
+// The real gap this check surfaces is EXISTENCE, not a threshold: does
+// the model build any per-unit revenue metric that a reviewer could use
+// to sanity-check the overall revenue build against comparable evidence
+// at all? A model with zero such metric anywhere gives a reviewer
+// nothing to benchmark against, regardless of what the "right" number
+// would be.
+const REVENUE_PER_UNIT_TERMS = [
+  'revenue per event', 'revenue per patron', 'revenue per attendee',
+  'revenue per seat', 'revenue per capacity', 'revenue per guest',
+  'revenue per visitor', 'revenue per customer', 'revenue per member',
+  'revenue per unit', 'revenue per tonne', 'revenue per ticket',
+  'average ticket value', 'average spend per', 'yield per event',
+  'average revenue per',
+];
+
+function checkRevenuePerUnitMetric(workbook) {
+  for (const term of REVENUE_PER_UNIT_TERMS) {
+    const found = findLabeledValues(workbook, [term]);
+    if (found.length > 0) {
+      const pick = pickModalCandidate(found);
+      return {
+        applicable: true, found: true,
+        metric: term, location: `${pick.sheet}!${pick.valueCell}`,
+        note: `A revenue-per-unit reasonableness metric was found ("${term}" at ${pick.sheet}!${pick.valueCell}) — the revenue build has at least one benchmarkable figure a reviewer can sanity-check against comparable evidence.`,
+      };
+    }
+  }
+  return {
+    applicable: true, found: false,
+    note: 'No revenue-per-unit reasonableness metric (e.g. revenue per event-night, per patron, per capacity unit, per tonne) was found anywhere in this workbook. This is not a numeric threshold check — there is no universal benchmark for what such a figure should be, and the tool has no live comparable-business data feed. The gap is that the revenue build appears to have no benchmarkable per-unit figure at all for a reviewer to sanity-check against market or comparable-operator evidence.',
+  };
+}
+
+// ── Terminal value alternate cross-check existence ───────────────────────
+// Sourced from the same 2026-07-25 gap-analysis review: "No cross-check
+// of terminal value against yield on cost, replacement cost, revenue
+// multiple or implied buyer return." checkTerminalValueConcentration
+// above already measures how much of total NPV depends on the exit
+// assumption; this check asks a different question — does the model
+// corroborate that exit assumption through a SECOND, independent method,
+// or does it rest on a single unchallenged multiple? Deliberately an
+// existence check, not a numeric comparison — cross-checking a single
+// labelled value against another labelled value with no shared
+// mechanical relationship between them (e.g. an EBITDA-multiple exit
+// vs. an "implied buyer return" percentage) can't be meaningfully
+// verified as arithmetically consistent without knowing the specific
+// model's own derivation logic, which this tool does not have.
+const TV_CROSS_CHECK_TERMS = [
+  'implied buyer return', 'implied purchaser return', 'implied yield',
+  'exit yield', 'replacement cost', 'revenue multiple',
+  'implied cap rate', 'implied capitalisation rate',
+];
+
+function checkTerminalValueCrossCheck(workbook) {
+  const tv = findLabeledValues(workbook, ['pv of terminal value', 'terminal value']);
+  if (tv.length === 0) {
+    return { applicable: false, note: 'No labelled Terminal Value was found — nothing to cross-check.' };
+  }
+
+  for (const term of TV_CROSS_CHECK_TERMS) {
+    const found = findLabeledValues(workbook, [term]);
+    if (found.length > 0) {
+      const pick = pickModalCandidate(found);
+      return {
+        applicable: true, found: true,
+        metric: term, location: `${pick.sheet}!${pick.valueCell}`,
+        note: `Terminal value has at least one independent cross-check present ("${term}" at ${pick.sheet}!${pick.valueCell}), corroborating the exit assumption through a second method rather than resting on a single unchallenged multiple.`,
+      };
+    }
+  }
+  return {
+    applicable: true, found: false,
+    note: 'A labelled Terminal Value was found, but no independent cross-check (implied buyer return, implied yield, replacement cost, or revenue multiple) was found anywhere in this workbook. Terminal value is often the single largest driver of total return — resting it on one unchallenged exit multiple, with no second method corroborating it, is a real gap even where the multiple itself looks reasonable.',
+  };
+}
+
+module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck };

@@ -528,6 +528,91 @@ Return uncertain with confidence 30.
 State: "Whether financial statement sheets contain original calculations
 or only reference links requires formula text inspection."
 
+### test: reverse_stress_test_exists
+Sourced from a 2026-07-25 gap-analysis review, not the ICAEW/FAST/PwC
+standards the rest of this checklist traces to — a real prior review
+of this model showed covenant headroom at the base case but never
+solved for the decline that would breach it.
+Look for a schedule, sheet, or labelled calculation that solves for
+the revenue or EBITDA decline required to breach the tightest covenant
+(commonly DSCR) — a "breakeven," "reverse stress," or "covenant
+headroom to breach" style calculation, distinct from ordinary
+sensitivity tables that only show outputs at a few preset input levels.
+- If such a schedule exists and appears to solve for a breach threshold → pass
+- If only ordinary sensitivity tables exist (preset input levels, not
+  solved for a breach point) → fail, and say so specifically —
+  showing headroom is not the same as testing to breach
+- If no covenant exists in this model at all → not applicable
+
+### test: combined_downside_stress
+Sourced from the same 2026-07-25 gap-analysis review.
+Look for a scenario or case that combines multiple adverse variables at
+once — lower revenue, lower margin, higher costs, and delayed opening
+together — rather than only single-variable sensitivities tested in
+isolation.
+- If a combined/compound downside case exists → pass
+- If only single-variable sensitivities exist (e.g. revenue alone,
+  costs alone) with no case combining them → fail — note that adverse
+  variables moving together is the realistic downside scenario, and
+  testing them only in isolation can understate real combined risk
+- If evidence is genuinely insufficient to tell → uncertain
+
+### test: sources_and_uses_sufficiency
+Sourced from the same 2026-07-25 gap-analysis review.
+Look for a period-by-period sources and uses reconciliation, and
+evidence that funding sufficiency has been tested under stress (e.g.
+senior debt unavailable, working capital debt unavailable, increased
+capex, delayed drawdown).
+- If a sources and uses schedule exists AND a funding-sufficiency
+  stress case is evidenced → pass
+- If a sources and uses schedule exists but no stress case is evidenced → uncertain
+- If neither exists → fail — note the specific risk: without this,
+  a funding shortfall under stress could surface as a silent negative
+  cash balance or an unexplained plug rather than a visible gap
+
+### test: interest_rate_stress_test
+Sourced from the same 2026-07-25 gap-analysis review.
+Look for evidence that the interest rate assumption can be stressed
+(a sensitivity input, a rate-shock scenario) and that DSCR, cash flow,
+and covenant outputs are shown responding to it.
+- If an interest rate stress case exists and the directional response
+  can be checked → pass or fail based on whether the direction is
+  correct (higher rates should reduce DSCR/cash headroom)
+- If no interest rate stress case is evidenced → fail
+- If interest is fixed-rate for the full facility term by design (no
+  rate risk exists to test) → not applicable, and say so explicitly
+
+### test: delayed_rampup_stress
+Sourced from the same 2026-07-25 gap-analysis review.
+This is distinct from a delayed *start date* test (already covered by
+delayed_start_test) — look specifically for a test of slower demand,
+attendance, or utilisation ramp-up *after* opening has already
+occurred, not a shifted opening date itself.
+- If a distinct post-opening ramp-up stress exists → pass
+- If only a delayed-start test exists and nothing tests a slower
+  ramp curve after opening → fail — note these represent different
+  real-world risks (a late start vs. a slow build to full demand) and
+  a test of one should not be assumed to cover the other
+- If evidence is genuinely insufficient to tell the two apart → uncertain
+
+### test: qualitative_risk_mapping
+Sourced from the same 2026-07-25 gap-analysis review.
+Look for evidence that named qualitative business risks (single-asset
+concentration, key-person dependency, greenfield/execution risk,
+demand ramp-up risk, event-pipeline or customer-pipeline risk, funding
+availability risk, terminal-value dependency) are mapped to a specific
+assumption, scenario, or sensitivity meant to represent them — not
+just mentioned in narrative text with no corresponding model linkage.
+- If material risks are explicitly mapped to specific assumptions or
+  scenarios → pass
+- If risks are named in commentary but not mapped to anything
+  modelled → fail — note this as a documentation/evidence gap: a
+  named risk with no corresponding assumption or scenario cannot be
+  tested for its modelled impact
+- If no risk register or commentary exists at all → uncertain, and
+  note this explicitly as evidence insufficiency rather than assuming
+  no risks exist
+
 ---
 
 ## Step 7: Handling manual_only rules
