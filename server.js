@@ -31,6 +31,7 @@ const { checkOverflowError } = require('./src/utils/overflow-error-check');
 const { checkMixedReferences } = require('./src/utils/mixed-reference-check');
 const { checkWhitespaceSheetNames } = require('./src/utils/whitespace-sheet-name-check');
 const { checkHiddenFormulas } = require('./src/utils/hidden-formula-check');
+const { checkDuplicateCalculationLogic } = require('./src/utils/duplicate-calculation-logic-check');
 const { checkDsraSizing } = require('./src/utils/dsra-sizing-check');
 const { checkComplexFormulas } = require('./src/utils/complex-formula-check');
 const { checkNumbersStoredAsText } = require('./src/utils/number-as-text-check');
@@ -965,6 +966,52 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       root_cause: 'Formula is hidden from the formula bar under active sheet protection', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 65,
       ...buildRootCauseFields('T0-HIDDENFORMULA-001', hiddenFormulaCheck, { commonRemediationAction: 'Confirm whether hiding this formula is intentional; clear the Hidden attribute if not.' })
+    });
+  }
+
+  // ── Duplicate calculation logic across sheets (Tier 0 complement to
+  // the manual_only Tier 2 rule T2-S1-004) ─────────────────────────────────
+  // Sourced from real user feedback that a naive "no calculation in
+  // more than one sheet" rule would incorrectly flag legitimate
+  // aggregation — a detail table's line items feeding a single summary
+  // formula that's then linked elsewhere is correct, expected
+  // structure; not every line item needs to independently reach the
+  // financial statements. Grounded in a real best-practice principle
+  // (RÖDL's "10 Golden Rules of Financial Modeling": "calculated only
+  // once and then linked to avoid redundancies"). T2-S1-004 stays
+  // manual_only because Tier 2 (Mode A) has no formula-text access at
+  // all and cannot verify this from values alone; this Tier 0 check has
+  // full formula access and can. Deliberately conservative: only exact
+  // aggregate-function matches over an identical precedent range,
+  // never bare references (the correct link pattern) or same-sheet
+  // row/column repetition (already covered elsewhere). Real-file
+  // testing found a genuine instance: two differently-named diagnostic
+  // sheets independently computing the identical balance-sheet-
+  // imbalance formula, character for character.
+  const dupCalcCheck = (() => { try { return checkDuplicateCalculationLogic(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Duplicate calculation logic check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (dupCalcCheck.applicable && dupCalcCheck.findings.length > 0) {
+    dupCalcCheck.findings.forEach((f, idx) => {
+      const groupId = `T0-DUPCALC-${String(idx + 1).padStart(3, '0')}`;
+      allFlagged.push({
+        id: groupId,
+        label: `The same ${f.fnName}() aggregate is independently computed on ${f.sheets.length} different sheets`,
+        severity: 'medium', status: 'fail',
+        sheet: f.sheets[0], cell: f.occurrences[0].split('!')[1],
+        category: 'Structure',
+        condition: f.note,
+        reason: `Duplicated ${f.fnName}() calculation across sheets: ${f.occurrences.join(', ')}`,
+        corrective_action: 'Confirm whether one location should instead be a simple reference to the other, so the calculation is computed once and linked, not independently rebuilt.',
+        workstream: 'Structure', issue_type: 'Duplicate calculation logic',
+        model_risk: 'If the underlying detail range changes later, one copy of this calculation may be updated while the other is silently left behind, causing the two to quietly diverge.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: `Same ${f.fnName}() aggregate independently computed on multiple sheets`, escalation_flag: false,
+        urgency: 'Next scheduled review', confidence: 70,
+        root_cause_id: groupId, master_finding_id: groupId,
+        occurrence_count: f.occurrences.length, material_occurrence_count: f.occurrences.length,
+        affected_cells: f.occurrences, affected_sheets: f.sheets,
+        common_remediation_action: 'Link one location to the other instead of independently recomputing the same aggregate.',
+      });
     });
   }
 

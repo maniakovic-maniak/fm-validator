@@ -18,7 +18,7 @@ Tier 0  →  Tier 1  →  Tier 2  →  Report
 
 - **Tier 0** — deterministic pattern/structural checks over formula text (26+ checks: daisy-chained links, numbers stored as text, DSCR lock-up violations, balance-sheet plugs, revenue double-counting, and more). IDs like `T0-XXXXX-NNN`.
 - **Tier 1** — deterministic, checklist-driven structural checks (18 rules, `T1-NNN`).
-- **Tier 2** — Claude-based semantic review across three batches (Structure, Accounting & Debt, Scenarios & Governance — 141 rules, `T2-SXX-NNN`), informed by a domain-specific skill file per model type.
+- **Tier 2** — Claude-based semantic review across three batches (Structure, Accounting & Debt, Scenarios & Governance — 147 rules, `T2-SXX-NNN`), informed by a domain-specific skill file per model type.
 - **A1 (Formualizer recalculation)** — actually recalculates the workbook. This is the one component that closes the real gap in Tier 2's Mode A review (which reasons over extracted values, not raw formula logic) — it's what catches something like "equity NPV wired to equity value instead of discounted cash flows."
 
 ## The P1 / P2 / P3 framework
@@ -73,7 +73,7 @@ src/validator-tier2.js     Tier 2 orchestration (Claude API)
 src/recalc_check.py        Formualizer-based recalculation (A1)
 src/build_report.py        report builder (16-tab .xlsx output)
 src/utils/                 individual Tier 0 checks + shared utilities
-config/checklist.json      the Tier 1/2 rule definitions (159 rules)
+config/checklist.json      the Tier 1/2 rule definitions (165 rules)
 config/soul.md              Tier 2's system prompt / classification guide
 scripts/bug-scan-agent.js  post-commit code-review agent for this repo itself
 test-*.js / test_*.py      per-module test suites

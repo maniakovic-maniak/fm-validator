@@ -33,8 +33,18 @@
 // double-counting finding (T0-REVDOUBLE) both classified as an
 // ordinary Query rather than a Critical Query, despite touching
 // exactly the "financial statements" category the memo names.
+// FIX: found via direct testing after the gap-analysis rule additions
+// — "terminal value" (a genuine key-output/valuation concern, named
+// explicitly in both the source gap-analysis review and the finding's
+// own text) didn't match any existing hint term, since "valuation"
+// doesn't match "value" as a substring. This silently gave a terminal
+// value finding weaker Query treatment than an equally material
+// revenue finding that happened to contain the word "revenue" — not a
+// deliberate materiality judgment, just an accidental keyword miss.
+// Added the specific phrase "terminal value" rather than the bare word
+// "value", which would be too broad and catch unrelated mentions.
 const KEY_OUTPUT_CATEGORY_HINTS = [
-  'valuation', 'debt', 'interest', 'liquidity', 'funding', 'covenant', 'dscr', 'dsra',
+  'valuation', 'terminal value', 'debt', 'interest', 'liquidity', 'funding', 'covenant', 'dscr', 'dsra',
   'ownership', 'dilution', 'equity', 'tax', 'gst', 'circular', 'external',
   'return', 'irr', 'investor',
   'financial statement', 'balance sheet', 'income statement', 'cash flow statement',

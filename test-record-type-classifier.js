@@ -7,6 +7,13 @@ function run() {
     ['informational urgency -> Observation', { urgency: 'Informational', confidence: 30, severity: 'low' }, 'Observation'],
     ['low confidence, no key-output hint -> Query', { confidence: 45, severity: 'medium', issue_type: 'Formula complexity' }, 'Query'],
     ['low confidence, valuation-adjacent -> Critical Query', { confidence: 45, severity: 'medium', issue_type: 'Valuation divergence' }, 'Critical Query'],
+    // FIX: found via testing after the gap-analysis rule additions —
+    // "terminal value" didn't match any hint term before this fix,
+    // since "valuation" (already in the list) doesn't match "value" as
+    // a substring. A terminal value finding was silently getting
+    // weaker Query treatment than an equally material finding that
+    // happened to contain the word "revenue".
+    ['low confidence, terminal-value-adjacent -> Critical Query (the specific fix)', { confidence: 40, severity: 'medium', issue_type: 'Terminal value reasonableness', root_cause: 'No independent terminal value cross-check' }, 'Critical Query'],
     ['low confidence, debt-adjacent via root_cause -> Critical Query', { confidence: 50, severity: 'high', root_cause: 'DSCR lock-up not enforced' }, 'Critical Query'],
     ['high confidence, real severity -> Confirmed Finding', { confidence: 80, severity: 'high' }, 'Confirmed Finding'],
     ['high confidence, low severity -> Confirmed Finding', { confidence: 100, severity: 'low' }, 'Confirmed Finding'],

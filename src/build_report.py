@@ -128,7 +128,7 @@ def build_report(data_path, output_path):
     redundantIn  = d.get('redundantInputs',{'applicable':False,'totalInputs':0,'redundantCount':0,'redundant':[],'inputSheets':[]})
     orphanIn     = d.get('orphanSheets',{'applicable':False,'orphanSheets':[],'financialStatementSheets':[],'reachableSheets':[],'totalSheets':0})
     namedRangeIn = d.get('namedRangeAudit',{'applicable':False,'unused':[],'poorlyNamed':[],'broken':[],'totalNamedRanges':0})
-    reasonIn    = d.get('reasonableness',{'waccOverride':{'applicable':False},'terminalValue':{'applicable':False},'outputs':{'applicable':False,'results':[],'flaggedCount':0}})
+    reasonIn    = d.get('reasonableness',{'waccOverride':{'applicable':False},'terminalValue':{'applicable':False},'outputs':{'applicable':False,'results':[],'flaggedCount':0},'revenuePerUnit':{'applicable':False},'terminalValueCrossCheck':{'applicable':False}})
     dupIn       = d.get('duplicateSheets',{'applicable':False,'flaggedCount':0,'flagged':[]})
     formulaDeepIn = d.get('formulaDeepDive',{'applicable':False,'reviewed':0,'findings':[]})
     deepAcctSheets = d.get('deepAccountingResolvedSheets',{'resolvedMap':{},'unresolvedCategories':[]})
@@ -624,8 +624,10 @@ def build_report(data_path, output_path):
           else 'Not applicable — no named ranges defined in this model')),
         ('Commercial reasonableness',
          (reasonIn.get('waccOverride',{}).get('mismatch',False) or reasonIn.get('terminalValue',{}).get('flagged',False)
-          or reasonIn.get('outputs',{}).get('flaggedCount',0)>0 or dupIn.get('flaggedCount',0)>0),
-         (f"{reasonIn.get('outputs',{}).get('flaggedCount',0)} output metric(s) and {dupIn.get('flaggedCount',0)} duplicate sheet(s) flagged for commercial-reasonableness review — this checks whether results are believable, not whether the model is wired correctly. See the Reasonableness Review tab."
+          or reasonIn.get('outputs',{}).get('flaggedCount',0)>0 or dupIn.get('flaggedCount',0)>0
+          or (reasonIn.get('revenuePerUnit',{}).get('applicable',False) and not reasonIn.get('revenuePerUnit',{}).get('found',True))
+          or (reasonIn.get('terminalValueCrossCheck',{}).get('applicable',False) and not reasonIn.get('terminalValueCrossCheck',{}).get('found',True))),
+         (f"{reasonIn.get('outputs',{}).get('flaggedCount',0)} output metric(s), {dupIn.get('flaggedCount',0)} duplicate sheet(s), revenue-per-unit metric {'found' if reasonIn.get('revenuePerUnit',{}).get('found') else 'not found'}, and terminal value cross-check {'found' if reasonIn.get('terminalValueCrossCheck',{}).get('found') else 'not found'} — this checks whether results are believable, not whether the model is wired correctly. See the Reasonableness Review tab."
           if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
           else 'No output metrics or duplicate sheets were found to warrant flagging'
           if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
@@ -840,10 +842,21 @@ def build_report(data_path, output_path):
 
     # ── Panel 2: Work Performed ──────────────────────────────────────────────
     r3 = panel_header(r3,'WORK PERFORMED')
+    # FIX: found via systematic checking after the gap-analysis rule
+    # additions — the literal "12" below didn't match Tier 1's actual
+    # rule count (18) or anything else identifiable, and was reused to
+    # compute "Tier 2 coverage" by subtraction, silently drifting
+    # further from correct every time the checklist grows. Computed
+    # dynamically from the _tier tag already present on each
+    # checklist_rules entry instead — the same fix pattern already
+    # applied once this session to the "129"/"141" hardcoded-count bug
+    # in index.js/server.js.
+    _t1_count = len([r for r in checklist_rules if r.get('_tier')=='Tier 1'])
+    _t2_count = len([r for r in checklist_rules if r.get('_tier')=='Tier 2'])
     for label,val in [('Rules applied',f'{len(findings)} findings from a {len(checklist_rules)}-rule checklist'),
                        ('Tier 0 coverage',f'{t0.get("stats",{}).get("totalFormulaCells",0):,} formula cells scanned across all sheets'),
-                       ('Tier 1 coverage','12 deterministic structural code checks'),
-                       ('Tier 2 coverage',f'{len(checklist_rules)-12} Claude semantic checks across 13 sections'),
+                       ('Tier 1 coverage',f'{_t1_count} deterministic structural code checks'),
+                       ('Tier 2 coverage',f'{_t2_count} Claude semantic checks across 13 sections'),
                        ('Accounting framework','Not confirmed in model — accrual basis assumed from statement structure'),
                        ('Audit completion',f'{igReadiness}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)')]:
         r3 = kv_row(r3,label,val)
@@ -874,9 +887,11 @@ def build_report(data_path, output_path):
     _reason_flagged = (reasonIn.get('outputs',{}).get('flaggedCount',0)
                         + (1 if reasonIn.get('waccOverride',{}).get('mismatch') else 0)
                         + (1 if reasonIn.get('terminalValue',{}).get('flagged') else 0)
-                        + dupIn.get('flaggedCount',0))
+                        + dupIn.get('flaggedCount',0)
+                        + (1 if (reasonIn.get('revenuePerUnit',{}).get('applicable') and not reasonIn.get('revenuePerUnit',{}).get('found',True)) else 0)
+                        + (1 if (reasonIn.get('terminalValueCrossCheck',{}).get('applicable') and not reasonIn.get('terminalValueCrossCheck',{}).get('found',True)) else 0))
     _reason_summary = (
-        f"Tested WACC-vs-applied-rate consistency, terminal value concentration, {len(reasonIn.get('outputs',{}).get('results',[]))} output metric(s) against disclosed rule-of-thumb thresholds, and duplicate/backup sheet naming. {_reason_flagged} item(s) flagged for review. This tests whether stated results are plausible against documented triggers — it is not verified against live external market data, and does not test for missing line items (see Commercial omission testing below)."
+        f"Tested WACC-vs-applied-rate consistency, terminal value concentration, {len(reasonIn.get('outputs',{}).get('results',[]))} output metric(s) against disclosed rule-of-thumb thresholds, duplicate/backup sheet naming, whether a revenue-per-unit reasonableness metric exists, and whether terminal value has an independent cross-check. {_reason_flagged} item(s) flagged for review. This tests whether stated results are plausible against documented triggers — it is not verified against live external market data, and does not test for missing line items (see Commercial omission testing below)."
         if _reason_performed else 'No labelled output metrics (EBITDA margin, IRR, exit multiple etc.) were found in this model to test.'
     )
     _vba_ran = vbaIn.get('applicable', False)
@@ -2115,6 +2130,8 @@ def build_report(data_path, output_path):
     _tv   = reasonIn.get('terminalValue',{'applicable':False})
     _out  = reasonIn.get('outputs',{'applicable':False,'results':[]})
     _dup  = dupIn
+    _rpu  = reasonIn.get('revenuePerUnit',{'applicable':False})
+    _tvcc = reasonIn.get('terminalValueCrossCheck',{'applicable':False})
 
     # ── Summary cards ─────────────────────────────────────────────────
     _cards=[
@@ -2128,6 +2145,22 @@ def build_report(data_path, output_path):
         merge(wrr,f'{col_l}{r_rr}:{get_column_letter(c2)}{r_rr}',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
         merge(wrr,f'{col_l}{r_rr+1}:{get_column_letter(c2)}{r_rr+1}',val,bold=True,sz=16,
               col=(P2_TXT if (val=='Yes' or (isinstance(val,int) and val>0)) else CHARCOAL),bg=PANEL_GREY,h='center')
+        for rr in (r_rr,r_rr+1):
+            for cc in range(c1,c2+1): wrr.cell(rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wrr,r_rr,14); set_row(wrr,r_rr+1,24); r_rr+=3
+
+    # Second row — the two checks added for the 2026-07-25 gap-analysis
+    # review. Existence checks rather than numeric metrics, so the card
+    # shows Found/Not Found rather than a computed value.
+    _cards2=[
+        ('Revenue-per-unit metric', 'Found' if _rpu.get('found') else 'Not found' if _rpu.get('applicable') else 'N/A', 2,3),
+        ('Terminal value cross-check', 'Found' if _tvcc.get('found') else 'Not found' if _tvcc.get('applicable') else 'N/A', 4,5),
+    ]
+    for label,val,c1,c2 in _cards2:
+        col_l=get_column_letter(c1)
+        merge(wrr,f'{col_l}{r_rr}:{get_column_letter(c2)}{r_rr}',label,bold=True,sz=8,col=GREY_TXT2,bg=PANEL_GREY,h='center')
+        merge(wrr,f'{col_l}{r_rr+1}:{get_column_letter(c2)}{r_rr+1}',val,bold=True,sz=16,
+              col=(P2_TXT if val=='Not found' else CHARCOAL),bg=PANEL_GREY,h='center')
         for rr in (r_rr,r_rr+1):
             for cc in range(c1,c2+1): wrr.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(wrr,r_rr,14); set_row(wrr,r_rr+1,24); r_rr+=3
@@ -2195,6 +2228,24 @@ def build_report(data_path, output_path):
     else:
         merge(wrr,f'B{r_rr}:F{r_rr}','No duplicate or backup sheets detected by name.',sz=9,col=OK_TXT,bg=OK_FILL,wrap=True)
         set_row(wrr,r_rr,20); r_rr+=1
+    set_row(wrr,r_rr,10); r_rr+=1
+
+    # ── Revenue-Per-Unit Metric (2026-07-25 gap-analysis addition) ──────
+    r_rr = section_header(r_rr,'REVENUE-PER-UNIT REASONABLENESS METRIC')
+    merge(wrr,f'B{r_rr}:F{r_rr}', _rpu.get('note','Not applicable.'),
+          sz=9,col=(P2_TXT if (_rpu.get('applicable') and not _rpu.get('found')) else CHARCOAL),
+          bg=(P2_FILL if (_rpu.get('applicable') and not _rpu.get('found')) else WHITE),wrap=True)
+    for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wrr,r_rr,32); r_rr+=1
+    set_row(wrr,r_rr,10); r_rr+=1
+
+    # ── Terminal Value Cross-Check (2026-07-25 gap-analysis addition) ───
+    r_rr = section_header(r_rr,'TERMINAL VALUE INDEPENDENT CROSS-CHECK')
+    merge(wrr,f'B{r_rr}:F{r_rr}', _tvcc.get('note','Not applicable.'),
+          sz=9,col=(P2_TXT if (_tvcc.get('applicable') and not _tvcc.get('found')) else CHARCOAL),
+          bg=(P2_FILL if (_tvcc.get('applicable') and not _tvcc.get('found')) else WHITE),wrap=True)
+    for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
+    set_row(wrr,r_rr,32); r_rr+=1
 
 
     # ════════════════════════════════════════════════════════════════════════
