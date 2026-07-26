@@ -250,11 +250,25 @@ const DEEP_ACCOUNTING_CATEGORIES = {
   // own common naming conventions), not overfit to this one file's
   // literal sheet names — though this file's exact names are included
   // too, since they cost nothing and directly fix the observed gap.
-  'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table'],
-  'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating'],
-  'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons', 'Development CF', 'Development Cash Flow'],
+  // FIX: "Cons" removed — found via investigating a real run to be a
+  // genuinely still-active false-positive risk, not a previously-fixed
+  // one. resolveSheetName's word-boundary-aware matching (see
+  // sheet-resolver.js) now protects against this class of bug in
+  // general, but this specific alias is also too short and generic to
+  // keep regardless — it would match "Consolidation", "Considerations",
+  // or any other sheet merely starting with those four letters.
+  //
+  // FIX: "Financial Statements" added as an alias for all three
+  // statement types below — found via the same real run, a genuine gap
+  // rather than a matching bug. A model with a single combined
+  // "Financial Statements" sheet (rather than separate Balance Sheet /
+  // Income Statement / Equity tabs) is common, legitimate structure,
+  // and had no alias anywhere in this list before.
+  'Balance Sheet':      ['Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table', 'Financial Statements'],
+  'Income Statement':   ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating', 'Financial Statements'],
+  'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Development CF', 'Development Cash Flow'],
   'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
-  'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors'],
+  'Equity':             ['Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors', 'Financial Statements'],
   'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T'],
   'Leases':             ['Lease Schedule', 'Leases', 'Lease'],
 };
@@ -291,13 +305,19 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   // non-mining model — confirmed on a real production file where only
   // 'Inputs' and 'Debt' resolved out of seven targets.
   const KEY_SHEET_CATEGORIES = {
-    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Cons', 'Development CF', 'Development Cash Flow'],
-    'Income Statement': ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating'],
-    'Balance Sheet':    ['Balance Sheet', 'Statement of Financial Position', 'AFS', 'SOFP', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table'],
+    // FIX: "Cons" removed here too — this is a second, separate alias
+    // list that had drifted out of sync with the same fix applied to
+    // DEEP_ACCOUNTING_CATEGORIES above, found via investigating a real
+    // run. "Financial Statements" added to the two statement
+    // categories below for the same reason as above — a real model
+    // with one combined sheet, not split by statement type.
+    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Development CF', 'Development Cash Flow'],
+    'Income Statement': ['Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating', 'Financial Statements'],
+    'Balance Sheet':    ['Balance Sheet', 'Statement of Financial Position', 'AFS', 'SOFP', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table', 'Financial Statements'],
     'Inputs':           ['Inputs', 'Assumptions', 'Key Inputs'],
     'Debt':             ['Debt Schedule', 'Debt Dashboard', 'Debt'],
     'Operations':       ['Operations', 'Ops', 'Operating Assumptions'],
-    'Equity':           ['Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors'],
+    'Equity':           ['Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors', 'Financial Statements'],
   };
 
   let sheetsToCheck;

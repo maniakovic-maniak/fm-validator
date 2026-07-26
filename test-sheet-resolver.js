@@ -55,6 +55,20 @@ function run() {
     resolveAny(['Nonexistent1', 'Nonexistent2'], ['Debt', 'Equity']),
     null);
 
+  // ── Real bugs found via a real production run (The Bend Precinct Model,
+  // 26 7 2026) ──────────────────────────────────────────────────────────────
+  // The old Level 4 (plain startsWith on the space-stripped string)
+  // destroyed word boundaries entirely, causing two real, opposite-
+  // direction failures on the same run.
+  check('word-boundary fix: "Cons" no longer falsely matches "Construction Timeline" (confirmed still-active on a real run, despite an existing comment claiming this was already fixed)',
+    resolveSheetName('Cons', ['Construction Timeline', 'Debt', 'Equity']), null);
+  check('word-boundary fix: "Cash Flow" now correctly matches "Annual Cash Flow" (a genuine whole-word match not located at the start, which the old character-level startsWith missed entirely)',
+    resolveSheetName('Cash Flow', ['Annual Cash Flow', 'Debt', 'Equity']), 'Annual Cash Flow');
+  check('word-boundary fix: a single short whole word ("Debt") still matches a longer sheet name starting with it, same as before',
+    resolveSheetName('Debt', ['Debt Schedule Detail']), 'Debt Schedule Detail');
+  check('word-boundary fix: partial-word matches are still correctly rejected in the other direction too ("Structio" is not a whole word inside "Construction Timeline")',
+    resolveSheetName('Structio', ['Construction Timeline']), null);
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }

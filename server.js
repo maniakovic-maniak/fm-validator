@@ -1978,6 +1978,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     }
   } else {
     console.log(`   \u26a0\ufe0f  Recalculation check did not complete: ${recalcCheckResult.status}${recalcCheckResult.error ? ' — ' + recalcCheckResult.error : ''}`);
+    if (recalcCheckResult.reason) {
+      console.log(`   \u2139\ufe0f  ${recalcCheckResult.reason}`);
+    }
   }
 
       if (reasonableness.waccOverride.applicable && reasonableness.waccOverride.mismatch) {

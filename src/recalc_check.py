@@ -351,7 +351,28 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     try:
         wb = fz.Workbook.load_path(path, config=fz.WorkbookConfig(eval_config=cfg))
     except Exception as e:
-        return {"status": "load_or_eval_failed", "error": str(e), "elapsed_s": round(time.time() - t_start, 2)}
+        error_str = str(e)
+        # FIX: found via investigating a real production run — Calamine
+        # (the Rust library Formualizer uses to load .xlsx/.xlsm files)
+        # fails its own load step entirely when a defined name contains
+        # certain special characters. Confirmed directly: this specific
+        # model uses "?" as a deliberate, legitimate naming convention
+        # for several defined names (CF_Report?, CU?, Dbl_Promote?,
+        # Perm_Debt?) — valid Excel syntax, but Calamine's own parser
+        # rejects it outright, failing to load the workbook at all
+        # rather than skipping just that one name. This is a real
+        # limitation in a third-party dependency, not something fixable
+        # here — sanitizing a temporary copy of the workbook before
+        # recalculation is a larger, riskier change that would need its
+        # own careful testing, not attempted in this fix. What IS fixed
+        # here is turning a cryptic passthrough error into an accurate,
+        # actionable one, so a future occurrence is diagnosable on sight
+        # rather than requiring the same manual investigation this one did.
+        if "Invalid name" in error_str and "#NAME?" in error_str:
+            return {"status": "load_or_eval_failed", "error": error_str,
+                    "reason": "The recalculation engine (Formualizer/Calamine) failed to load this workbook because one of its defined names contains a character its parser rejects — commonly \"?\" used as part of a naming convention (e.g. a toggle or flag range). This is a known limitation of the underlying library, not a problem with the model itself. The recalculation-based check (A1) is unavailable for this file; every other check in this report still ran normally.",
+                    "elapsed_s": round(time.time() - t_start, 2)}
+        return {"status": "load_or_eval_failed", "error": error_str, "elapsed_s": round(time.time() - t_start, 2)}
     _progress(f"Formualizer load complete ({round(time.time()-t_start,1)}s elapsed).")
 
     # fix #3a — read_only=True is primary, not a fallback. See module docstring.
