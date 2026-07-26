@@ -15,7 +15,22 @@
 const { findLabeledValues } = require('./find-labeled-value');
 
 function pct(v) { return `${(v * 100).toFixed(1)}%`; }
-function money(v) { return `$${(v / 1e6).toFixed(1)}M`; }
+// FIX: found via investigating a real flagged report — this
+// unconditionally divided by 1e6, assuming the input is always in raw
+// dollars. Confirmed directly: a real model's own "A$m" unit label
+// shows its terminal-value and NPV figures (255.31, 180.67) are
+// already expressed in millions, so dividing by a million again
+// produced a misleading "$0.0M" for genuinely material figures. Full
+// unit-detection (scanning for a nearby "$m"/"$000s" label) would be a
+// larger, separate change; this is a safe, conservative heuristic
+// instead — if treating the value as raw dollars would round to a
+// near-zero, uninformative display for a value that isn't actually
+// zero, it's far more likely already expressed in millions, so show it
+// as-is rather than dividing again.
+function money(v) {
+  if (v !== 0 && Math.abs(v / 1e6) < 0.05) return `$${v.toFixed(1)}M`;
+  return `$${(v / 1e6).toFixed(1)}M`;
+}
 
 /**
  * When a label search returns several candidates, the genuinely correct
@@ -36,6 +51,25 @@ function pickModalCandidate(candidates) {
   }
   let bestKey = null, bestCount = 0;
   for (const [key, count] of counts) { if (count > bestCount) { bestKey = key; bestCount = count; } }
+  // FIX: found via two separate real instances on the same report —
+  // when every candidate has a unique value (no genuine frequency-
+  // based mode to find at all), the old code silently fell through to
+  // "whichever candidate came first in iteration order", which is
+  // arbitrary and not a meaningful selection. Confirmed directly: a
+  // real model had a clean, exact "Terminal value" label (255.31)
+  // competing against a long, unrelated row-description sentence that
+  // merely contains the phrase "terminal value" within a much longer
+  // methodology note (-3,185,000) — the long sentence won purely by
+  // iteration order, not because it was the right match. When there's
+  // no genuine tie to resolve by frequency, prefer the candidate whose
+  // own label text is shortest — closer to an exact match of the
+  // search term, rather than the term being buried inside a much
+  // longer, unrelated sentence.
+  if (bestCount === 1) {
+    return candidates.reduce((shortest, c) =>
+      (c.labelText || '').length < (shortest.labelText || '').length ? c : shortest
+    );
+  }
   return candidates.find(c => c.value.toFixed(6) === bestKey);
 }
 
@@ -78,7 +112,24 @@ function checkTerminalValueConcentration(workbook, threshold = 0.6) {
   // exceed 100%, as an early version of this check confirmed by mistake).
   let tv = findLabeledValues(workbook, ['pv of terminal value']);
   if (tv.length === 0) tv = findLabeledValues(workbook, ['terminal value']);
-  const npv = findLabeledValues(workbook, ['project npv', 'enterprise value', 'total npv']);
+  // FIX: found via investigating a real flagged report — this used to
+  // search ['project npv', 'enterprise value', 'total npv'] all at
+  // once and let pickModalCandidate's frequency-based selection sort
+  // out which candidate to use. That works well when the same metric
+  // is genuinely labelled in multiple places (the intended case), but
+  // silently degenerates to "whichever candidate happened to be listed
+  // first in the search-terms array" when every candidate has a unique
+  // value, since there's no genuine mode to find. Confirmed directly:
+  // a real model had both a genuine "Project NPV" label (180.67) and
+  // an unrelated "Enterprise value" label (278.50) — "Enterprise
+  // value" won purely because it was listed first in the array, not
+  // because it was the right match, producing a nonsensical -1,143,634%
+  // concentration ratio downstream. Switched to the same sequential-
+  // priority pattern the terminal-value search above already uses:
+  // try the precise terms first, only fall back to the broader
+  // "enterprise value" proxy if nothing precise is found at all.
+  let npv = findLabeledValues(workbook, ['project npv', 'total npv']);
+  if (npv.length === 0) npv = findLabeledValues(workbook, ['enterprise value']);
 
   if (tv.length === 0 || npv.length === 0) {
     return { applicable: false, note: 'Could not locate both a labelled Terminal Value and a labelled total NPV/Enterprise Value to compare.' };

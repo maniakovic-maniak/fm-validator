@@ -140,6 +140,81 @@ async function main() {
     check('TV cross-check: no terminal value present at all is not applicable', r3.applicable === false);
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // Real bugs found via investigating a live-flagged report showing a
+  // nonsensical "-1143634%" terminal-value concentration. Two separate
+  // instances of the same underlying issue in pickModalCandidate: when
+  // every candidate has a unique value (no genuine frequency-based
+  // mode to find), the old code silently picked whichever candidate
+  // came first in array/iteration order, which is arbitrary. Confirmed
+  // directly on the real file: an "Enterprise value" label won over a
+  // genuine "Project NPV" label purely by search-term array order, and
+  // a long row-description sentence that merely contains the phrase
+  // "terminal value" won over a clean, exact "Terminal value" label
+  // purely by workbook iteration order.
+  // ══════════════════════════════════════════════════════════════════
+  {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Valuation');
+    // A clean, exact "Terminal value" label, plus an unrelated row
+    // description that merely mentions the same phrase in passing —
+    // the clean label must win, not whichever was found first.
+    ws.getCell('A12').value = 'Pre-terminal unlevered cash flows plus one discounted terminal value.';
+    ws.getCell('X12').value = -3185000;
+    ws.getCell('A13').value = 'Terminal value';
+    ws.getCell('B13').value = 255.31;
+    // A genuine "Project NPV" label, plus an unrelated "Enterprise
+    // value" label that should not win just because it's listed first
+    // in the search-terms array.
+    ws.getCell('A44').value = 'Enterprise value';
+    ws.getCell('B44').value = 278.50;
+    ws.getCell('J44').value = 'Project NPV';
+    ws.getCell('K44').value = 180.67;
+
+    const r = checkTerminalValueConcentration(wb);
+    check('real bug fixed: the clean, exact "Terminal value" label (255.31) wins over a long row-description sentence that merely mentions the phrase (-3185000)',
+      r.terminalValue === 255.31 && r.terminalValueLocation === 'Valuation!B13');
+    check('real bug fixed: the genuine "Project NPV" label (180.67) wins over the unrelated "Enterprise value" label (278.50), regardless of array order',
+      r.totalNpv === 180.67 && r.totalNpvLocation === 'Valuation!K44');
+    check('real bug fixed: the resulting concentration is a sane, real percentage, not a nonsensical negative six-figure one',
+      r.concentrationPct > 0 && r.concentrationPct < 10);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // The money() display bug found on the same real report — a model
+  // whose values are already expressed in millions (per its own "A$m"
+  // unit label) was having those values divided by a million AGAIN,
+  // producing a misleading "$0.0M" for genuinely material figures like
+  // $255.3M and $180.7M.
+  // ══════════════════════════════════════════════════════════════════
+  {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Valuation');
+    ws.getCell('A1').value = 'Terminal value';
+    ws.getCell('B1').value = 255.31; // already in millions, per this model's own convention
+    ws.getCell('A2').value = 'Project NPV';
+    ws.getCell('B2').value = 180.67;
+
+    const r = checkTerminalValueConcentration(wb);
+    check('real display bug fixed: an already-in-millions value is shown as-is, not divided by a million again ("$255.3M", not "$0.0M")',
+      r.note.includes('$255.3M') && !r.note.includes('$0.0M'));
+
+    // Confirm the fix doesn't break the ordinary, intended case — a
+    // genuinely raw-dollar value, in a scenario that actually crosses
+    // the flag threshold so the money()-formatted note path is
+    // exercised (the non-flagged note template never calls money() at
+    // all, so a below-threshold case wouldn't test this).
+    const wb2 = new ExcelJS.Workbook();
+    const ws2 = wb2.addWorksheet('Valuation');
+    ws2.getCell('A1').value = 'Terminal value';
+    ws2.getCell('B1').value = 70000000; // genuine raw dollars, matching the real Wave 1 verification figure's order of magnitude
+    ws2.getCell('A2').value = 'Project NPV';
+    ws2.getCell('B2').value = 100000000;
+    const r2 = checkTerminalValueConcentration(wb2);
+    check('the money() fix does not break the ordinary raw-dollar case — still correctly shown as "$70.0M", not divided again',
+      r2.note.includes('$70.0M'));
+  }
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }
