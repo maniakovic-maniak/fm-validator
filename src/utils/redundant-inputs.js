@@ -118,14 +118,65 @@ function harvestRefs(formula, ownSheet, ownIsInput, refs, nameMap) {
   }
 }
 
-const INPUT_SHEET_RE = /input|assumption|driver/i;
+// FIX: found via investigating a real run — "input|assumption|driver"
+// alone missed a genuine input sheet named "PROJECT DATA" entirely (13
+// sheets, zero matched, so this check silently found nothing to
+// evaluate at all). "settings" added as a genuinely synonymous term —
+// a "backend settings" sheet is a common real-world equivalent of an
+// assumptions sheet.
+const INPUT_SHEET_RE = /input|assumption|driver|settings/i;
+
+// Broadening the sheet-NAME pattern to something generic like "data"
+// would have caught "PROJECT DATA" (a genuine input schedule) but also
+// "DATA MAP" (a documentation/traceability sheet with no input values
+// at all) — confirmed by direct inspection of both sheets' real
+// content. What actually and precisely distinguishes them is each
+// sheet's own title-area text: "PROJECT DATA"'s own row 4 literally
+// reads "CENTRALISED INPUT SCHEDULE"; "DATA MAP"'s reads "SOURCE-TO-
+// TARGET TRACEABILITY & ISSUE...". Checking the first few rows of each
+// sheet's own text against the same pattern is what correctly tells
+// these apart, rather than trying to guess a broader but still-precise
+// name pattern.
+// FIX: found via real-file testing — a genuine summary/display
+// dashboard sheet can incidentally mention "assumptions" in narrative
+// prose (e.g. "Under the current funding and valuation assumptions,
+// [investor] invests $X...") without actually being an input schedule
+// at all. On one real file this caused a severe false-positive class:
+// an "INVESTOR DASHBOARD" sheet's sensitivity-table range labels
+// ("50.00% → 5.39%", "A$23.22m – A$46.44m") were misread as
+// unreferenced input constants, contributing 196 of 274 total findings
+// (71%) — almost all of it noise from one dashboard's display grid,
+// not genuine redundant inputs. A sheet whose NAME contains "dashboard"
+// is excluded from the title-text-based detection path specifically —
+// it can still be recognized as a genuine input sheet via an explicit
+// name match (e.g. a sheet literally named "Assumptions Dashboard"),
+// just not via an incidental title-text mention alone.
+const DASHBOARD_NAME_RE = /dashboard/i;
+
+function sheetHasInputTitleText(ws) {
+  if (DASHBOARD_NAME_RE.test(ws.name)) return false;
+  let rowsChecked = 0;
+  let found = false;
+  ws.eachRow({ includeEmpty: false }, row => {
+    if (found || rowsChecked >= 8) return;
+    rowsChecked++;
+    row.eachCell({ includeEmpty: false }, cell => {
+      if (found) return;
+      const v = cell.value;
+      if (typeof v === 'string' && INPUT_SHEET_RE.test(v)) found = true;
+    });
+  });
+  return found;
+}
 
 function detectRedundantInputs(workbook) {
   const inputSheets = [];
-  workbook.eachSheet(ws => { if (INPUT_SHEET_RE.test(ws.name)) inputSheets.push(ws.name); });
+  workbook.eachSheet(ws => {
+    if (INPUT_SHEET_RE.test(ws.name) || sheetHasInputTitleText(ws)) inputSheets.push(ws.name);
+  });
   if (inputSheets.length === 0) {
     return { applicable: false, inputSheets: [], totalInputs: 0, redundantCount: 0, redundant: [],
-             note: 'No sheet matching input/assumption/driver naming — analysis not applicable.' };
+             note: 'No sheet matching input/assumption/driver/settings naming or title text — analysis not applicable.' };
   }
 
   // Defined names
