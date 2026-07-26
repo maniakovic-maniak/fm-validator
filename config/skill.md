@@ -295,11 +295,31 @@ not an estimate — use it.
   inspection is required — the same as before.
 
 ### test: no_duplicated_logic
-No calculation should appear in more than one sheet.
-This is a manual_only test.
+Genuinely stays manual_only, but for an architectural reason worth
+being explicit about — not because this was left unbuilt. This tool
+runs in Mode A: Tier 2 reasons over extracted values and labels, with
+no access to formula text at all (see the Mode A section above).
+Verifying "the same calculation logic exists in two places" fundamentally
+requires seeing the formulas themselves — two cells matching in value
+could equally be a correct link, a coincidence, or genuine duplication,
+and there is no way to tell which from values alone.
+A dedicated Tier 0 check (duplicate-calculation-logic-check.js) has
+full formula-text access and covers the real risk directly: the same
+aggregate function (SUM, SUMIF, AVERAGE, COUNT, etc.), over the exact
+same precedent range, independently rebuilt on two or more different
+sheets rather than computed once and linked. See its findings
+(T0-DUPCALC-*) for what this rule is actually testing in practice.
+Note the important distinction this rule is NOT about: a detail
+table's individual line items feeding a single summary total that is
+then linked to the financial statements is correct, expected
+structure — not every line item needs to independently reach a
+financial statement, only the aggregate does, and a bare reference
+(a link) is never itself "duplicated logic."
 - Return uncertain with confidence 30
 - State: "Duplicate calculation detection requires formula text
-  inspection across all sheets. Cannot verify from summary data."
+  inspection, which this review does not have access to (Mode A). See
+  the Tier 0 duplicate-calculation-logic findings for what full
+  formula-text analysis actually found."
 
 ### test: no_mixed_periodicity
 A single sheet should not mix monthly, quarterly, and annual
