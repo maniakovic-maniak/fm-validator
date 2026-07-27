@@ -153,6 +153,46 @@ const INPUT_SHEET_RE = /input|assumption|driver|settings/i;
 // just not via an incidental title-text mention alone.
 const DASHBOARD_NAME_RE = /dashboard/i;
 
+// FIX: found via investigating a real run's "Redundant Inputs: 0 of
+// 411" result, then confirmed with direct, external evidence — the
+// user provided a separate "data book" file, and DATA MAP's own
+// "Source Sheet"/"Source Cell/Range" columns literally named that
+// external file's own sheets (e.g. "MODEL DESIGN") as the documented
+// origin of each PROJECT DATA value. This is a manual cross-workbook
+// reconciliation log, not a real calculation dependency — but its
+// broad validation-lookup range ('PROJECT DATA'!$A$2:$N$256, built to
+// check "has this value drifted since we documented the mapping") was
+// silently marking every single one of PROJECT DATA's 259 inputs as
+// "referenced", regardless of whether any given cell is genuinely used
+// in a real calculation anywhere else in the model.
+//
+// Detected by column-header signature rather than name or title text:
+// a sheet with BOTH a "source sheet/cell" column and a "target
+// sheet/cell" column, in the same header row, is unambiguously a
+// mapping/reconciliation table — a real calculation sheet essentially
+// never has this specific pairing of column headers. This is a
+// narrower, higher-confidence signal than name-based exclusion (like
+// the dashboard exclusion above), so it excludes the sheet's
+// references entirely rather than requiring a name match too.
+const SOURCE_COL_RE = /\bsource\s*(sheet|cell|range)\b/i;
+const TARGET_COL_RE = /\btarget\s*(sheet|cell|range)\b/i;
+
+function isTraceabilityMappingSheet(ws) {
+  let hasSource = false, hasTarget = false;
+  let rowsChecked = 0;
+  ws.eachRow({ includeEmpty: false }, row => {
+    if ((hasSource && hasTarget) || rowsChecked >= 10) return;
+    rowsChecked++;
+    row.eachCell({ includeEmpty: false }, cell => {
+      const v = cell.value;
+      if (typeof v !== 'string') return;
+      if (SOURCE_COL_RE.test(v)) hasSource = true;
+      if (TARGET_COL_RE.test(v)) hasTarget = true;
+    });
+  });
+  return hasSource && hasTarget;
+}
+
 function sheetHasInputTitleText(ws) {
   if (DASHBOARD_NAME_RE.test(ws.name)) return false;
   let rowsChecked = 0;
@@ -191,7 +231,14 @@ function detectRedundantInputs(workbook) {
   const refs = new RefSet();
   let offsetIndirect = 0;
 
+  // Identify traceability-mapping sheets once, up front — their formula
+  // references get excluded from the "referenced" set entirely (see
+  // isTraceabilityMappingSheet's own comment for why).
+  const mappingSheets = new Set();
+  workbook.eachSheet(ws => { if (isTraceabilityMappingSheet(ws)) mappingSheets.add(ws.name.trim()); });
+
   workbook.eachSheet(ws => {
+    if (mappingSheets.has(ws.name.trim())) return;
     const ownIsInput = inputSet.has(ws.name.trim());
     ws.eachRow({ includeEmpty: false }, row => {
       row.eachCell({ includeEmpty: false }, cell => {

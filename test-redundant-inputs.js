@@ -115,6 +115,38 @@ async function main() {
       result.inputSheets.includes('Assumptions Dashboard'));
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // Case 6: the real fix confirmed via a second, external data-book
+  // file the user provided — a "DATA MAP" style sheet with genuine
+  // Source Sheet/Cell and Target Sheet/Cell columns is a manual
+  // cross-workbook reconciliation log, not a real calculation
+  // dependency. Its broad validation-lookup range was silently marking
+  // every single PROJECT DATA input as "referenced" on a real file (0
+  // of 411 flagged), regardless of genuine usage. Confirmed on the
+  // real file this fix restores genuine detection (0 -> 116 flagged,
+  // 86 of them on PROJECT DATA specifically).
+  // ══════════════════════════════════════════════════════════════════
+  {
+    const wb = new ExcelJS.Workbook();
+    const pd = wb.addWorksheet('PROJECT DATA');
+    pd.getCell('A4').value = 'PROJECT DATA | CENTRALISED INPUT SCHEDULE';
+    pd.getCell('B10').value = 42; // never referenced by any genuine calculation
+
+    const dm = wb.addWorksheet('DATA MAP');
+    dm.getCell('A7').value = 'Field ID';
+    dm.getCell('C7').value = 'Source Sheet';
+    dm.getCell('D7').value = 'Source Cell/Range';
+    dm.getCell('F7').value = 'Target Sheet';
+    dm.getCell('G7').value = 'Target Cell/Range';
+    // A broad validation-lookup formula, matching the real pattern —
+    // must NOT count as "PROJECT DATA!B10 is referenced".
+    dm.getCell('H8').value = { formula: "COUNTA('PROJECT DATA'!$A$2:$N$256)", result: 1 };
+
+    const result = detectRedundantInputs(wb);
+    check('real fix confirmed: a DATA MAP-style sheet (Source Sheet/Cell + Target Sheet/Cell columns) is correctly identified as a traceability-mapping sheet',
+      result.redundant.some(r => r.sheet === 'PROJECT DATA' && r.cell === 'B10'));
+  }
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }
