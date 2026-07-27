@@ -413,10 +413,22 @@ def build_report(data_path, output_path):
     # unrelated reason. A first run (no prior history to compare against)
     # is called out explicitly rather than silently showing "0 closed, 0
     # regressed" in a way that could be misread as "nothing changed".
-    _crn_closed = len(crossRunStats.get('closed', []))
-    _crn_new = len(crossRunStats.get('new', []))
-    _crn_regressed = len(crossRunStats.get('regressed', []))
-    _crn_still_open = len(crossRunStats.get('stillOpen', []))
+    # FIX: found via investigating a real production run's dashboard
+    # showing "17609 still open" against a report with only 165 total
+    # findings. Root cause: fingerprints are deliberately cell-level
+    # granularity (needed to track a partial fix within a grouped
+    # finding precisely — e.g. 78 redundant-input cells under one
+    # finding), but the raw fingerprint-array length was being used
+    # directly as the displayed summary count, conflating "distinct
+    # cell-level occurrences" with "distinct findings". Uses the new
+    # *FindingCount fields (deduplicated by root_cause_id) when present;
+    # falls back to the old cell-level count only for a payload
+    # predating this field, for backward compatibility — same pattern
+    # already established for isFirstRun above.
+    _crn_closed = crossRunStats.get('closedFindingCount', len(crossRunStats.get('closed', [])))
+    _crn_new = crossRunStats.get('newFindingCount', len(crossRunStats.get('new', [])))
+    _crn_regressed = crossRunStats.get('regressedFindingCount', len(crossRunStats.get('regressed', [])))
+    _crn_still_open = crossRunStats.get('stillOpenFindingCount', len(crossRunStats.get('stillOpen', [])))
     # FIX: found via a real bug-scan run. Previously inferred from the
     # counts above (new>0, everything else 0) — but a genuine first run
     # on a perfectly clean model has ZERO findings of every kind, which

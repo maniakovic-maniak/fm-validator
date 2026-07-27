@@ -136,6 +136,20 @@ function currentFingerprints(findings) {
   return fingerprints;
 }
 
+/** Distinct finding count within one of the closed/new/regressed/
+ * stillOpen arrays — deduplicates by rootCauseId, since a single
+ * grouped finding (e.g. 78 redundant-input cells, or a blank-cell-
+ * reference check with hundreds of affected cells) produces one
+ * fingerprint PER CELL by design (needed to track a partial fix
+ * within a group precisely), not one per finding. A dashboard summary
+ * needs "how many distinct issues changed status", not "how many
+ * individual cells changed status" — conflating the two is what
+ * produced a real, confirmed bug: a report with 165 total findings
+ * showing "17609 still open" on its own dashboard. */
+function distinctFindingCount(entries) {
+  return new Set(entries.map(e => e.rootCauseId)).size;
+}
+
 /** Compares this run's findings against the stored history for this
  * model, returning { closed, new, regressed, stillOpen, updatedHistory }.
  * Does NOT save — call saveHistory(modelKey, updatedHistory) separately,
@@ -180,7 +194,13 @@ function computeCrossRunStats(findings, history) {
   // which is the actual, unambiguous signal.
   const isFirstRun = Object.keys(history).length === 0;
 
-  return { closed, new: newOnes, regressed, stillOpen, updatedHistory, isFirstRun };
+  return {
+    closed, new: newOnes, regressed, stillOpen, updatedHistory, isFirstRun,
+    closedFindingCount: distinctFindingCount(closed),
+    newFindingCount: distinctFindingCount(newOnes),
+    regressedFindingCount: distinctFindingCount(regressed),
+    stillOpenFindingCount: distinctFindingCount(stillOpen),
+  };
 }
 
 module.exports = { loadHistory, saveHistory, currentFingerprints, computeCrossRunStats, historyFilePath, normalizeModelIdentity };

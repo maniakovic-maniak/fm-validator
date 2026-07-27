@@ -24,6 +24,31 @@ function run() {
   console.log(`${run1Pass ? 'PASS' : 'FAIL'}: run 1 (empty history) -- everything is New`);
   if (!run1Pass) allPass = false;
 
+  // --- The real bug this fixes: a dashboard showed "17609 still open"
+  // against a report with only 165 total findings, because the raw
+  // cell-level fingerprint count was used directly as the displayed
+  // summary number. run1Findings here has 1 finding grouped across 3
+  // cells -- .new.length (cell-level) should stay 3, unchanged for
+  // backward compatibility, but .newFindingCount (the new field) must
+  // correctly deduplicate to 1. ---
+  const distinctCountPass = stats1.new.length === 3 && stats1.newFindingCount === 1;
+  console.log(`${distinctCountPass ? 'PASS' : 'FAIL'}: distinct-finding-count fix -- 1 finding grouped across 3 cells reports newFindingCount=1, not the cell-level count of 3`);
+  if (!distinctCountPass) allPass = false;
+
+  // --- Multiple distinct grouped findings mixed together, closer to a
+  // real report shape (e.g. one 78-cell redundant-inputs finding plus
+  // several other, smaller findings) -- confirms deduplication counts
+  // distinct root causes correctly, not just "collapse everything to 1". ---
+  const mixedFindings = [
+    { root_cause_id: 'T0-RI-001', affected_cells: Array.from({length: 78}, (_, i) => `Data!B${i+1}`), label: 'redundant inputs' },
+    { root_cause_id: 'T0-DUPCALC-001', affected_cells: ['SheetA!X1', 'SheetB!Y1'], label: 'duplicate calc' },
+    { root_cause_id: 'T0-RSN-002', affected_cells: [], label: 'terminal value concentration' },
+  ];
+  const mixedStats = computeCrossRunStats(mixedFindings, {});
+  const mixedPass = mixedStats.new.length === 81 && mixedStats.newFindingCount === 3;
+  console.log(`${mixedPass ? 'PASS' : 'FAIL'}: distinct-finding-count fix -- 3 distinct findings (78 + 2 + 1 = 81 cell-level entries) correctly report newFindingCount=3`);
+  if (!mixedPass) allPass = false;
+
   // --- Run 2: A1 and A3 fixed (both gone), A2 still open, A4 new ---
   const run2Findings = [
     { root_cause_id: 'T0-DAISYCHAIN-001', affected_cells: ['SheetA!A2', 'SheetA!A4'], label: '2 daisy chains' },
