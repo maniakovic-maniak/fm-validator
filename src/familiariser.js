@@ -95,6 +95,29 @@ function buildFamiliarisationPayload(parsed) {
   };
 }
 
+// FIX: found via a fresh production run reproducing a known, documented
+// failure (truncated familiarisation JSON) on a 24-sheet file. Traced
+// the root cause precisely: the old floor (12000) and rate (250/sheet)
+// meant 4000 + 32*250 = 12000 exactly, so the floor dominated for EVERY
+// model with 32 sheets or fewer — a 13-sheet model and a 31-sheet model
+// received the identical token budget despite one having more than
+// double the content to describe. The "scales with sheet count" formula
+// was actually inert across the entire range where failures were
+// observed (confirmed: 26-sheet and 31-sheet files both failing at this
+// same floor). Lowered the floor so scaling activates much sooner
+// (~8 sheets) and raised the per-sheet rate, so budget now genuinely
+// tracks sheet count across the failing range. Extracted as its own
+// function (previously inline) so it's cheaply unit-testable without a
+// live API call, given this formula's history of silent, hard-to-
+// diagnose failures. The downside of over-provisioning here is minimal
+// (Claude stops once the response is complete); the downside of
+// under-provisioning is severe (degrades the whole run to the
+// generic/unknown fallback, starving Tier 2 of keySheets) — so this
+// errs generous.
+function computeFamiliariserMaxTokens(sheetCount) {
+  return Math.min(32000, Math.max(8000, 4000 + sheetCount * 500));
+}
+
 async function familiariseModel(parsed) {
   console.log(`   Reading ${parsed.sheetNames.length} sheets...`);
 
@@ -132,8 +155,24 @@ async function familiariseModel(parsed) {
   // 'generic/unknown' fallback below — visible in the final client-facing
   // report as "generic — unknown | unknown · unknown", and starving Tier 2
   // of keySheets for the rest of that run.
+  //
+  // FIX: found via a fresh production run reproducing this exact failure
+  // on a 24-sheet file (truncated on attempt 1, recovered on retry).
+  // Traced the root cause precisely: with the old floor (12000) and rate
+  // (250/sheet), 4000 + 32*250 = 12000 exactly — meaning the floor
+  // dominated for EVERY model with 32 sheets or fewer, so a 13-sheet
+  // model and a 31-sheet model received the identical token budget
+  // despite one having more than double the content to describe. The
+  // "scales with sheet count" formula was actually inert across the
+  // entire range where failures were observed. Lowered the floor so
+  // scaling activates much sooner (~8 sheets) and raised the per-sheet
+  // rate, so token budget now genuinely tracks sheet count across the
+  // range that was failing. The downside of over-provisioning here is
+  // minimal (Claude stops once the response is complete); the downside
+  // of under-provisioning is severe (degrades the whole run to the
+  // generic/unknown fallback) — so this errs generous.
   const sheetCount = parsed.sheetNames.length;
-  const familiariserMaxTokens = Math.min(32000, Math.max(12000, 4000 + sheetCount * 250));
+  const familiariserMaxTokens = computeFamiliariserMaxTokens(sheetCount);
   console.log(`   Familiarisation max_tokens: ${familiariserMaxTokens} (${sheetCount} sheets)`);
 
   // Familiarisation drives the domain-skill choice — a parse failure here
@@ -248,4 +287,4 @@ function formatSummaryAsContext(summary) {
   return lines.join('\n');
 }
 
-module.exports = { familiariseModel, formatSummaryAsContext };
+module.exports = { familiariseModel, formatSummaryAsContext, computeFamiliariserMaxTokens };
