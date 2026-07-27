@@ -26,6 +26,32 @@ function buildSystemPrompt(domain, modelContext) {
   return { staticPrompt, dynamicPrompt: modelContext || '' };
 }
 
+// FIX: found via investigating a real forensic audit review that
+// identified a severe, confirmed defect (cash hard-coded to zero on a
+// balance sheet) that Tier 2 completely missed. Traced the root cause
+// directly: the old "first maxRows numeric rows from the top" logic
+// silently dropped the exact rows needed to catch it — row 33 ("Cash",
+// hard-coded to 0), row 51 (an intermediate cash-reconciliation
+// check), and row 81 (the real closing cash balance) never survived
+// the cap, while row 52 ("TOTAL CHECK" ≈ 0, which looks completely
+// fine in isolation with no visibility into what feeds it) did. This
+// was not a reasoning failure — Tier 2 genuinely never saw the data
+// needed. Fixed by always prioritizing rows whose own label matches
+// key balance-integrity terms (cash, check, balance, total, equity,
+// reconcil-) before falling back to positional selection for the
+// remaining slots, so a label match can never be silently dropped
+// purely due to where it happens to sit in the sheet.
+const PRIORITY_LABEL_RE = /\b(cash|check|balance|total|equity|reconcil\w*)\b/i;
+
+function rowLabel(row) {
+  // The label is typically the first short, non-numeric string value —
+  // same heuristic the row-anchor logic below already uses for cell refs.
+  for (const v of Object.values(row)) {
+    if (typeof v === 'string' && v.trim() !== '' && isNaN(parseFloat(v))) return v;
+  }
+  return null;
+}
+
 function extractMeaningfulRows(rows, maxRows = 20) {
   if (!rows || rows.length === 0) return [];
 
@@ -42,7 +68,24 @@ function extractMeaningfulRows(rows, maxRows = 20) {
     !Object.values(row).some(v => v !== null && !isNaN(parseFloat(v)))
   );
 
-  const selected = [...numeric.slice(0, maxRows), ...nonNumeric.slice(0, 5)].slice(0, maxRows);
+  // Priority rows: a label match is always kept, regardless of position —
+  // capped at half of maxRows so priority matches alone can't crowd out
+  // everything else on a sheet with many "total"/"balance"-labelled rows.
+  const priorityCap = Math.max(1, Math.floor(maxRows / 2));
+  const priority = [];
+  const priorityKeys = new Set();
+  for (const row of numeric) {
+    if (priority.length >= priorityCap) break;
+    const label = rowLabel(row);
+    if (label && PRIORITY_LABEL_RE.test(label)) {
+      priority.push(row);
+      priorityKeys.add(row);
+    }
+  }
+  const remainingNumeric = numeric.filter(row => !priorityKeys.has(row));
+  const remainingSlots = Math.max(0, maxRows - priority.length);
+
+  const selected = [...priority, ...remainingNumeric.slice(0, remainingSlots), ...nonNumeric.slice(0, 5)].slice(0, maxRows);
 
   return selected.map(row => {
     const keys = Object.keys(row);

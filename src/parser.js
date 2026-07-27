@@ -89,6 +89,28 @@ function cellPlainValue(cell) {
       if (r && typeof r === 'object' && typeof r.error === 'string') return r.error;
       return r === undefined ? null : r;
     }
+    // FIX: found via investigating a real forensic audit review that
+    // identified a severe defect (cash hard-coded to zero) Tier 2
+    // completely missed. Traced the root cause all the way down: a
+    // formula cell that's part of Excel's own "shared formula"
+    // optimization — extremely common in wide, period-by-period
+    // financial statements, where the same formula pattern repeats
+    // across many columns — returns {formula, ref, shareType:'shared'}
+    // (the master cell) or {sharedFormula: 'G33'} (every other cell in
+    // the group) from cell.value, with NO "result" key inside it at
+    // all, on either the master or a dependent cell. The existing code
+    // above only ever checked v.result (inside cell.value), so every
+    // shared-formula cell silently returned null here — not just on
+    // this one model, but on any sheet using this extremely common
+    // Excel optimization. ExcelJS does expose the correct cached value
+    // via a separate, top-level cell.result getter (confirmed directly
+    // against the real file: correct on both master and dependent
+    // shared-formula cells), which the code above never checked.
+    if (cell.result !== undefined) {
+      const r = cell.result;
+      if (r && typeof r === 'object' && typeof r.error === 'string') return r.error;
+      return r;
+    }
     if (Array.isArray(v.richText)) return v.richText.map(rt => rt.text).join('');
     if (typeof v.text === 'string') return v.text;                         // hyperlink { text, hyperlink }
     return null;
