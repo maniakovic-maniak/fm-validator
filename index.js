@@ -1876,6 +1876,9 @@ async function run() {
   } else if (recalcCheckResult.status === 'skipped_too_large') {
     console.log(`   \u2139\ufe0f  Recalculation check skipped: ${recalcCheckResult.formula_cells.toLocaleString()} formula cells exceeds the ${recalcCheckResult.threshold.toLocaleString()}-cell safety threshold (see recalc_check.py for tuning notes).`);
   } else if (recalcCheckResult.status === 'success') {
+    if (recalcCheckResult.sanitized_defined_names_count > 0) {
+      console.log(`   \u2139\ufe0f  Recalculation check succeeded after removing ${recalcCheckResult.sanitized_defined_names_count} defined name(s) containing "?" that this workbook's recalculation engine cannot parse (${recalcCheckResult.sanitized_defined_names.join(', ')}) \u2014 ${recalcCheckResult.sanitized_formula_cells_affected} formula cell(s) referencing them may show as unresolved rather than compared; every other cell was recalculated and compared normally.`);
+    }
     if (recalcCheckResult.mismatch_count > 0) {
       const sample = recalcCheckResult.mismatches.slice(0, 8)
         .map(m => `${m.sheet}!${m.cell} (shows ${m.cached.toLocaleString()}, recalculates to ${m.recalculated.toLocaleString()})`).join(', ');
