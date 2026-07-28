@@ -67,7 +67,7 @@ const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwn
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
-const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck } = require('./src/utils/reasonableness-checks');
+const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
@@ -258,9 +258,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     terminalValue: checkTerminalValueConcentration(parsed._raw),
     outputs: checkOutputReasonableness(parsed._raw),
     revenuePerUnit: checkRevenuePerUnitMetric(parsed._raw),
-    terminalValueCrossCheck: checkTerminalValueCrossCheck(parsed._raw)
+    terminalValueCrossCheck: checkTerminalValueCrossCheck(parsed._raw),
+    modelStatusFlag: checkModelStatusFlag(parsed._raw)
   }; } catch (e) { console.error('   \u26a0\ufe0f  Reasonableness checks failed:', e.message);
-    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false} }; } })();
+    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false} }; } })();
   const duplicateSheets = (() => { try { return detectDuplicateSheets(parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
   const formulaDeepDive = wantsDeepDive
@@ -2057,6 +2058,24 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
           model_risk: 'Terminal value is often the largest single driver of total return — resting it on one unchallenged exit multiple, with no independent method corroborating it, is a real gap even where the multiple itself looks reasonable.',
           key_output_impact: 'Yes', method: 'automated', needs_retest: false, root_cause: 'No independent terminal value cross-check',
           escalation_flag: false, urgency: 'Before external circulation', confidence: 40
+        });
+      }
+      // ── Model self-discloses a status/readiness flag (found via a real
+      // forensic audit review — the model itself directly says it is not
+      // reliance-ready, at one or more explicit locations. A direct
+      // self-disclosure, not an inference, so confidence is set high and
+      // this is treated as a genuine finding rather than a query. ──
+      if (reasonableness.modelStatusFlag.applicable && reasonableness.modelStatusFlag.found === true) {
+        const flags = reasonableness.modelStatusFlag.flags;
+        allFlagged.push({
+          id: 'T0-RSN-006', label: 'Model contains its own explicit status/readiness flag',
+          severity: 'high', status: 'fail', sheet: flags[0].sheet, cell: flags[0].valueCell,
+          category: 'Reasonableness', condition: reasonableness.modelStatusFlag.note, reason: reasonableness.modelStatusFlag.note,
+          corrective_action: 'Resolve whatever the flagged status indicates (e.g. outstanding confirmations, unfinished sections) and update the flag to reflect the model\'s actual, current state before external circulation.',
+          workstream: 'Governance', issue_type: 'Model status disclosure',
+          model_risk: 'The model directly discloses it is not in a final, reliance-ready state — treating its outputs as final without resolving this is a governance gap regardless of how the underlying figures look.',
+          key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Model self-flagged as not ready for reliance',
+          escalation_flag: true, urgency: 'Before external circulation', confidence: 95
         });
       }
       if (duplicateSheets.applicable && duplicateSheets.flaggedCount > 0) {

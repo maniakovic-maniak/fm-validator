@@ -12,7 +12,7 @@
 // trigger for review — not a verified market benchmark. The tool has no
 // live external data feed and will not pretend otherwise.
 
-const { findLabeledValues } = require('./find-labeled-value');
+const { findLabeledValues, cellText } = require('./find-labeled-value');
 
 function pct(v) { return `${(v * 100).toFixed(1)}%`; }
 // FIX: found via investigating a real flagged report — this
@@ -302,4 +302,60 @@ function checkTerminalValueCrossCheck(workbook) {
   };
 }
 
-module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck };
+// ── Model status / readiness flag ────────────────────────────────────────
+// Found via investigating a real forensic audit review's "REVIEW
+// REQUIRED" claim. Traced why Tier 2 never caught it, despite the
+// row-extraction fixes elsewhere in this project: Familiarisation's
+// key_sheets selection is prompt-driven, explicitly defined as "sheets
+// that appear to contain the core financial logic" — a genuine,
+// high-value self-disclosure on a summary/dashboard sheet (not a core
+// calculation sheet by that definition) can be missed entirely, since
+// the sheet itself is never sent to Tier 2 at all, regardless of what
+// survives row-selection within it. A dedicated, deterministic check
+// that scans every sheet in the workbook — not just whichever ones
+// Tier 2 happens to review — is more reliable here than a prompt
+// change, matching this project's established pattern of building a
+// Tier 0 check for anything that can be reliably pattern-matched.
+// Verified zero false positives across three other real test files
+// (Carlsberg, The Bend Audited, Hidden Gem) before building this.
+const CONCERNING_STATUS_TERMS = [
+  'review required', 'not ready', 'draft', 'incomplete', 'pending review',
+  'tbc', 'to be confirmed', 'not for reliance', 'work in progress', 'wip',
+  'do not rely', 'not final', 'unconfirmed',
+];
+const STATUS_LABEL_RE = /\bstatus\b/i;
+
+function checkModelStatusFlag(workbook) {
+  const found = [];
+  workbook.eachSheet(ws => {
+    ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
+      row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+        const label = cellText(cell.value);
+        if (!label || !STATUS_LABEL_RE.test(label)) return;
+        // Look rightward a short distance for the actual status value —
+        // same "label, then nearby value" shape as findLabeledValues,
+        // but searching for a concerning TEXT value, not a number.
+        for (let c = colNum + 1; c <= colNum + 4; c++) {
+          const valCell = row.getCell(c);
+          const raw = valCell.formula ? valCell.result : valCell.value;
+          const valText = cellText(raw);
+          if (!valText) continue;
+          const matched = CONCERNING_STATUS_TERMS.find(t => valText.toLowerCase().trim() === t);
+          if (matched) {
+            found.push({ sheet: ws.name, labelCell: cell.address, valueCell: valCell.address, label: label.slice(0, 60), value: valText });
+          }
+          break; // first non-empty cell right of the label — that's the status value, whatever it says
+        }
+      });
+    });
+  });
+
+  if (found.length === 0) {
+    return { applicable: true, found: false,
+      note: 'No explicit model-status or readiness flag (e.g. a cell labelled "status" reading "review required", "draft", "not for reliance", or similar) was found anywhere in this workbook.' };
+  }
+  return { applicable: true, found: true, flags: found,
+    note: `This model contains its own explicit status/readiness flag: ${found.map(f => `${f.sheet}!${f.valueCell} ("${f.label}" = "${f.value}")`).join('; ')} — the model itself discloses it is not yet in a final, reliance-ready state.` };
+}
+
+module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag };
