@@ -83,9 +83,25 @@ function extractMeaningfulRows(rows, maxRows = 20) {
     }
   }
   const remainingNumeric = numeric.filter(row => !priorityKeys.has(row));
-  const remainingSlots = Math.max(0, maxRows - priority.length);
 
-  const selected = [...priority, ...remainingNumeric.slice(0, remainingSlots), ...nonNumeric.slice(0, 5)].slice(0, maxRows);
+  // FIX: found via verifying a real claim in a forensic audit review —
+  // a model's own "MODEL STATUS: REVIEW REQUIRED" self-flag lives in a
+  // non-numeric row (a row of pure text/status labels, no parseable
+  // number anywhere in it). The old composition put numeric rows
+  // first, then non-numeric rows, then applied a flat .slice(0,
+  // maxRows) at the end — so if numeric rows alone reached maxRows
+  // (routine on any sheet with 20+ rows of figures), non-numeric rows
+  // got ZERO room, no matter how important their content. Confirmed
+  // directly: all 20 survivors on a real sheet were numeric: none was
+  // the status row, even though it sat early in the sheet. Reserves
+  // guaranteed space for non-numeric rows up front, so a genuine
+  // status/label row can never be silently crowded out entirely by
+  // however many numeric rows a sheet happens to have.
+  const nonNumericReserved = nonNumeric.slice(0, 5);
+  const numericSlots = Math.max(0, maxRows - nonNumericReserved.length);
+  const numericSelected = [...priority, ...remainingNumeric.slice(0, Math.max(0, numericSlots - priority.length))];
+
+  const selected = [...numericSelected, ...nonNumericReserved].slice(0, maxRows);
 
   return selected.map(row => {
     const keys = Object.keys(row);
@@ -561,4 +577,4 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   }
 }
 
-module.exports = { runTier2, parseResponse, resolveDeepAccountingSheets };
+module.exports = { runTier2, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows };
