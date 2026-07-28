@@ -108,7 +108,8 @@
       "sheets": [
         "AFS",
         "IFS",
-        "Balance Sheet"
+        "Balance Sheet",
+        "Financial Statements"
       ],
       "fixable": false,
       "fix_instruction": "Add a balance sheet check row showing Assets minus Liabilities minus Equity equals zero for every period."
@@ -125,8 +126,8 @@
       "sheets": [
         "AFS",
         "IFS",
-        "Cons",
-        "Cash Flow"
+        "Cash Flow",
+        "Financial Statements"
       ],
       "fixable": false,
       "fix_instruction": "Add a cash reconciliation check row: change in balance sheet cash equals operating plus investing plus financing cash flows."
