@@ -174,6 +174,21 @@ function findHeaderRow(ws) {
     let textCells = 0;
     let numericCells = 0;
     row.eachCell({ includeEmpty: false }, cell => {
+      // FIX: found via checking a real file's valuation-gap defect —
+      // ExcelJS's cell.text (what headerCellText reads) returns the
+      // SAME string for every cell spanning a merged range, not just
+      // the master cell. Without this guard, a single wide merged
+      // methodology note (confirmed on a real sheet: one merge spanning
+      // 10 columns) gets counted as 10 separate "text cells", enough to
+      // outscore the sheet's genuine header row and make the parser
+      // treat an ordinary data row as the header instead — silently
+      // excluding every row above and including it from all parsed
+      // data. Confirmed directly: this dropped 10 entire rows,
+      // including the exact figure ("Completed property value") a
+      // valuation-comparison check needed. Counting only the merge's
+      // master cell (cell.master === cell) once fixes this without
+      // otherwise changing the scoring heuristic.
+      if (cell.isMerged && cell.master !== cell) return;
       const v = headerCellText(cell);
       if (v.length > 0 && isNaN(Number(v))) textCells++;
       else if (!isNaN(Number(v)) && v.length > 0) numericCells++;
@@ -199,7 +214,22 @@ function worksheetToRows(ws) {
     headers[col] = base;
   });
   const rows = [];
-  for (let r = headerRowNum + 1; r <= ws.rowCount; r++) {
+  // FIX: found via the same valuation-gap investigation — this sheet
+  // genuinely has two sections: a summary/key-metrics block (rows 1-9,
+  // containing figures like "Completed property value" needed for a
+  // valuation-comparison check) sitting above the main periodic table,
+  // whose real header correctly starts at row 10 (genuine, distinct
+  // monthly date columns). The old loop only ever parsed rows AFTER
+  // the detected header, so the entire summary section above it was
+  // silently discarded on any sheet shaped this way — every value in
+  // it simply never existed in the parsed output at all. Now parses
+  // every row except the header itself, reusing the same header-
+  // derived column keys throughout; an imperfect key mapping for a
+  // differently-laid-out section is still strictly better than
+  // discarding its data entirely, and extractMeaningfulRows only ever
+  // inspects each row's values, not its specific key names.
+  for (let r = 1; r <= ws.rowCount; r++) {
+    if (r === headerRowNum) continue;
     const row = ws.getRow(r);
     const obj = {};
     const cellRefs = {};

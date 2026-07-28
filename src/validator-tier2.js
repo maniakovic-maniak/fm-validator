@@ -41,15 +41,36 @@ function buildSystemPrompt(domain, modelContext) {
 // reconcil-) before falling back to positional selection for the
 // remaining slots, so a label match can never be silently dropped
 // purely due to where it happens to sit in the sheet.
-const PRIORITY_LABEL_RE = /\b(cash|check|balance|total|equity|reconcil\w*)\b/i;
+// FIX: found via systematically checking all 13 confirmed-defect
+// claims from a forensic audit review against a fresh production run.
+// Several genuine anomalies the model has (a $437m gap between two
+// valuation methods, a sign-flipped NPV vs XNPV, a negative DSCR
+// period, a negative debt yield period) were still not surfacing as
+// Tier 2 findings even after the earlier row-selection fix — traced
+// precisely: on VALUATIONS (134 total rows), "Completed property
+// value" (row 8) was dropped by the cap while "Property DCF value"
+// (row 12) survived, and "Project NPV" (row 44) was dropped while
+// "Project XNPV" (row 45) survived — meaning Tier 2 could only ever
+// see HALF of a comparison it needed both numbers for, on both counts.
+// Same pattern confirmed on DEBT (176 rows: periodic "Debt yield" row
+// dropped) and INVESTOR ANALYTICS (95 rows: DSCR summary and periodic
+// rows both dropped). The existing priority mechanism only covered
+// balance-sheet-integrity terms (cash/check/balance/total/equity) —
+// extended to cover the key return, covenant, and valuation-comparison
+// metrics an audit review specifically needs to see both sides of.
+const PRIORITY_LABEL_RE_HIGH = /\b(dscr|llcr|covenant|yield|npv|irr|xnpv|property value|dcf value)\b/i;
+const PRIORITY_LABEL_RE_LOW = /\b(cash|check|balance|total|equity|reconcil\w*)\b/i;
 
-function rowLabel(row) {
-  // The label is typically the first short, non-numeric string value —
-  // same heuristic the row-anchor logic below already uses for cell refs.
+function rowMatchesPriority(row, re) {
+  // Checks every string value in the row, not just the first — a row
+  // can carry multiple, entirely unrelated label/value pairs packed
+  // side-by-side (e.g. "Line fee" in columns A-B, "Debt yield" in
+  // columns J-K, both on the same physical row), and checking only
+  // the first string silently misses every other label sharing that row.
   for (const v of Object.values(row)) {
-    if (typeof v === 'string' && v.trim() !== '' && isNaN(parseFloat(v))) return v;
+    if (typeof v === 'string' && v.trim() !== '' && isNaN(parseFloat(v)) && re.test(v)) return true;
   }
-  return null;
+  return false;
 }
 
 function extractMeaningfulRows(rows, maxRows = 20) {
@@ -68,16 +89,39 @@ function extractMeaningfulRows(rows, maxRows = 20) {
     !Object.values(row).some(v => v !== null && !isNaN(parseFloat(v)))
   );
 
-  // Priority rows: a label match is always kept, regardless of position —
-  // capped at half of maxRows so priority matches alone can't crowd out
-  // everything else on a sheet with many "total"/"balance"-labelled rows.
-  const priorityCap = Math.max(1, Math.floor(maxRows / 2));
-  const priority = [];
-  const priorityKeys = new Set();
+  // FIX: found via checking a real 176-row sheet (DEBT) directly — a
+  // single-tier priority cap still failed to surface a genuinely
+  // important row. 75 rows on that sheet matched the combined priority
+  // terms, but only 12 matched the rare, specific return/covenant
+  // terms (dscr/yield/npv/irr/etc) — the other 63 matched only common
+  // balance-sheet-integrity terms (cash/total/balance/equity), whose
+  // sheer volume crowded out the rarer, more diagnostically important
+  // rows under one shared cap. The periodic "Debt yield" row (a real,
+  // confirmed negative value in one period) was the 48th match among
+  // 75 combined candidates — nowhere close to surviving any single cap
+  // sized for a 20-40 row budget. Splitting into two tiers — a
+  // generous reservation for the rare HIGH-value terms first, then a
+  // smaller reservation for the more common LOW-value terms with
+  // whatever room remains — is what actually fixes this, since 12
+  // rows fit easily in a generous reservation where 75 combined did not.
+  const highCap = Math.max(1, maxRows - 2);
+  const highPriority = [];
+  const highKeys = new Set();
   for (const row of numeric) {
-    if (priority.length >= priorityCap) break;
-    const label = rowLabel(row);
-    if (label && PRIORITY_LABEL_RE.test(label)) {
+    if (highPriority.length >= highCap) break;
+    if (rowMatchesPriority(row, PRIORITY_LABEL_RE_HIGH)) {
+      highPriority.push(row);
+      highKeys.add(row);
+    }
+  }
+
+  const remainingAfterHigh = numeric.filter(row => !highKeys.has(row));
+  const lowCap = Math.max(1, Math.floor((maxRows - highPriority.length) / 2));
+  const priority = [...highPriority];
+  const priorityKeys = new Set(highKeys);
+  for (const row of remainingAfterHigh) {
+    if (priority.length >= highPriority.length + lowCap) break;
+    if (rowMatchesPriority(row, PRIORITY_LABEL_RE_LOW)) {
       priority.push(row);
       priorityKeys.add(row);
     }

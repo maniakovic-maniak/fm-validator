@@ -76,6 +76,45 @@ function row(rowNum, obj) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// The two-tier priority fix: found via checking a real 176-row sheet
+// (DEBT) directly. A single-tier priority system still failed to
+// surface a genuinely important row, because 75 rows matched the
+// combined priority terms but only 12 matched the rare, specific
+// return/covenant terms (dscr/yield/npv/irr) — the other 63 matched
+// only common balance-sheet-integrity terms (cash/total/balance),
+// whose sheer volume crowded out the rarer, more important rows under
+// one shared cap.
+// ══════════════════════════════════════════════════════════════════
+{
+  const rows = [];
+  // Many common-term rows (would all match the LOW-priority tier)
+  for (let i = 1; i <= 30; i++) rows.push(row(i, { label: `Total facility line ${i}`, val: i * 1000 }));
+  // A rare, specific high-priority term buried late in iteration order
+  rows.push(row(133, { label: 'Debt yield', val: -0.076 }));
+
+  const selected = extractMeaningfulRows(rows, 20);
+  const survived = selected.map(r => r._excelRow);
+  check('two-tier priority fix: a rare high-priority term ("Debt yield") survives even when 30 common-term rows ("Total...") would otherwise crowd it out under a single shared cap',
+    survived.includes(133));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Confirms the fix correctly handles a label sharing a row with an
+// unrelated value pair — the exact real pattern found ("Line fee" in
+// columns A-B, "Debt yield" in columns J-K, same physical row).
+// ══════════════════════════════════════════════════════════════════
+{
+  const rows = [];
+  for (let i = 1; i <= 25; i++) rows.push(row(i, { label: `Line item ${i}`, val: i * 100 }));
+  rows.push(row(50, { unrelatedLabel: 'Line fee', unrelatedVal: 0, priorityLabel: 'Debt yield', priorityVal: -0.05 }));
+
+  const selected = extractMeaningfulRows(rows, 20);
+  const survived = selected.map(r => r._excelRow);
+  check('side-by-side label fix: a priority term is detected even when it is not the first string value on the row (an unrelated label appears first)',
+    survived.includes(50));
+}
+
+// ══════════════════════════════════════════════════════════════════
 // End-to-end confirmation against the real files that motivated both
 // fixes.
 // ══════════════════════════════════════════════════════════════════
@@ -98,6 +137,27 @@ const { parseWorkbook } = require('./src/parser.js');
     const idSurvived = idSelected.map(r => r._excelRow);
     check('end-to-end: real file — INVESTOR DASHBOARD "MODEL STATUS: REVIEW REQUIRED" (row 4) survives',
       idSurvived.includes(4));
+
+    // Found via systematically checking all 13 audit-review defects
+    // against a fresh run — DEBT, VALUATIONS, and INVESTOR ANALYTICS
+    // all showed the same class of bug (key comparison-pair rows
+    // dropped by the cap), confirmed here with the fix applied.
+    const debtSelected = extractMeaningfulRows(parsed.sheets['DEBT'], 20);
+    const debtSurvived = debtSelected.map(r => r._excelRow);
+    check('end-to-end: real file — DEBT periodic "Debt yield" row (133, showing a real negative value) survives',
+      debtSurvived.includes(133));
+
+    const valSelected = extractMeaningfulRows(parsed.sheets['VALUATIONS'], 20);
+    const valSurvived = valSelected.map(r => r._excelRow);
+    check('end-to-end: real file — VALUATIONS both sides of the property-value-vs-DCF comparison (rows 8 and 12) survive together',
+      valSurvived.includes(8) && valSurvived.includes(12));
+    check('end-to-end: real file — VALUATIONS both sides of the NPV-vs-XNPV comparison (rows 44 and 45) survive together',
+      valSurvived.includes(44) && valSurvived.includes(45));
+
+    const iaSelected = extractMeaningfulRows(parsed.sheets['INVESTOR ANALYTICS'], 20);
+    const iaSurvived = iaSelected.map(r => r._excelRow);
+    check('end-to-end: real file — INVESTOR ANALYTICS DSCR summary (63, 64) and periodic (77) rows all survive',
+      [63, 64, 77].every(n => iaSurvived.includes(n)));
   } else {
     console.log('SKIPPED: end-to-end real-file tests (files not present in this environment)');
   }
