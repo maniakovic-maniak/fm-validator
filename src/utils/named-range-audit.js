@@ -17,11 +17,34 @@
 const POOR_NAME_RE = /^(range|var|data|temp|tmp|x|y|z|val|value|name|item|list|table)\d*$/i;
 const SYSTEM_NAME_RE = /^_xlnm\./i;   // Excel-managed (Print_Area etc.) — not a user choice
 
+// FIX: found via investigating a real, confirmed false positive from a
+// forensic audit review — 8 defined names on a real file (Range_Debt,
+// Range_Equity, Range_NOI, Range_Building_Type, etc.), each a genuine,
+// valid OFFSET/COUNTA-based dynamic range (a common pattern for
+// auto-sizing a named range to a variable-length list), were all
+// flagged "Broken". Root cause: ExcelJS's own defined-name parser
+// splits a formula like OFFSET(Data!$B$25,0,0,COUNTA(Data!$B$25:$B$46),1)
+// at its commas and returns malformed fragments such as
+// "'OFFSET(Data'!$B$25" and "'COUNTA(Data'!$B$25:$B$46" — the function
+// name gets folded into what looks like a quoted sheet name.
+// isBrokenRange then naively extracted "OFFSET(Data" as a sheet name,
+// correctly found no sheet is literally named that, and flagged the
+// range as broken — a false positive on this project's own part, not
+// a genuine model defect. Detected here by checking whether the
+// "sheet name" extracted by the existing regex itself looks like a
+// function call (an uppercase word immediately followed by an open
+// parenthesis — OFFSET(, COUNTA(, INDEX(, etc.) — a real sheet name
+// can never take this shape. When detected, this range is skipped
+// rather than asserted broken: fm-validator cannot reliably validate
+// a dynamic OFFSET-based reference this way, and staying silent on
+// what it can't verify is safer than a confident false accusation.
+const FUNCTION_CALL_SHEET_RE = /^[A-Z][A-Z0-9._]*\(/i;
+
 function rangeToSheets(ranges) {
   const sheets = new Set();
   for (const r of ranges || []) {
     const m = /^'?([^'!]+)'?!/.exec(r);
-    if (m) sheets.add(m[1]);
+    if (m && !FUNCTION_CALL_SHEET_RE.test(m[1])) sheets.add(m[1]);
   }
   return [...sheets];
 }
@@ -32,6 +55,7 @@ function isBrokenRange(workbook, ranges) {
     const m = /^'?([^'!]+)'?!(.+)$/.exec(r);
     if (!m) return true;                              // unparseable reference
     const [, sheetName] = m;
+    if (FUNCTION_CALL_SHEET_RE.test(sheetName)) continue; // a dynamic OFFSET/INDEX/COUNTA-style formula ExcelJS mis-split at a comma — not a genuine sheet reference, can't reliably validate this way, don't assert broken
     if (!workbook.getWorksheet(sheetName)) return true; // sheet no longer exists
   }
   return false;
