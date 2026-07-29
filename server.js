@@ -70,6 +70,7 @@ const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative } = require('./src/utils/reasonableness-checks');
 const { checkDegenerateCovenantBranch } = require('./src/utils/degenerate-covenant-branch-check');
 const { checkEquityComponentBackwardSolved } = require('./src/utils/equity-component-backward-solved-check');
+const { checkMidRowFormulaRegimeChange } = require('./src/utils/mid-row-formula-regime-change-check');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
@@ -273,6 +274,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Degenerate covenant branch scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const equityComponentBackwardSolved = (() => { try { return checkEquityComponentBackwardSolved(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Equity-component backward-solve scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const midRowFormulaRegimeChange = (() => { try { return checkMidRowFormulaRegimeChange(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Mid-row formula regime-change scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const formulaDeepDive = wantsDeepDive
     ? await (async () => { try { return await runFormulaDeepDive(parsed, tier0, {}); }
         catch (e) { console.error('   \u26a0\ufe0f  Formula Deep Dive failed:', e.message); return { applicable:false, note:e.message, reviewed:0, findings:[] }; } })()
@@ -2186,6 +2189,26 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
             model_risk: 'A component labelled as an independent fact but actually computed as a residual will silently absorb any error elsewhere on the balance sheet, and if later periods anchor back to it, the plug propagates across the whole model horizon undetected.',
             key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Equity component derived from Total Assets minus Total Liabilities rather than tracked independently',
             escalation_flag: true, urgency: 'Before next reliance', confidence: 85
+          });
+        }
+      }
+      // ── Mid-row formula regime change (R-5) — a clean formula-
+      // shape break at a single column. Medium severity, moderate
+      // confidence: confirmed directly this can also be a genuine,
+      // legitimate actuals-to-forecast or phase boundary. ──
+      if (midRowFormulaRegimeChange.applicable && midRowFormulaRegimeChange.flaggedCount > 0) {
+        for (const f of midRowFormulaRegimeChange.findings) {
+          allFlagged.push({
+            id: `T0-REGIMECHANGE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.rowNum}`,
+            label: 'Formula pattern changes cleanly at a single column mid-row',
+            severity: 'medium', status: 'fail', sheet: f.sheet, cell: f.splitCell,
+            category: 'Structure', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Confirm whether this transition is intentional (e.g. an actuals-to-forecast boundary or a construction-to-operations phase change) and, if so, document it explicitly. If not intentional, correct the formula so the pattern is consistent across the full period range.',
+            workstream: 'Structure', issue_type: 'Mid-row formula inconsistency',
+            model_risk: `A clean, single-point formula change (${f.beforeCount} period(s) one way, ${f.afterCount} another) can be a deliberate model boundary or a copy-paste/model-surgery error — worth confirming which, since it wasn't caught by majority-vote consistency checking (neither side reached a clear majority).`,
+            key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Formula template changes mid-row at a single transition point',
+            escalation_flag: false, urgency: 'Before next reliance', confidence: 55
           });
         }
       }
