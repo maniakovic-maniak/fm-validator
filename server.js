@@ -69,6 +69,7 @@ const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative } = require('./src/utils/reasonableness-checks');
 const { checkDegenerateCovenantBranch } = require('./src/utils/degenerate-covenant-branch-check');
+const { checkEquityComponentBackwardSolved } = require('./src/utils/equity-component-backward-solved-check');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
@@ -270,6 +271,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
   const degenerateCovenantBranch = (() => { try { return checkDegenerateCovenantBranch(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Degenerate covenant branch scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const equityComponentBackwardSolved = (() => { try { return checkEquityComponentBackwardSolved(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Equity-component backward-solve scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const formulaDeepDive = wantsDeepDive
     ? await (async () => { try { return await runFormulaDeepDive(parsed, tier0, {}); }
         catch (e) { console.error('   \u26a0\ufe0f  Formula Deep Dive failed:', e.message); return { applicable:false, note:e.message, reviewed:0, findings:[] }; } })()
@@ -2164,6 +2167,25 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
             model_risk: `A distribution, debt-sizing, or release gate that cannot fail when it cannot measure its own ratio provides no genuine protection in exactly the periods where protection matters most — confirmed here across ${f.instanceCount} period(s) on this row alone.`,
             key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Zero-denominator branch defaults to TRUE instead of blocking',
             escalation_flag: true, urgency: 'Before next reliance', confidence: 92
+          });
+        }
+      }
+      // ── Equity component backward-solved (R-4) — a contributed-
+      // equity style line computed as a residual of Total Assets/
+      // Liabilities. ──
+      if (equityComponentBackwardSolved.applicable && equityComponentBackwardSolved.flaggedCount > 0) {
+        for (const f of equityComponentBackwardSolved.findings) {
+          allFlagged.push({
+            id: `T0-EQPLUG-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.rowNum}`,
+            label: 'Equity component computed as a residual rather than an independent figure',
+            severity: 'high', status: 'fail', sheet: f.sheet, cell: f.sampleCell,
+            category: 'Accounting', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Rebuild this line as a genuine independent roll-forward (actual capital contribution events), not a residual of Total Assets and Total Liabilities. If it must remain a plug pending correction, label it explicitly as such so reviewers are not misled into treating it as an independent fact.',
+            workstream: 'Accounting', issue_type: 'Unlabelled balance-sheet plug',
+            model_risk: 'A component labelled as an independent fact but actually computed as a residual will silently absorb any error elsewhere on the balance sheet, and if later periods anchor back to it, the plug propagates across the whole model horizon undetected.',
+            key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Equity component derived from Total Assets minus Total Liabilities rather than tracked independently',
+            escalation_flag: true, urgency: 'Before next reliance', confidence: 85
           });
         }
       }
