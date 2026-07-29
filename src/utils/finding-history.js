@@ -58,9 +58,24 @@ if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
 // common case, and it's a better tradeoff than the previous behavior,
 // which failed on the ordinary case of a model simply being re-dated.
 const DATE_PATTERN_RE = /\b\d{1,4} \d{1,2} \d{1,4}\b/g; // e.g. 12 7 2026, 2026 07 13 (after separators are normalized to spaces below)
-const REVISION_WORD_RE = /\b(audited|validated|draft|final|reviewed|approved|updated|revised|checked|copy|backup|old|new|latest)\b/gi;
+const REVISION_WORD_RE = /\b(audited|validated|draft|final|reviewed|approved|updated|revised|checked|copy|backup|old|new|latest|fixed|corrected|amended)\b/gi;
 const PAREN_VERSION_RE = /\(\d+\)/g; // (1), (2) -- needs literal parens, checked before separator normalization
 const V_VERSION_RE = /\bv\d+\b/gi; // v1, v2 -- needs a real \b, checked after separator normalization
+// FIX: found via a real cross-run tracking failure — "Investor Ready
+// 12" was treated as a permanently distinct model from "Investor
+// Ready v6", since V_VERSION_RE only matches "v" literally followed
+// by digits; a bare number with no "v" prefix survived untouched.
+// Confirmed directly: normalizeModelIdentity() returned two different
+// strings for what is genuinely the same model at two different
+// revisions. Deliberately narrower than stripping any trailing
+// number: only strips a number directly preceded by a recognized
+// stage/version word, keeping the word itself so "Ready 12" and
+// "Ready v6" (which already loses its "v6" to V_VERSION_RE above)
+// both converge to the same "...ready" identity. A blind trailing-
+// number strip would risk collapsing genuinely different models —
+// "Building 12" and "Building 13" — into one identity; requiring a
+// stage word immediately before the number avoids that.
+const STAGE_NUMBER_RE = /\b(ready|version|ver|rev|revision|release|draft|build)\s+\d+\b/gi;
 
 function normalizeModelIdentity(filename) {
   let s = String(filename || '');
@@ -79,6 +94,7 @@ function normalizeModelIdentity(filename) {
   s = s.replace(/[_\-.()]+/g, ' ');
   s = s.replace(DATE_PATTERN_RE, ' ');
   s = s.replace(V_VERSION_RE, ' ');
+  s = s.replace(STAGE_NUMBER_RE, '$1');
   s = s.replace(REVISION_WORD_RE, ' ');
   s = s.toLowerCase();
   s = s.replace(/\s+/g, ' ').trim();

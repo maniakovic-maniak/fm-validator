@@ -54,6 +54,30 @@ function run() {
   check('a filename that normalizes to nothing meaningful falls back to the raw lowercased filename rather than an empty string',
     normalizeModelIdentity('2026_07_13.xlsx').length > 0);
 
+  // ══════════════════════════════════════════════════════════════════
+  // R-1 fix: found via a real cross-run tracking failure. A bare
+  // number after a stage word ("Investor Ready 12") has no "v" prefix,
+  // so V_VERSION_RE never matched it, and it survived into the
+  // identity untouched — meaning every numbered revision of this
+  // model got a permanently distinct identity. "FIXED" survived for
+  // the same reason: it wasn't in the revision-word list.
+  // ══════════════════════════════════════════════════════════════════
+  check('the exact real motivating case: "Investor Ready v6" and "Investor Ready 12" now converge to the same identity',
+    normalizeModelIdentity('The_Bend_Precinct_Model_26_7_2026_Investor_Ready_v6.xlsm') ===
+    normalizeModelIdentity('The_Bend_Precinct_Model_Investor_Ready_12.xlsm'));
+  check('a "_FIXED" suffix (the same real file, re-saved) normalizes the same as without it',
+    normalizeModelIdentity('The_Bend_Precinct_Model_Investor_Ready_12.xlsm') ===
+    normalizeModelIdentity('The_Bend_Precinct_Model_Investor_Ready_12_FIXED.xlsm'));
+  check('other recognized stage words also converge correctly ("Draft 3" vs "Draft v3")',
+    normalizeModelIdentity('Model_Draft_3.xlsx') === normalizeModelIdentity('Model_Draft_v3.xlsx'));
+
+  // ── The deliberate tradeoff boundary: a bare number is ONLY
+  // stripped when a recognized stage word immediately precedes it,
+  // specifically to avoid collapsing genuinely different models that
+  // happen to be numbered (e.g. different buildings in a portfolio). ──
+  check('genuinely different models numbered WITHOUT a stage word do NOT collide (the false-collapse risk this fix deliberately avoids)',
+    normalizeModelIdentity('Building_12.xlsx') !== normalizeModelIdentity('Building_13.xlsx'));
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }
