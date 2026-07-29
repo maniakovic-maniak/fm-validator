@@ -54,7 +54,7 @@ const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwn
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
-const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag } = require('./src/utils/reasonableness-checks');
+const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier');
@@ -107,9 +107,10 @@ async function run() {
     outputs: checkOutputReasonableness(parsed._raw),
     revenuePerUnit: checkRevenuePerUnitMetric(parsed._raw),
     terminalValueCrossCheck: checkTerminalValueCrossCheck(parsed._raw),
-    modelStatusFlag: checkModelStatusFlag(parsed._raw)
+    modelStatusFlag: checkModelStatusFlag(parsed._raw),
+    npvSignConsistency: checkNpvSignConsistency(parsed._raw)
   }; } catch (e) { console.error('   \u26a0\ufe0f  Reasonableness checks failed:', e.message);
-    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false} }; } })();
+    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false}, npvSignConsistency:{applicable:false} }; } })();
   const duplicateSheets = (() => { try { return detectDuplicateSheets(parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
   const formulaDeepDive = wantsDeepDive
@@ -2010,6 +2011,25 @@ async function run() {
         model_risk: 'The model directly discloses it is not in a final, reliance-ready state — treating its outputs as final without resolving this is a governance gap regardless of how the underlying figures look.',
         key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Model self-flagged as not ready for reliance',
         escalation_flag: true, urgency: 'Before external circulation', confidence: 95
+      });
+    }
+    // ── NPV sign inconsistency across calculation methods — found via
+    // investigating why a confirmed real defect (Project NPV vs XNPV
+    // disagreeing on sign) still wasn't caught even after every
+    // row-extraction fix; the sheet it lives on isn't consistently
+    // selected as a key sheet by Familiarisation, so this is a
+    // dedicated, deterministic check independent of that selection. ──
+    if (reasonableness.npvSignConsistency.applicable && reasonableness.npvSignConsistency.found === true) {
+      const first = reasonableness.npvSignConsistency.flagged[0];
+      allFlagged.push({
+        id: 'T0-RSN-007', label: 'NPV values disagree on sign for the same underlying metric',
+        severity: 'high', status: 'fail', sheet: first.items[0].location.split('!')[0], cell: first.items[0].location.split('!')[1],
+        category: 'Reasonableness', condition: reasonableness.npvSignConsistency.note, reason: reasonableness.npvSignConsistency.note,
+        corrective_action: 'Reconcile the two calculation methods producing opposite signs — check the cash flow range, sign convention, and discount rate feeding each, since one is very likely a genuine formula error rather than an acceptable difference in method.',
+        workstream: 'Valuation', issue_type: 'NPV sign consistency',
+        model_risk: 'Two calculation methods for the same underlying project or equity value disagreeing on sign (not just magnitude) is a strong indicator one of them is genuinely wrong, not a benign methodological difference.',
+        key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'NPV vs XNPV (or similar paired methods) sign mismatch',
+        escalation_flag: true, urgency: 'Before next reliance', confidence: 90
       });
     }
     if (duplicateSheets.applicable && duplicateSheets.flaggedCount > 0) {

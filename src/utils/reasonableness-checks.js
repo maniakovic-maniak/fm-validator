@@ -358,4 +358,58 @@ function checkModelStatusFlag(workbook) {
     note: `This model contains its own explicit status/readiness flag: ${found.map(f => `${f.sheet}!${f.valueCell} ("${f.label}" = "${f.value}")`).join('; ')} — the model itself discloses it is not yet in a final, reliance-ready state.` };
 }
 
-module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag };
+// ── NPV sign consistency across calculation methods ──────────────────────
+// Found via investigating why a confirmed, real defect (Project NPV
+// +$510m vs Project XNPV -$263m — opposite signs for what should be
+// the same underlying project value) still wasn't caught by Tier 2,
+// even after fixing every row-extraction gap on the sheet it lives
+// on. Traced to the same architectural cause as the model-status-flag
+// gap above: the sheet (VALUATIONS) simply isn't consistently
+// selected as a key sheet by Familiarisation, so no row-level fix
+// within it can help reliably. A dedicated, deterministic check that
+// scans every sheet directly — independent of Tier 2's sheet
+// selection — is the more reliable fix here, matching the same
+// reasoning as checkModelStatusFlag.
+//
+// Groups every "NPV"/"XNPV"-labelled value by its base label (the
+// label with "NPV"/"XNPV" itself stripped out — e.g. "Project NPV"
+// and "Project XNPV" both reduce to "project"), then flags a group
+// where one value is positive and another is negative. Verified this
+// grouping is safe across three other real files before building:
+// unrelated NPV-adjacent labels ("Years for NPV", "Option NPV") have
+// distinct base names and are never compared against each other, and
+// a genuinely different metric being negative (e.g. "Option NPV")
+// isn't flagged, since nothing else shares its base name to compare against.
+const NPV_STRIP_RE = /\b(x?npv)\b/gi;
+
+function checkNpvSignConsistency(workbook) {
+  const candidates = findLabeledValues(workbook, ['npv']);
+  const groups = new Map();
+  for (const c of candidates) {
+    const base = c.labelText.replace(NPV_STRIP_RE, '').replace(/[@().]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!base) continue; // a bare "NPV" label with nothing else has no group to compare within
+    if (!groups.has(base)) groups.set(base, []);
+    groups.get(base).push(c);
+  }
+
+  const flagged = [];
+  for (const [base, items] of groups) {
+    const positives = items.filter(i => i.value > 0);
+    const negatives = items.filter(i => i.value < 0);
+    if (positives.length > 0 && negatives.length > 0) {
+      flagged.push({ base, items: items.map(i => ({ label: i.labelText, value: i.value, location: `${i.sheet}!${i.valueCell}` })) });
+    }
+  }
+
+  if (flagged.length === 0) {
+    return { applicable: true, found: false,
+      note: 'No sign inconsistency found among NPV/XNPV-labelled values grouped by their shared base metric.' };
+  }
+  const descriptions = flagged.map(f =>
+    f.items.map(i => `${i.label} = ${i.value.toFixed(1)} at ${i.location}`).join(' vs. ')
+  );
+  return { applicable: true, found: true, flagged,
+    note: `Opposite-sign NPV values were found for what appears to be the same underlying metric: ${descriptions.join('; ')}. Two calculation methods for the same project value disagreeing on sign (not just magnitude) is a strong indicator one of them has a genuine formula or sign-convention error.` };
+}
+
+module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency };
