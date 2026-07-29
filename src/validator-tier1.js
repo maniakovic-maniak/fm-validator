@@ -3,6 +3,71 @@ const { resolveSheetName, resolveAny } = require('./utils/sheet-resolver');
 const { scanFormulaErrors } = require('./parser');
 const icaewChecks = require('./utils/validator-tier1-icaew-additions');
 
+// FIX (R-2): found via an independent review directly disproving both
+// T1-009 and T1-012 on a real file. Both checks previously only ever
+// looked for a dedicated sheet literally named Timing/Flags/Timeline/
+// Inputs/Assumptions — but this model's actual/forecast flags are
+// confirmed to genuinely exist, just embedded within an ordinary
+// sheet (Underwriting!L4:EN4), which the old logic never considered
+// at all. Scans every sheet's early rows for a row containing both
+// "actual" and "forecast" as distinct cell values across different
+// columns — the shape of a genuine actual/forecast flag row — as a
+// fallback when no dedicated sheet exists, rather than concluding
+// failure just because no sheet has the expected name.
+function findEmbeddedActualForecastFlagRow(parsed) {
+  // FIX: found via testing against the real motivating file — requiring
+  // BOTH "actual" and "forecast" values to simultaneously appear on the
+  // row was too strict. This model's flag row (Underwriting!4) has a
+  // genuine, working per-column formula — IF(date<=cutoff,"Actual",
+  // "Forecast") — labelled "Actual / Forecast Status", but every column
+  // currently evaluates to "Forecast" since the model hasn't reached any
+  // historical period yet. That's a legitimate, expected state for a
+  // forward-looking development model, not a defect — the flag
+  // MECHANISM genuinely exists and works, independent of which value
+  // any given period happens to show today. Requires multiple cells
+  // matching "actual" or "forecast" (confirming a genuine per-column
+  // flag pattern, not a one-off label mention) AND a label on the same
+  // row referencing both words together.
+  const LABEL_RE = /actual.{0,15}forecast|forecast.{0,15}actual/i;
+  function scanRow(rowValues) {
+    let flagCount = 0;
+    let hasCombinedLabel = false;
+    for (const v of rowValues) {
+      const text = String(v || '').toLowerCase().trim();
+      if (text === 'actual' || text === 'actuals' || text === 'forecast') flagCount++;
+      if (LABEL_RE.test(String(v || ''))) hasCombinedLabel = true;
+    }
+    return hasCombinedLabel && flagCount >= 2;
+  }
+
+  if (parsed._raw && parsed._type === 'exceljs') {
+    let found = null;
+    parsed._raw.eachSheet(ws => {
+      if (found) return;
+      const limit = Math.min(30, ws.rowCount);
+      for (let r = 1; r <= limit; r++) {
+        const row = ws.getRow(r);
+        const rowValues = [];
+        row.eachCell({ includeEmpty: false }, cell => {
+          const v = cell.value;
+          const raw = (v && typeof v === 'object' && 'result' in v) ? v.result : v;
+          rowValues.push(raw);
+        });
+        if (scanRow(rowValues)) { found = { sheetName: ws.name, rowNum: r }; break; }
+      }
+    });
+    return found;
+  }
+  // Fallback for a non-ExcelJS parsed shape — scan whatever rows were parsed.
+  for (const sheetName of parsed.sheetNames) {
+    const rows = parsed.sheets[sheetName] || [];
+    for (const row of rows.slice(0, 30)) {
+      if (scanRow(Object.values(row))) return { sheetName, rowNum: row._rowNum };
+    }
+  }
+  return null;
+}
+
 // Safe keyword match for sheet-name checks — short/ambiguous keywords need
 // a word boundary or they false-match inside unrelated longer names.
 // Confirmed real: 'Cons' (from T1-002's sheets_known list) matching
@@ -35,12 +100,34 @@ function runTier1(parsed) {
         known.some(k => sheetNameMatchesKeyword(name, k))
       );
       const minCount = rule.sheets_minimum_count || 2;
-      const passed = matched.length >= minCount;
+      let passed = matched.length >= minCount;
+      // FIX (R-2): found via an independent review — the old message
+      // read "Only 0 recognisable financial sheet(s) found" and then
+      // listed EVERY sheet in the workbook, including ones with no
+      // relation to what this rule actually searches for. That reads
+      // as self-contradictory (a reviewer sees "Financial Statements"
+      // right there in the list and reasonably asks why it says zero
+      // were found) even when the underlying keyword match is
+      // genuinely correct. States what was searched for, separately
+      // from what the workbook actually contains.
+      let reason = passed ? null :
+        `None of the expected sheet types (${known.join(', ')}) were found among this workbook's ${sheetNamesClean.length} sheets: ${sheetNamesClean.join(', ')}.`;
+      // T1-009 specifically: actual/forecast flags can genuinely live
+      // embedded in an ordinary sheet rather than a dedicated one —
+      // confirmed directly on a real file (Underwriting!L4:EN4).
+      // Check for this before concluding failure.
+      if (!passed && rule.id === 'T1-009') {
+        const embedded = findEmbeddedActualForecastFlagRow(parsed);
+        if (embedded) {
+          passed = true;
+          reason = null;
+        }
+      }
       results.push({
         id: rule.id, label: rule.label, severity: rule.severity || 'high',
         status: passed ? 'pass' : 'fail',
         fixable: rule.fixable, fix_instruction: rule.fix_instruction,
-        reason: passed ? null : `Only ${matched.length} recognisable financial sheet(s) found. Sheets: ${sheetNamesClean.join(', ')}`
+        reason
       });
     }
 
@@ -297,11 +384,27 @@ function runTier1(parsed) {
       const found = flagSheets.some(s => sheetNamesClean.includes(s));
 
       if (!found) {
-        results.push({
-          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
-          status: 'fail', fixable: false, fix_instruction: rule.fix_instruction,
-          reason: 'No Timing, Flags, or Inputs sheet found. Actuals/forecast separation cannot be verified.'
-        });
+        // FIX (R-2): found via an independent review — actual/forecast
+        // flags can genuinely live embedded in an ordinary sheet
+        // rather than a dedicated Timing/Flags sheet. Confirmed
+        // directly on a real file (Underwriting!L4:EN4). The old logic
+        // never even attempted this fallback when no dedicated sheet
+        // existed at all — it went straight to "fail". Scans every
+        // sheet before concluding that.
+        const embedded = findEmbeddedActualForecastFlagRow(parsed);
+        if (embedded) {
+          results.push({
+            id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+            status: 'pass', fixable: false, fix_instruction: rule.fix_instruction,
+            reason: null
+          });
+        } else {
+          results.push({
+            id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+            status: 'fail', fixable: false, fix_instruction: rule.fix_instruction,
+            reason: `No sheet named Timing/Flags/Timeline/Inputs/Assumptions was found among this workbook's ${parsed.sheetNames.length} sheets, and no row combining "actual" and "forecast" values was found embedded in any other sheet either. Actuals/forecast separation cannot be verified.`
+          });
+        }
       } else {
         // Check if any of the candidate sheets have a row mentioning actual/forecast
         let hasFlag = false;
