@@ -55,6 +55,7 @@ const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
 const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative } = require('./src/utils/reasonableness-checks');
+const { checkDegenerateCovenantBranch } = require('./src/utils/degenerate-covenant-branch-check');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier');
@@ -115,6 +116,13 @@ async function run() {
     return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false}, npvSignConsistency:{applicable:false}, valuationMethodDivergence:{applicable:false}, debtYieldNegative:{applicable:false} }; } })();
   const duplicateSheets = (() => { try { return detectDuplicateSheets(parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
+  // FIX (R-3): found via an independent review's single most serious
+  // finding — a covenant/gate formula defaulting to PASS on a zero
+  // denominator. This is a formula-text pattern, not inferrable from
+  // extracted values alone, so it runs as its own deterministic Tier 0
+  // scan, independent of whichever sheets Tier 2 happens to review.
+  const degenerateCovenantBranch = (() => { try { return checkDegenerateCovenantBranch(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Degenerate covenant branch scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const formulaDeepDive = wantsDeepDive
     ? await (async () => { try { return await runFormulaDeepDive(parsed, tier0, {}); }
         catch (e) { console.error('   \u26a0\ufe0f  Formula Deep Dive failed:', e.message); return { applicable:false, note:e.message, reviewed:0, findings:[] }; } })()
@@ -2078,6 +2086,26 @@ async function run() {
         key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Duplicate sheet not archived',
         escalation_flag: false, urgency: 'Before next reliance', confidence: 90
       });
+    }
+    // ── Degenerate covenant branch (R-3) — a covenant/gate formula
+    // defaulting to PASS on a zero denominator. One Issue Log entry
+    // per flagged row, since the check already aggregates repeated
+    // periods sharing the same underlying formula into one entry. ──
+    if (degenerateCovenantBranch.applicable && degenerateCovenantBranch.flaggedCount > 0) {
+      for (const f of degenerateCovenantBranch.findings) {
+        allFlagged.push({
+          id: `T0-COVENANT-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.rowNum}`,
+          label: 'Covenant/gate formula defaults to PASS on a zero denominator',
+          severity: 'high', status: 'fail', sheet: f.sheet, cell: f.sampleCell,
+          category: 'Debt', condition: f.note,
+          reason: f.note,
+          corrective_action: 'Change the zero-denominator branch to block (FALSE/0) rather than pass (TRUE) — an inability to measure the covenant ratio should never default to a passing result. Confirm whether any distributions or releases were paid through this branch historically and whether they need to be reversed or disclosed.',
+          workstream: 'Debt', issue_type: 'Degenerate covenant branch',
+          model_risk: `A distribution, debt-sizing, or release gate that cannot fail when it cannot measure its own ratio provides no genuine protection in exactly the periods where protection matters most — confirmed here across ${f.instanceCount} period(s) on this row alone.`,
+          key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Zero-denominator branch defaults to TRUE instead of blocking',
+          escalation_flag: true, urgency: 'Before next reliance', confidence: 92
+        });
+      }
     }
   if (formulaDeepDive.findings && formulaDeepDive.findings.length) allFlagged.push(...formulaDeepDive.findings);
   if (vbaReview.findings && vbaReview.findings.length) allFlagged.push(...vbaReview.findings);
