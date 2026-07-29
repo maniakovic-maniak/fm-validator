@@ -54,7 +54,7 @@ const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwn
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
-const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency } = require('./src/utils/reasonableness-checks');
+const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative } = require('./src/utils/reasonableness-checks');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier');
@@ -108,9 +108,11 @@ async function run() {
     revenuePerUnit: checkRevenuePerUnitMetric(parsed._raw),
     terminalValueCrossCheck: checkTerminalValueCrossCheck(parsed._raw),
     modelStatusFlag: checkModelStatusFlag(parsed._raw),
-    npvSignConsistency: checkNpvSignConsistency(parsed._raw)
+    npvSignConsistency: checkNpvSignConsistency(parsed._raw),
+    valuationMethodDivergence: checkValuationMethodDivergence(parsed._raw),
+    debtYieldNegative: checkDebtYieldNegative(parsed._raw)
   }; } catch (e) { console.error('   \u26a0\ufe0f  Reasonableness checks failed:', e.message);
-    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false}, npvSignConsistency:{applicable:false} }; } })();
+    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false}, npvSignConsistency:{applicable:false}, valuationMethodDivergence:{applicable:false}, debtYieldNegative:{applicable:false} }; } })();
   const duplicateSheets = (() => { try { return detectDuplicateSheets(parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
   const formulaDeepDive = wantsDeepDive
@@ -2030,6 +2032,37 @@ async function run() {
         model_risk: 'Two calculation methods for the same underlying project or equity value disagreeing on sign (not just magnitude) is a strong indicator one of them is genuinely wrong, not a benign methodological difference.',
         key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'NPV vs XNPV (or similar paired methods) sign mismatch',
         escalation_flag: true, urgency: 'Before next reliance', confidence: 90
+      });
+    }
+    // ── Valuation-method divergence (DCF vs. direct/income
+    // capitalisation) — found via the same investigation as the NPV
+    // check above, same architectural cause. ──
+    if (reasonableness.valuationMethodDivergence.applicable && reasonableness.valuationMethodDivergence.found === true) {
+      const vmd = reasonableness.valuationMethodDivergence;
+      allFlagged.push({
+        id: 'T0-RSN-008', label: 'Two valuation methods for the same asset diverge materially',
+        severity: 'high', status: 'fail', sheet: vmd.direct.location.split('!')[0], cell: vmd.direct.location.split('!')[1],
+        category: 'Reasonableness', condition: vmd.note, reason: vmd.note,
+        corrective_action: 'Reconcile the DCF-method and direct/income-capitalisation-method valuations for this asset — a divergence this large usually means one method has a stale or incorrect input, not a genuine, defensible difference in approach.',
+        workstream: 'Valuation', issue_type: 'Valuation method divergence',
+        model_risk: 'Two independent valuation methods disagreeing this materially on the value of the same asset undermines confidence in whichever figure the model relies on downstream.',
+        key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'DCF and direct-capitalisation valuations diverge beyond a reasonable tolerance',
+        escalation_flag: true, urgency: 'Before next reliance', confidence: 75
+      });
+    }
+    // ── Negative periodic debt yield — found via the same
+    // investigation, same architectural cause. ──
+    if (reasonableness.debtYieldNegative.applicable && reasonableness.debtYieldNegative.found === true) {
+      const dyn = reasonableness.debtYieldNegative;
+      allFlagged.push({
+        id: 'T0-RSN-009', label: 'Periodic debt yield is negative in at least one period',
+        severity: 'high', status: 'fail', sheet: dyn.flagged[0].sheet, cell: 'A1',
+        category: 'Reasonableness', condition: dyn.note, reason: dyn.note,
+        corrective_action: 'Investigate the period(s) where debt yield goes negative — confirm whether this reflects a genuine operating loss or a formula error, and check whether summary DSCR/yield statistics elsewhere in the model correctly reflect this period.',
+        workstream: 'Debt', issue_type: 'Debt yield reasonableness',
+        model_risk: 'A negative debt yield implies negative NOI relative to total debt in that period — a summary "average" or "minimum" statistic elsewhere in the model may not surface this specific period.',
+        key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Negative periodic debt yield value',
+        escalation_flag: true, urgency: 'Before next reliance', confidence: 85
       });
     }
     if (duplicateSheets.applicable && duplicateSheets.flaggedCount > 0) {

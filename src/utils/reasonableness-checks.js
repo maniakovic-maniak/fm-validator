@@ -412,4 +412,131 @@ function checkNpvSignConsistency(workbook) {
     note: `Opposite-sign NPV values were found for what appears to be the same underlying metric: ${descriptions.join('; ')}. Two calculation methods for the same project value disagreeing on sign (not just magnitude) is a strong indicator one of them has a genuine formula or sign-convention error.` };
 }
 
-module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency };
+// ── Negative periodic debt yield ──────────────────────────────────────
+// Found via investigating why a confirmed real defect (a periodic
+// "Debt yield" row showing -7.6% in one period, invisible in a
+// +21.5% summary statistic) still wasn't caught. Same architectural
+// cause as the checks above: the sheet isn't consistently reviewed by
+// Tier 2. Debt yield (NOI / total debt) should never be negative for
+// a model with genuinely positive operating income — a negative value
+// is either a real operating loss in that period or a formula error,
+// either way worth surfacing directly.
+//
+// Uses its own search logic rather than the shared findLabeledRowSeries
+// utility: that function correctly stops at the first non-numeric
+// cell it finds (a genuine label), but this model's layout has a unit
+// label ("%") immediately to the right of the metric label, with the
+// real numeric series starting several columns further right —
+// confirmed directly this caused the shared utility to capture only 1
+// value instead of the full periodic series. Tolerates a short run of
+// non-numeric cells (units, descriptions) before giving up, rather
+// than stopping at the very first one.
+function findPeriodicSeriesTolerant(workbook, labelTerms, opts = {}) {
+  const maxDistance = opts.maxDistance || 60;
+  const toleratedGap = opts.toleratedGap || 6;
+  const terms = labelTerms.map(t => t.toLowerCase());
+  const results = [];
+
+  workbook.eachSheet(ws => {
+    ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
+      row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+        const text = cellText(cell.value).toLowerCase();
+        if (!text) return;
+        const matchedTerm = terms.find(t => text.includes(t));
+        if (!matchedTerm) return;
+        const series = [];
+        let nonNumericRun = 0;
+        for (let c = colNum + 1; c <= colNum + maxDistance; c++) {
+          const valCell = row.getCell(c);
+          const raw = valCell.formula ? valCell.result : valCell.value;
+          if (typeof raw === 'number') {
+            series.push({ cell: valCell.address, value: raw });
+            nonNumericRun = 0;
+          } else {
+            nonNumericRun++;
+            if (nonNumericRun >= toleratedGap && series.length === 0) break; // nothing numeric found yet within tolerance — give up
+            if (nonNumericRun >= 3 && series.length > 0) break; // series had already started, then genuinely ended
+          }
+        }
+        if (series.length > 1) { // a single value isn't a genuine periodic series
+          results.push({ sheet: ws.name, labelCell: cell.address, labelText: cellText(cell.value).slice(0, 80), series });
+        }
+      });
+    });
+  });
+
+  return results;
+}
+
+function checkDebtYieldNegative(workbook) {
+  const results = findPeriodicSeriesTolerant(workbook, ['debt yield']);
+  const flagged = [];
+  for (const r of results) {
+    const negatives = r.series.filter(s => s.value < 0);
+    if (negatives.length > 0) {
+      flagged.push({ sheet: r.sheet, label: r.labelText, negativeCells: negatives.map(n => `${r.sheet}!${n.cell} = ${(n.value * 100).toFixed(1)}%`) });
+    }
+  }
+
+  if (flagged.length === 0) {
+    return { applicable: true, found: false,
+      note: 'No periodic debt-yield series with a negative value was found.' };
+  }
+  return { applicable: true, found: true, flagged,
+    note: `The periodic debt yield series shows a negative value in at least one period: ${flagged.map(f => f.negativeCells.join(', ')).join('; ')}. Debt yield (NOI over total debt) going negative implies a genuine operating loss in that period, or a formula error — either way worth reviewing directly, since summary "average/minimum" statistics for this metric may not reflect it.`,
+  };
+}
+
+module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative };
+
+// ── Valuation-method divergence (DCF vs. direct/income capitalisation) ──
+// Found via investigating why a confirmed real defect (Completed
+// property value $679.6m vs Property DCF value $242.6m — a 2.8x, $437m
+// gap between two valuation methods for the same asset) still wasn't
+// caught by Tier 2. Same architectural cause as the other two
+// dedicated checks above: VALUATIONS isn't consistently selected as a
+// key sheet by Familiarisation, so no row-level fix within it can help
+// reliably — a dedicated, deterministic check is needed here too.
+//
+// Comparing a DCF-method value against a direct/income-capitalisation-
+// method value for the same asset is a standard real estate valuation
+// cross-check, not specific to this one model — but the exact label
+// pattern used here ("DCF value", "property value") did not appear on
+// any of three other real test files, so cross-model false-positive
+// risk could not be directly verified the way the NPV check's could.
+// The threshold is set deliberately conservative (50%, roughly double)
+// as a result — this is meant to catch a genuinely severe divergence
+// like the one confirmed here (2.8x), not flag every ordinary
+// difference between two legitimate valuation methods.
+const DCF_VALUE_TERMS = ['dcf value', 'dcf valuation'];
+const DIRECT_VALUE_TERMS = ['property value', 'capitalisation value', 'capitalization value', 'income capitalisation value'];
+const VALUATION_DIVERGENCE_THRESHOLD = 0.5; // 50% — deliberately conservative, see note above
+
+function checkValuationMethodDivergence(workbook) {
+  const dcfCandidates = findLabeledValues(workbook, DCF_VALUE_TERMS);
+  const directCandidates = findLabeledValues(workbook, DIRECT_VALUE_TERMS);
+
+  if (dcfCandidates.length === 0 || directCandidates.length === 0) {
+    return { applicable: true, found: false,
+      note: 'No pair of DCF-method and direct/income-capitalisation-method valuation figures for the same asset was found to cross-check against each other.' };
+  }
+
+  const dcf = pickModalCandidate(dcfCandidates);
+  const direct = pickModalCandidate(directCandidates);
+  if (dcf.value === 0 || direct.value === 0) {
+    return { applicable: true, found: false,
+      note: 'A DCF-method and a direct-method valuation figure were found, but one is zero — a percentage divergence is not meaningful here.' };
+  }
+
+  const divergence = Math.abs(direct.value - dcf.value) / Math.max(Math.abs(direct.value), Math.abs(dcf.value));
+  if (divergence < VALUATION_DIVERGENCE_THRESHOLD) {
+    return { applicable: true, found: false,
+      note: `A DCF-method valuation (${dcf.labelText} = ${dcf.value.toFixed(1)}) and a direct-method valuation (${direct.labelText} = ${direct.value.toFixed(1)}) were found and diverge by ${(divergence * 100).toFixed(0)}% — within the disclosed review threshold.` };
+  }
+  return { applicable: true, found: true,
+    dcf: { label: dcf.labelText, value: dcf.value, location: `${dcf.sheet}!${dcf.valueCell}` },
+    direct: { label: direct.labelText, value: direct.value, location: `${direct.sheet}!${direct.valueCell}` },
+    divergencePct: divergence * 100,
+    note: `${direct.labelText} (${direct.value.toFixed(1)} at ${direct.sheet}!${direct.valueCell}) and ${dcf.labelText} (${dcf.value.toFixed(1)} at ${dcf.sheet}!${dcf.valueCell}) diverge by ${(divergence * 100).toFixed(0)}% — two independent valuation methods for what appears to be the same asset disagreeing this materially warrants review of which one (if either) is reliable.`,
+  };
+}
