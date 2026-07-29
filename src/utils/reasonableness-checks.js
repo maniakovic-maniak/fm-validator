@@ -316,12 +316,21 @@ function checkTerminalValueCrossCheck(workbook) {
 // Tier 2 happens to review — is more reliable here than a prompt
 // change, matching this project's established pattern of building a
 // Tier 0 check for anything that can be reliably pattern-matched.
-// Verified zero false positives across three other real test files
-// (Carlsberg, The Bend Audited, Hidden Gem) before building this.
+// FIX: found via checking this same defect against a newer version of
+// the same model. The status wording changed from "REVIEW REQUIRED"
+// to a longer, compound phrase — "TECHNICALLY RECONCILED — OWNER
+// DECISIONS OUTSTANDING" — at the exact same cell, same formula
+// source. The old exact-match logic against a fixed phrase list could
+// never catch this, since the full string doesn't equal any single
+// listed phrase. Switched matching from exact-equality to substring,
+// and added "outstanding" — a status containing this word inherently
+// signals something isn't finished regardless of the surrounding
+// wording, a more durable signal than trying to enumerate every
+// possible caveat phrase a model author might choose to use.
 const CONCERNING_STATUS_TERMS = [
   'review required', 'not ready', 'draft', 'incomplete', 'pending review',
   'tbc', 'to be confirmed', 'not for reliance', 'work in progress', 'wip',
-  'do not rely', 'not final', 'unconfirmed',
+  'do not rely', 'not final', 'unconfirmed', 'outstanding',
 ];
 const STATUS_LABEL_RE = /\bstatus\b/i;
 
@@ -340,7 +349,7 @@ function checkModelStatusFlag(workbook) {
           const raw = valCell.formula ? valCell.result : valCell.value;
           const valText = cellText(raw);
           if (!valText) continue;
-          const matched = CONCERNING_STATUS_TERMS.find(t => valText.toLowerCase().trim() === t);
+          const matched = CONCERNING_STATUS_TERMS.find(t => valText.toLowerCase().includes(t));
           if (matched) {
             found.push({ sheet: ws.name, labelCell: cell.address, valueCell: valCell.address, label: label.slice(0, 60), value: valText });
           }

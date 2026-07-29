@@ -78,5 +78,47 @@ const check = (desc, pass) => {
     result.found === false);
 }
 
+// ══════════════════════════════════════════════════════════════════
+// The real gap found via checking this same defect against a newer
+// version of the same model: the status wording changed from "REVIEW
+// REQUIRED" to a longer, compound phrase at the exact same cell/
+// formula source — "TECHNICALLY RECONCILED — OWNER DECISIONS
+// OUTSTANDING". The old exact-match logic against a fixed phrase list
+// could never catch this. Switched to substring matching + added
+// "outstanding" as a term.
+// ══════════════════════════════════════════════════════════════════
+{
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('INVESTOR REPORT');
+  ws.getCell('G4').value = 'MODEL STATUS';
+  ws.getCell('I4').value = 'TECHNICALLY RECONCILED — OWNER DECISIONS OUTSTANDING';
+
+  const result = checkModelStatusFlag(wb);
+  check('real gap fixed: a compound status phrase ("...OUTSTANDING") not matching any single listed phrase exactly is now caught via substring matching',
+    result.found === true);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Confirms the new "outstanding" term doesn't introduce a false
+// positive on an unrelated, common financial usage of the word (e.g.
+// "outstanding shares", "outstanding balance") that happens to share
+// a row with something matching "status" elsewhere — the check only
+// fires when "outstanding" itself is in the value cell immediately
+// right of a "status"-labelled cell, so this confirms that scoping
+// still holds correctly.
+// ══════════════════════════════════════════════════════════════════
+{
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Cap Table');
+  ws.getCell('A1').value = 'Shares outstanding';
+  ws.getCell('B1').value = 1000000;
+  ws.getCell('C1').value = 'Approval status';
+  ws.getCell('D1').value = 'Approved';
+
+  const result = checkModelStatusFlag(wb);
+  check('the new "outstanding" term does not false-positive on an unrelated label ("Shares outstanding") that is not itself a status-value cell',
+    result.found === false);
+}
+
 console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
 if (!allPass) process.exit(1);
