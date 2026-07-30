@@ -5,6 +5,7 @@ const checklist = require('../config/checklist.json');
 const { resolveAny } = require('./utils/sheet-resolver');
 const { extractJson } = require('./utils/json-extract');
 const { dumpFailedResponse } = require('./utils/dump-failed-response');
+const { normalizeFormula: normalizeFormulaShape, colToNum } = require('./utils/formula-pattern-consistency-check');
 
 const client = new Anthropic();
 
@@ -147,6 +148,15 @@ function extractMeaningfulRows(rows, maxRows = 20) {
 
   const selected = [...numericSelected, ...nonNumericReserved].slice(0, maxRows);
 
+  // R-8 fix: formula text is only attached to rows ALREADY judged
+  // most likely to matter — the priority covenant/return rows and the
+  // reserved non-numeric status rows — not every selected row. This
+  // targets the token cost at exactly the class of row where a
+  // values-only review has been confirmed to miss real defects (a
+  // degenerate covenant branch, a backward-solved equity plug), while
+  // ordinary numeric fill rows stay value-only.
+  const formulaEligible = new Set([...priority, ...nonNumericReserved]);
+
   return selected.map(row => {
     const keys = Object.keys(row);
     // Capture cell address info before trimming — _cellRefs and _rowNum
@@ -187,6 +197,36 @@ function extractMeaningfulRows(rows, maxRows = 20) {
     }
     if (rowNum) {
       resultRow._excelRow = rowNum;
+    }
+
+    // R-8 fix: attach up to 2 distinct formula-SHAPE samples (not one per
+    // column) for formula-eligible rows, so Tier 2 can reason about
+    // actual formula logic, not just displayed values — the gap
+    // confirmed to structurally block it from catching defects like a
+    // degenerate covenant branch or a backward-solved equity plug.
+    // Groups by normalized (relative-offset) template so period
+    // columns sharing the same underlying formula shape collapse to
+    // one sample rather than repeating near-identical text per column;
+    // a genuine mid-row shape difference still surfaces a second,
+    // distinct sample.
+    if (formulaEligible.has(row) && row._formulas) {
+      const shapesSeen = new Map(); // template -> {cellRef, formula}
+      for (const k of Object.keys(resultRow)) {
+        if (k.startsWith('_')) continue;
+        const formula = row._formulas[k];
+        if (!formula) continue;
+        const cellRef = cellRefs[k];
+        const colMatch = cellRef && /^([A-Z]+)(\d+)$/.exec(cellRef);
+        const colNum = colMatch ? colToNum(colMatch[1]) : 0;
+        const template = normalizeFormulaShape(formula, rowNum || 0, colNum);
+        if (!shapesSeen.has(template)) shapesSeen.set(template, { cellRef, formula });
+        if (shapesSeen.size >= 2) break;
+      }
+      if (shapesSeen.size > 0) {
+        resultRow._formulaSamples = [...shapesSeen.values()].map(s =>
+          `${s.cellRef}: ${s.formula.length > 300 ? s.formula.slice(0, 300) + '…' : s.formula}`
+        );
+      }
     }
 
     return resultRow;
@@ -598,9 +638,29 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
       fix_instruction:          r.fix_instruction || r.corrective_action || '',
       escalation_flag:          r.escalation_flag ?? false,
       needs_retest:             r.needs_retest ?? false,
+      // FIX: found via trying to directly confirm whether Tier 2
+      // genuinely uses the R-8 formula-sample capability on a real
+      // run — this field was being silently dropped here despite
+      // skill.md instructing Claude to set it on every finding
+      // (llm_only / llm_with_partial_formulas / etc.), since this
+      // mapping lists fixed fields explicitly rather than spreading
+      // r's own fields through. Without it, there was no way to
+      // objectively verify R-8's usage — only indirect inference from
+      // prose wording, which turned out to be unreliable (LLM prose
+      // varies run to run regardless of what data it saw).
+      review_mode:              r.review_mode || 'llm_only',
       // Top-level meta fields (from overall assessment)
       _meta: topLevelMeta
     }));
+
+    // R-8 verification: log a direct, objective count of how many
+    // findings this run actually used the new formula-sample
+    // capability for, rather than leaving this to be inferred
+    // indirectly from finding-text wording (confirmed unreliable).
+    const reviewModeCounts = {};
+    normalised.forEach(r => { reviewModeCounts[r.review_mode] = (reviewModeCounts[r.review_mode] || 0) + 1; });
+    const modeSummary = Object.entries(reviewModeCounts).map(([mode, count]) => `${mode}: ${count}`).join(', ');
+    console.log(`   Tier 2 review modes — ${modeSummary}`);
 
     return normalised;
 
