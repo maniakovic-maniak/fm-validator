@@ -589,7 +589,6 @@ def build_report(data_path, output_path):
         ws1[f'{col_l1}{r}'].border=B(col=WHITE)
     set_row(ws1,r,18); r+=1
 
-    _pri_rank={'P1':0,'P2':1,'P3':2}
     # P1/P2/P3 framework renewal, Tier 2 item 3: risk_weighted_total ranks
     # WITHIN a priority tier — the memo's own explicit ask ("a weighted
     # score may be used to rank P2 and P3 findings... but a numerical
@@ -598,12 +597,24 @@ def build_report(data_path, output_path):
     # fscore tiebreakers, which still apply for any finding that wasn't
     # risk-scored (e.g. a non-Confirmed-Finding record_type, by design —
     # see risk-scoring.js's own gating).
-    top5 = sorted(p1+p2+p3, key=lambda f:(
+    # FIX: found via a full-repo bug scan. Only drew from p1+p2+p3
+    # (Confirmed Findings), entirely excluding open Critical Queries —
+    # even though the verdict, reason text, and key takeaway above all
+    # treat an unresolved Critical Query as equally reliance-blocking
+    # as a P1. A model with 0 P1s but several unresolved Critical
+    # Queries would show an empty or irrelevant table here while the
+    # banner above screams about blocking Critical Queries. Included
+    # them in the source list, and gave 'Critical Query' the same rank
+    # as P1 below (rather than falling through to the default rank of
+    # 3, which would have sorted it dead last — backwards from its
+    # actual severity).
+    _pri_rank={'P1':0,'Critical Query':0,'P2':1,'P3':2}
+    top5 = sorted(p1+p2+p3+critical_queries, key=lambda f:(
         _pri_rank.get(priority(f),3),
         -(f.get('risk_weighted_total') or 0),
         0 if str(f.get('key_output_impact','')).lower() in ('yes','true','high') else 1,
         -(f.get('fscore') or 0)))[:5]
-    _pri_style={'P1':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
+    _pri_style={'P1':(P1_FILL,P1_TXT),'Critical Query':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
     for f in top5:
         i=r
         pri=priority(f); pf,pt=_pri_style.get(pri,(GREY_LIGHT,CHARCOAL))
@@ -1214,7 +1225,15 @@ def build_report(data_path, output_path):
           sz=8,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
     set_row(ws5,2,20)
 
-    rem_findings=[f for f in findings if priority(f) in ('P1','P2')]
+    # FIX: found via a full-repo bug scan. Filtered to priority() in
+    # ('P1','P2') only, entirely excluding open Critical Queries — even
+    # though this file explicitly treats an unresolved Critical Query
+    # as equally reliance-blocking as a P1 in the verdict text, the
+    # priority summary line, and the key takeaway. A reliance-blocking
+    # item with no remediation tracking row at all was a genuine gap —
+    # the whole purpose of this tab is tracking and closing out
+    # blocking items.
+    rem_findings=[f for f in findings if priority(f) in ('P1','P2','Critical Query')]
     _rf_first, _rf_last = REM_HEADER_ROW+1, REM_HEADER_ROW+len(rem_findings)
     PRI_L2 = get_column_letter(rem_idx['Priority']); AS_L = get_column_letter(rem_idx['Action Status'])
     TIM_L  = get_column_letter(rem_idx['Timing'])
@@ -1247,7 +1266,7 @@ def build_report(data_path, output_path):
     # Action Status) per spec.
     ws5.freeze_panes = f'{get_column_letter(rem_idx["Timing"])}{REM_HEADER_ROW+1}'
 
-    _pri_badge2={'P1':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
+    _pri_badge2={'P1':(P1_FILL,P1_TXT),'Critical Query':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
     for idx,f in enumerate(rem_findings):
         row_i = REM_HEADER_ROW+1+idx
         pri=priority(f)

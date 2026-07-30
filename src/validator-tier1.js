@@ -495,4 +495,4 @@ function runTier1(parsed) {
   return results;
 }
 
-module.exports = { runTier1 };
+module.exports = { runTier1, sheetNameMatchesKeyword };

@@ -26,7 +26,16 @@ function sheetNameMatchesKeyword(sheetName, keyword) {
     const re = new RegExp('(?<![a-z0-9])' + kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])', 'i');
     return re.test(sheetName);
   }
-  return sheetName.toLowerCase().includes(kwLower);
+  // FIX: found via a full-repo bug scan comparing this helper against
+  // its identically-named, identically-purposed twin in
+  // validator-tier1.js, which had silently diverged to check both
+  // directions (a longer keyword can also be matched by a shorter,
+  // abbreviated sheet name it fully contains — e.g. a sheet literally
+  // named "Debt" against the keyword "debt schedule") while this one
+  // only checked whether the sheet name contains the keyword. Aligned
+  // to the more robust, bidirectional behavior for consistency between
+  // the two tiers' otherwise-identical logic.
+  return sheetName.toLowerCase().includes(kwLower) || kwLower.includes(sheetName.toLowerCase());
 }
 function sheetNameMatchesAny(sheetName, keywords) {
   return keywords.some(kw => sheetNameMatchesKeyword(sheetName, kw));
@@ -529,4 +538,4 @@ function buildEmptyResult() {
   };
 }
 
-module.exports = { runTier0, scoreFormula, complexityBand, complexityExplanation };
+module.exports = { runTier0, scoreFormula, complexityBand, complexityExplanation, sheetNameMatchesKeyword };
