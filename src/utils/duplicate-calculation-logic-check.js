@@ -68,6 +68,14 @@ function buildSignature(argsText, ownSheet) {
   return tokens.sort().join('|');
 }
 
+// Extracts the (sheet, row) pair from a "sheet!CELL" or "sheet!CELL:CELL"
+// occurrence string, for row-level aggregation independent of column.
+function sheetRowOf(occurrence) {
+  const [sheet, ref] = occurrence.split('!');
+  const m = /^\$?([A-Z]{1,3})\$?(\d+)/.exec(ref);
+  return m ? `${sheet}::${m[2]}` : occurrence;
+}
+
 function checkDuplicateCalculationLogic(workbook) {
   const bySignature = new Map(); // signature -> [{sheet, cell, formula, fnName}]
 
@@ -92,18 +100,43 @@ function checkDuplicateCalculationLogic(workbook) {
     });
   });
 
-  const findings = [];
-  for (const [key, occurrences] of bySignature) {
+  // FIX: found via investigating a real production report — 62 of 71
+  // findings this check produced were all the same underlying row-
+  // level duplication (Underwriting row 228/229 vs VALUATION & RETURNS
+  // row 27/29), just shifted by one period-column each time, since
+  // each period column's literal precedent range (L228 vs M228 vs
+  // N228...) builds a genuinely different exact-range signature above.
+  // Groups those signature-level groups a second time by the
+  // underlying (sheet, row) pairs involved — independent of which
+  // specific column each occurrence sits in — so period-column
+  // repetition of the same row-level defect collapses into one
+  // finding with an instance count, the same fix already applied to
+  // total-range-check.js and daisy-chain-check.js for this exact bug
+  // class (R-16).
+  const byRowPattern = new Map(); // "fnName::sorted (sheet,row) pairs" -> [{occurrences, sample}]
+
+  for (const [, occurrences] of bySignature) {
     const distinctSheets = new Set(occurrences.map(o => o.sheet));
     if (distinctSheets.size < 2) continue; // same aggregate repeated down a column on ONE sheet is a different, already-covered concern
     if (occurrences.length < 2) continue;
 
-    const sample = occurrences.slice(0, 5);
+    const rowPairs = [...new Set(occurrences.map(o => sheetRowOf(`${o.sheet}!${o.cell}`)))].sort();
+    const rowPatternKey = occurrences[0].fnName + '::' + rowPairs.join('|');
+    if (!byRowPattern.has(rowPatternKey)) byRowPattern.set(rowPatternKey, []);
+    byRowPattern.get(rowPatternKey).push({ distinctSheets, occurrences });
+  }
+
+  const findings = [];
+  for (const [, groups] of byRowPattern) {
+    const sampleGroup = groups[0];
+    const sample = sampleGroup.occurrences.slice(0, 5);
+    const totalOccurrences = groups.reduce((sum, g) => sum + g.occurrences.length, 0);
     findings.push({
-      sheets: [...distinctSheets],
-      occurrences: occurrences.map(o => `${o.sheet}!${o.cell}`),
-      fnName: occurrences[0].fnName,
-      note: `The same ${occurrences[0].fnName}() aggregate, over the exact same precedent range, is independently computed in ${occurrences.length} separate location(s) across ${distinctSheets.size} different sheets: ${sample.map(o => `${o.sheet}!${o.cell}`).join(', ')}${occurrences.length > 5 ? ' and others' : ''}. Per standard financial-modelling practice, an intermediate or final result should be calculated once and then linked elsewhere — not independently rebuilt. If the underlying detail range changes later (a row added, a period extended), one copy may be updated while the other is silently left behind. Confirm whether one of these should instead be a simple reference to the other.`,
+      sheets: [...sampleGroup.distinctSheets],
+      occurrences: sampleGroup.occurrences.map(o => `${o.sheet}!${o.cell}`),
+      fnName: sampleGroup.occurrences[0].fnName,
+      instanceCount: groups.length,
+      note: `The same ${sampleGroup.occurrences[0].fnName}() aggregate, over the exact same precedent range, is independently computed in ${sampleGroup.occurrences.length} separate location(s) across ${sampleGroup.distinctSheets.size} different sheets: ${sample.map(o => `${o.sheet}!${o.cell}`).join(', ')}${sampleGroup.occurrences.length > 5 ? ' and others' : ''}${groups.length > 1 ? ` (and ${groups.length - 1} other period-column instance(s) of this same row-level pattern, ${totalOccurrences} total cells across all periods)` : ''}. Per standard financial-modelling practice, an intermediate or final result should be calculated once and then linked elsewhere — not independently rebuilt. If the underlying detail range changes later (a row added, a period extended), one copy may be updated while the other is silently left behind. Confirm whether one of these should instead be a simple reference to the other.`,
     });
   }
 

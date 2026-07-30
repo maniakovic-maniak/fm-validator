@@ -70,6 +70,33 @@ async function main() {
   check('the real confirmed finding (Audit QA vs Model Checks, identical MAX formula) IS flagged',
     result.findings.some(f => f.occurrences.includes('Audit QA!B30') && f.occurrences.includes('Model Checks!B5')));
 
+  // ══════════════════════════════════════════════════════════════════
+  // The real bug found via investigating a production report: 62 of
+  // 71 findings this check produced were all the same underlying row-
+  // level duplication, just shifted by one period-column each time
+  // (each column's literal precedent range makes a genuinely different
+  // exact-range signature, so the old logic treated each period as a
+  // wholly separate finding). Confirms period-column repetition of the
+  // SAME row-level duplication now collapses into one finding with an
+  // instance count, matching the same fix already applied to
+  // total-range-check.js and daisy-chain-check.js (R-16).
+  // ══════════════════════════════════════════════════════════════════
+  const wb2 = new ExcelJS.Workbook();
+  const uw = wb2.addWorksheet('Underwriting');
+  const vr = wb2.addWorksheet('VALUATION & RETURNS');
+  const cols = ['L', 'M', 'N', 'O', 'P']; // 5 period-columns, same pattern each time
+  cols.forEach((col, i) => {
+    uw.getCell(col + '228').value = { formula: `MIN(Underwriting!${col}229:Underwriting!${col}230)`, result: 1 };
+    // The matching cross-sheet duplicate — same precedent range,
+    // explicitly sheet-qualified so it produces the identical signature.
+    const vrCol = ['DN', 'DO', 'DP', 'DQ', 'DR'][i];
+    vr.getCell(vrCol + '27').value = { formula: `MIN(Underwriting!${col}229:Underwriting!${col}230)`, result: 1 };
+  });
+  const result2 = checkDuplicateCalculationLogic(wb2);
+  const row228Finding = result2.findings.find(f => f.occurrences.some(o => o.includes('228')));
+  check('period-column repetition of the same row-level duplication collapses into ONE finding, not 5',
+    result2.flaggedCount === 1 && row228Finding && row228Finding.instanceCount === 5);
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }
