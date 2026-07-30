@@ -58,6 +58,10 @@ const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonabl
 const { checkDegenerateCovenantBranch } = require('./src/utils/degenerate-covenant-branch-check');
 const { checkEquityComponentBackwardSolved } = require('./src/utils/equity-component-backward-solved-check');
 const { checkMidRowFormulaRegimeChange } = require('./src/utils/mid-row-formula-regime-change-check');
+const { checkZeroBaseRates } = require('./src/utils/zero-base-rate-check');
+const { checkDateGatedRatioZero } = require('./src/utils/date-gated-ratio-zero-check');
+const { checkExceptionStatusRows } = require('./src/utils/exception-status-check');
+const { checkHardcodedMajorAsset } = require('./src/utils/hardcoded-major-asset-check');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier');
@@ -143,6 +147,28 @@ async function run() {
   // legitimate actuals-to-forecast boundary, not always a defect.
   const midRowFormulaRegimeChange = (() => { try { return checkMidRowFormulaRegimeChange(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Mid-row formula regime-change scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  // FIX (R-15): found via the same independent review — all labelled
+  // debt base rates in the workbook are genuinely zero, precluding
+  // rate-sensitivity testing.
+  const zeroBaseRates = (() => { try { return checkZeroBaseRates(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Zero-base-rate scan failed:', e.message); return { applicable:false, found:false, candidates:[] }; } })();
+  // FIX (R-12): found via the same independent review — DSCR/ICR/debt
+  // yield structurally forced to zero before a named milestone date.
+  // Precisely names the mechanism rather than leaving it as a generic
+  // "shows 0" observation, since a 0 produced this way is easy to
+  // mistake for a genuine covenant breach.
+  const dateGatedRatioZero = (() => { try { return checkDateGatedRatioZero(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Date-gated ratio scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  // FIX (R-22): found via the same independent review — check/
+  // reconciliation rows literally evaluating to "EXCEPTION" across
+  // multiple periods, with no visible gate on the report's summary.
+  const exceptionStatusRows = (() => { try { return checkExceptionStatusRows(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Exception-status scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  // FIX (R-7): found via the same independent review — a major
+  // balance-sheet asset row entirely hardcoded rather than linked to
+  // its own cost/basis schedule.
+  const hardcodedMajorAsset = (() => { try { return checkHardcodedMajorAsset(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Hardcoded-major-asset scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const formulaDeepDive = wantsDeepDive
     ? await (async () => { try { return await runFormulaDeepDive(parsed, tier0, {}); }
         catch (e) { console.error('   \u26a0\ufe0f  Formula Deep Dive failed:', e.message); return { applicable:false, note:e.message, reviewed:0, findings:[] }; } })()
@@ -1234,11 +1260,18 @@ async function run() {
       // severity — repeating across many periods is a stronger signal
       // than a single isolated reference.
       const isSystematic = count >= 10;
+      // FIX (R-18): found via an independent review's claim that
+      // finding metadata is largely unusable — this check alone
+      // accounted for 24 of 314 findings with a blank Sheet and
+      // Cell=A1, despite the genuine location (targetCell) already
+      // being available and used in this same object's own label/
+      // condition text. Uses it for the actual sheet/cell fields too.
+      const [targetSheet, targetCellAddr] = targetCell.includes('!') ? targetCell.split('!') : ['', 'A1'];
       allFlagged.push({
         id: groupId,
         label: `${count} formula(s) reference the genuinely blank cell ${targetCell}`,
         severity: isSystematic ? 'medium' : 'low', status: 'fail',
-        sheet: '', cell: 'A1', category: 'Structure',
+        sheet: targetSheet, cell: targetCellAddr, category: 'Structure',
         condition: `${count} formula(s) contain a bare reference to ${targetCell}, which is genuinely blank across the cells checked, including: ${sample}.`,
         reason: `${count} formula(s) reference the blank cell ${targetCell}`,
         corrective_action: `Confirm whether ${targetCell} and the row it's part of should contain real data — this pattern repeats across ${count} formula(s), which is a stronger signal of a systematic gap than an isolated reference.`,
@@ -2162,6 +2195,79 @@ async function run() {
           model_risk: `A clean, single-point formula change (${f.beforeCount} period(s) one way, ${f.afterCount} another) can be a deliberate model boundary or a copy-paste/model-surgery error — worth confirming which, since it wasn't caught by majority-vote consistency checking (neither side reached a clear majority).`,
           key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Formula template changes mid-row at a single transition point',
           escalation_flag: false, urgency: 'Before next reliance', confidence: 55
+        });
+      }
+    }
+    // ── Zero base rates (R-15) — all debt facility base rates are
+    // genuinely zero, precluding rate-sensitivity testing. ──
+    if (zeroBaseRates.applicable && zeroBaseRates.found === true) {
+      const first = zeroBaseRates.candidates[0];
+      allFlagged.push({
+        id: 'T0-ZEROBASERATE-001',
+        label: 'All debt base rates are genuinely zero',
+        severity: 'medium', status: 'fail', sheet: first.sheet, cell: first.valueCell,
+        category: 'Debt', condition: zeroBaseRates.note,
+        reason: zeroBaseRates.note,
+        corrective_action: 'Populate a realistic base/reference rate (or a clearly-labelled placeholder pending confirmation) for each debt facility, so rate-shock and rate-sensitivity scenarios have something to act on.',
+        workstream: 'Debt', issue_type: 'Zero base rate',
+        model_risk: 'With every base rate at zero, debt pricing is effectively margin-only — a rate-shock or rising-rate stress scenario cannot be meaningfully tested as the model is currently built.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'All labelled base/reference rate inputs are zero',
+        escalation_flag: false, urgency: 'Before next reliance', confidence: 80
+      });
+    }
+    // ── Date-gated ratio zero (R-12) — a covenant/ratio metric
+    // structurally forced to zero before a milestone date, not a
+    // calculation failure or missing data. ──
+    if (dateGatedRatioZero.applicable && dateGatedRatioZero.flaggedCount > 0) {
+      for (const f of dateGatedRatioZero.findings) {
+        allFlagged.push({
+          id: `T0-DATEGATE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.rowNum}`,
+          label: `${f.label} is structurally forced to zero before a milestone date`,
+          severity: 'medium', status: 'fail', sheet: f.sheet, cell: f.sampleCell,
+          category: 'Debt', condition: f.note,
+          reason: f.note,
+          corrective_action: 'Confirm this is intentional design, then ensure anything comparing this ratio against a covenant threshold treats the gated periods as not-yet-measurable (N/A) rather than as a genuine zero value to test against the covenant.',
+          workstream: 'Debt', issue_type: 'Date-gated ratio structurally zero',
+          model_risk: `A "0" produced by deliberate date-gating (${f.instanceCount} period(s) on this row) is easy to mistake for a genuine covenant breach — anything downstream that compares this ratio against a threshold should be checked for whether it correctly distinguishes "not yet measurable" from "measured and failing".`,
+          key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Ratio structurally date-gated to zero before a milestone',
+          escalation_flag: false, urgency: 'Before next reliance', confidence: 88
+        });
+      }
+    }
+    // ── Exception status rows (R-22) — a check/reconciliation row
+    // literally evaluates to "EXCEPTION" across multiple periods,
+    // with no visible gate on the report's summary. ──
+    if (exceptionStatusRows.applicable && exceptionStatusRows.flaggedCount > 0) {
+      for (const f of exceptionStatusRows.findings) {
+        allFlagged.push({
+          id: `T0-EXCEPTIONSTATUS-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.rowNum}`,
+          label: `${f.label} reports EXCEPTION across ${f.instanceCount} period(s)`,
+          severity: 'medium', status: 'fail', sheet: f.sheet, cell: f.sampleCell,
+          category: 'Structure', condition: f.note,
+          reason: f.note,
+          corrective_action: 'Resolve the underlying reconciliation failure this check row is reporting, and confirm whether the investor-facing summary or verdict should be gated on this check passing rather than proceeding regardless.',
+          workstream: 'Structure', issue_type: 'Unresolved exception status',
+          model_risk: 'A check row reporting EXCEPTION is a direct, explicit self-disclosure that a reconciliation is currently failing — treating the model\u2019s outputs as reliable without resolving this is a governance gap regardless of how the other figures look.',
+          key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Check/reconciliation row reports EXCEPTION, apparently ungated',
+          escalation_flag: true, urgency: 'Before next reliance', confidence: 90
+        });
+      }
+    }
+    // ── Hardcoded major asset (R-7) — a major balance-sheet asset row
+    // entirely hardcoded rather than linked to its own cost/basis schedule. ──
+    if (hardcodedMajorAsset.applicable && hardcodedMajorAsset.flaggedCount > 0) {
+      for (const f of hardcodedMajorAsset.findings) {
+        allFlagged.push({
+          id: `T0-HARDASSET-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.rowNum}`,
+          label: `${f.label} is a major asset line entirely hardcoded`,
+          severity: 'high', status: 'fail', sheet: f.sheet, cell: f.sampleCell,
+          category: 'Accounting', condition: f.note,
+          reason: f.note,
+          corrective_action: 'Confirm whether this is a deliberate, confirmed fixed balance or should be linked to the underlying cost/basis schedule so future changes to the cost build flow through automatically.',
+          workstream: 'Accounting', issue_type: 'Hardcoded major asset',
+          model_risk: 'A large asset line disconnected from its own cost/basis schedule will silently diverge from it over time with no warning, directly misstating the balance sheet and any leverage/coverage ratio computed from it.',
+          key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Major asset line hardcoded rather than linked to a cost schedule',
+          escalation_flag: true, urgency: 'Before next reliance', confidence: 75
         });
       }
     }
