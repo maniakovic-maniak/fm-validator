@@ -416,7 +416,8 @@ Every result must include all of the following fields:
       "fixable": false,
       "fix_instruction": "Review equity roll-forward and retained earnings link on AFS sheet for Q3 2028",
       "escalation_flag": false,
-      "needs_retest": true
+      "needs_retest": true,
+      "review_mode": "llm_with_partial_formulas"
     }
   ],
   "audit_completion_percent": 64,
@@ -437,12 +438,13 @@ Every result object must include:
 `condition` `criteria` `cause` `consequence` `corrective_action`
 `issue_type` `workstream` `model_risk` `key_output_impact`
 `fixable` `fix_instruction` `escalation_flag` `needs_retest`
-`record_type`
+`record_type` `review_mode`
 
 Use empty string for unavailable text fields.
 Use `"unquantified"` for unknown dollar_impact.
 Use `[]` for empty periods_affected.
 Use `false` for escalation_flag when not applicable.
+Set review_mode to `"llm_with_partial_formulas"` on a per-result basis, ONLY when THIS SPECIFIC finding's reasoning actually relied on a `_formulaSamples` field present on the row it concerns — otherwise `"llm_only"` (see skill.md's Mode A+ section for full detail on when this applies).
 Use `true` for needs_retest when the finding requires verification after fix.
 Use `"Unknown"` for key_output_impact when this cannot be determined.
 
