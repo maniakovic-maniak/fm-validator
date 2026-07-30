@@ -312,7 +312,22 @@ async function runTier0(parsed) {
             }
           }
 
-          const hardcodes = formula.match(/(?<![A-Z0-9_])[2-9]\d*(?:\.\d+)?(?![A-Z0-9_])/gi) || [];
+          // FIX (R-17): found via an independent review's claim that
+          // the headline hardcode count is overstated by roughly 30x.
+          // Confirmed directly: the old lookbehind excluded
+          // [A-Z0-9_] but not "$", so an absolute cell reference like
+          // $AP$33 or $G$36 had its own row number counted as a
+          // "hardcoded" numeric constant — the "$" sits directly
+          // before the number, not a letter/digit, so the old
+          // lookbehind never excluded it. This was the dominant
+          // source of the overcount: virtually every formula
+          // referencing any cell beyond row 1 via an absolute
+          // reference matched, which is most formulas in any real
+          // model. Verified directly against real formulas before
+          // and after: PROJECTS!$AP$33 and G32/$G$36 both went from
+          // 1 false match to 0, while a genuine hardcoded threshold
+          // like IF(A1>250,1,0) still correctly matches "250".
+          const hardcodes = formula.match(/(?<![A-Z0-9_$])[2-9]\d*(?:\.\d+)?(?![A-Z0-9_])/gi) || [];
           if (hardcodes.length > 0) {
             hardcodeCount++;
             totalHardcodes++;
