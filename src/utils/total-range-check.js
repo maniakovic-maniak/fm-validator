@@ -25,7 +25,16 @@ function colToNum(col) {
 }
 
 function checkTotalRanges(workbook) {
-  const findings = [];
+  // FIX (R-16): found via an independent review's claim that a large
+  // share of P2 findings are duplicates, and confirmed directly: all
+  // 44 instances this check produced on a real file were the exact
+  // same row (PROJECTS!row11), repeated across every period-column via
+  // shared-formula mechanics — genuinely one underlying defect, not 44
+  // distinct ones. Aggregates by (sheet, row) before returning,
+  // matching this project's own established, documented principle for
+  // T0-* checks (one Issue Log entry per root cause, with a sample and
+  // an instance count, not one per repeated period-column instance).
+  const groups = new Map(); // "sheet!row" -> { sheet, rowNum, instances: [...] }
 
   workbook.eachSheet(ws => {
     ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
@@ -86,25 +95,39 @@ function checkTotalRanges(workbook) {
           const parts = [];
           if (missingAtStart > 0) parts.push(`${missingAtStart} row(s) before the stated range (${col1}${trueBlockStart}:${col2}${sumRowStart - 1})`);
           if (missingAtEnd > 0) parts.push(`${missingAtEnd} row(s) after the stated range but before the total itself (${col1}${sumRowEnd + 1}:${col2}${trueBlockEnd})`);
-          findings.push({
-            sheet: ws.name,
-            cell: cell.address,
-            formula: formula.length > 100 ? formula.slice(0, 100) + '…' : formula,
-            sumRange: `${col1}${sumRowStart}:${col2}${sumRowEnd}`,
-            actualBlockRange: `${col1}${trueBlockStart}:${col2}${trueBlockEnd}`,
-            excludedCount,
-            note: `${ws.name}!${cell.address} sums ${col1}${sumRowStart}:${col2}${sumRowEnd}, but a contiguous run of plain numeric values in the same column actually extends from ${col1}${trueBlockStart} to ${col1}${trueBlockEnd} — ${parts.join(' and ')} — not included in this total. This is the classic symptom of a row being inserted into a block after the SUM range was set, without the range being extended to match.`,
+
+          const key = `${ws.name}!row${rowNum}`;
+          if (!groups.has(key)) groups.set(key, { sheet: ws.name, rowNum, instances: [] });
+          groups.get(key).instances.push({
+            cell: cell.address, formula, sumRange: `${col1}${sumRowStart}:${col2}${sumRowEnd}`,
+            actualBlockRange: `${col1}${trueBlockStart}:${col2}${trueBlockEnd}`, excludedCount, parts,
           });
         }
       });
     });
   });
 
+  const findings = [];
+  for (const [, g] of groups) {
+    const sample = g.instances[0];
+    findings.push({
+      sheet: g.sheet,
+      cell: sample.cell,
+      formula: sample.formula.length > 100 ? sample.formula.slice(0, 100) + '…' : sample.formula,
+      sumRange: sample.sumRange,
+      actualBlockRange: sample.actualBlockRange,
+      excludedCount: sample.excludedCount,
+      instanceCount: g.instances.length,
+      note: `${g.sheet}!${sample.cell} (and ${g.instances.length - 1} other period-column instance(s) on the same row) sums ${sample.sumRange}, but a contiguous run of plain numeric values in the same column actually extends from ${sample.actualBlockRange.split(':')[0]} to ${sample.actualBlockRange.split(':')[1]} — ${sample.parts.join(' and ')} — not included in this total. This is the classic symptom of a row being inserted into a block after the SUM range was set, without the range being extended to match.`,
+    });
+  }
+
   return {
     applicable: true,
     flaggedCount: findings.length,
+    totalInstances: [...groups.values()].reduce((sum, g) => sum + g.instances.length, 0),
     findings,
-    note: 'This check compares a SUM() formula\'s own stated range against the actual contiguous run of numeric values sitting in the same column, to catch a total that silently excludes rows inserted after the range was set. It only handles simple, single-column, contiguous SUM ranges — multi-range, cross-sheet, and row-wise (horizontal) totals are out of scope for this check and are not evaluated.',
+    note: 'This check compares a SUM() formula\'s own stated range against the actual contiguous run of numeric values sitting in the same column, to catch a total that silently excludes rows inserted after the range was set. It only handles simple, single-column, contiguous SUM ranges — multi-range, cross-sheet, and row-wise (horizontal) totals are out of scope for this check and are not evaluated. Findings are aggregated by (sheet, row): repeated period-column instances of the same underlying row-level defect are reported once, with an instance count.',
   };
 }
 

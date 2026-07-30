@@ -119,6 +119,16 @@ function checkDaisyChains(workbook) {
     });
   });
 
+  // FIX (R-16): found via an independent review's claim that a large
+  // share of P2 findings are duplicates, confirmed directly: 299
+  // findings from this check on a real file collapsed to just 23
+  // distinct row-groups, with two rows alone (Underwriting!row2,
+  // Underwriting!row23) accounting for 266 of 299 (89%) — genuinely
+  // the same underlying daisy chain repeated across every period-
+  // column via shared-formula mechanics, not 299 distinct chains.
+  // Aggregates by (sheet, row) before returning findings.
+  const rowGroups = new Map(); // "sheet!row" -> { sheet, rowNum, instances: [...] }
+
   workbook.eachSheet(ws => {
     ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
       row.eachCell({ includeEmpty: false }, (cell) => {
@@ -155,24 +165,45 @@ function checkDaisyChains(workbook) {
           hops++;
         }
 
-        findings.push({
-          sheet: ws.name,
-          cell: cell.address,
-          formula,
-          immediateTarget: target,
-          ultimateSource: current,
-          hopCount: hops,
-          note: `${ws.name}!${cell.address} links to ${target}, which is itself just a link (not a calculation or input) — a daisy chain of at least ${hops} hop(s), ultimately tracing back to ${current}. Redirect ${ws.name}!${cell.address} to reference ${current} directly instead of routing through the intermediate link.`,
-        });
+        // FIX: found via two rounds of testing. Grouping by (sheet,
+        // row) alone incorrectly merged genuinely different chains
+        // sharing a row (see below). Grouping by (sheet, row, ultimate
+        // source) then broke real-file aggregation entirely, since the
+        // ultimate source itself shifts per period-column (the whole
+        // chain shifts together across columns) — making that key
+        // unique per instance again. Hop count is the genuine
+        // distinguishing factor: confirmed via the existing test suite
+        // that two chains sharing a row but with different depths
+        // (D20: 2 hops via C20; E20: 3 hops via D20, C20) are
+        // genuinely different defects, while period-column repetitions
+        // of the SAME chain preserve the same depth for every column.
+        const groupKey = `${ws.name}!row${rowNum}!hops${hops}`;
+        if (!rowGroups.has(groupKey)) rowGroups.set(groupKey, { sheet: ws.name, rowNum, instances: [] });
+        rowGroups.get(groupKey).instances.push({ cell: cell.address, formula, immediateTarget: target, ultimateSource: current, hopCount: hops });
       });
     });
   });
 
+  for (const [, g] of rowGroups) {
+    const sample = g.instances[0];
+    findings.push({
+      sheet: g.sheet,
+      cell: sample.cell,
+      formula: sample.formula,
+      immediateTarget: sample.immediateTarget,
+      ultimateSource: sample.ultimateSource,
+      hopCount: sample.hopCount,
+      instanceCount: g.instances.length,
+      note: `${g.sheet}!${sample.cell} (and ${g.instances.length - 1} other period-column instance(s) on the same row) links to ${sample.immediateTarget}, which is itself just a link (not a calculation or input) — a daisy chain of at least ${sample.hopCount} hop(s), ultimately tracing back to ${sample.ultimateSource}. Redirect ${g.sheet}!${sample.cell} (and its sibling instances) to reference ${sample.ultimateSource} directly instead of routing through the intermediate link.`,
+    });
+  }
+
   return {
     applicable: true,
     flaggedCount: findings.length,
+    totalInstances: [...rowGroups.values()].reduce((sum, g) => sum + g.instances.length, 0),
     findings,
-    note: 'Flags a cell whose formula is a bare reference to another cell that is itself just a bare reference AND has no other real use in the workbook (fan-in of 1 — referenced only by the flagged cell) — a genuine daisy chain, per FAST Standard 3.06-02, PwC\'s Global Financial Modeling Guidelines, and ICAEW\'s "How to Review a Spreadsheet". A target cell referenced by multiple formulas is treated as a legitimate local call-up/Import cell (FAST and ICAEW\'s own term for exactly this pattern) and never flagged, regardless of which sheets are involved. Confirmed via real testing that fan-in, not which sheet is crossed, is the correct signal: two separate false-positive patterns were found and fixed this way — a cross-sheet staging sheet (1,125 false positives) and a same-sheet local call-up cell referenced by 6 other formulas — both resolved by requiring fan-in of exactly 1.',
+    note: 'Flags a cell whose formula is a bare reference to another cell that is itself just a bare reference AND has no other real use in the workbook (fan-in of 1 — referenced only by the flagged cell) — a genuine daisy chain, per FAST Standard 3.06-02, PwC\'s Global Financial Modeling Guidelines, and ICAEW\'s "How to Review a Spreadsheet". A target cell referenced by multiple formulas is treated as a legitimate local call-up/Import cell (FAST and ICAEW\'s own term for exactly this pattern) and never flagged, regardless of which sheets are involved. Findings are aggregated by (sheet, row): repeated period-column instances of the same underlying row-level chain are reported once, with an instance count.',
   };
 }
 

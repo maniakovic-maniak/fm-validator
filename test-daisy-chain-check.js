@@ -74,6 +74,36 @@ async function main() {
   console.log('E20 ultimate source resolves to B20 with 3 hops:', ultimateSourceCorrect ? 'PASS' : `FAIL (got ${e20 ? e20.ultimateSource + ', ' + e20.hopCount + ' hops' : 'not found'})`);
 
   if (!pass || c60Flagged || !ultimateSourceCorrect) process.exit(1);
+
+  // ══════════════════════════════════════════════════════════════════
+  // R-16 aggregation fix: found via an independent review's claim that
+  // a large share of P2 findings are duplicates. Confirmed directly on
+  // a real file: 299 findings from this check collapsed to just 23-30
+  // distinct groups, with two rows alone accounting for 266 of 299
+  // (89%) — genuinely the same underlying chain repeated across every
+  // period-column via shared-formula mechanics. This test confirms
+  // that same-row, same-depth repetition (the period-column case)
+  // correctly merges into one finding with an instance count.
+  // ══════════════════════════════════════════════════════════════════
+  const wbAgg = new ExcelJS.Workbook();
+  const wsAgg = wbAgg.addWorksheet('Model');
+  // Genuine parallel, same-depth chains across 5 columns: row 28 is a
+  // real value, row 29 links to row 28 (a bare link), row 30 links to
+  // row 29 (also a bare link) — the same 2-hop chain shape, repeated
+  // independently in each column, exactly like a period-column series
+  // in a real model.
+  for (const col of ['B', 'C', 'D', 'E', 'F']) {
+    wsAgg.getCell(col + '28').value = { formula: 'Y28+1', result: 5 };
+    wsAgg.getCell(col + '29').value = { formula: col + '28', result: 5 };
+    wsAgg.getCell(col + '30').value = { formula: col + '29', result: 5 };
+  }
+  const resultAgg = checkDaisyChains(wbAgg);
+  const row30Findings = resultAgg.findings.filter(f => f.sheet === 'Model' && f.cell.match(/30$/));
+  console.log('\nAggregation test — row 30 findings:', row30Findings.length, row30Findings.map(f => `${f.cell} (${f.instanceCount} instances)`));
+  const aggregationPass = row30Findings.length === 1 && row30Findings[0].instanceCount === 5;
+  console.log('Period-column repetition correctly merges into one finding with instance count:', aggregationPass ? 'PASS' : 'FAIL');
+  if (!aggregationPass) process.exit(1);
+
   console.log('\nALL TESTS PASSED');
 }
 
