@@ -1,7 +1,7 @@
 const {
   parseLocalRequires, buildDependencyGraph, orderByDependencyProximity,
   describeInBatchDependencies, batchFiles, buildReviewPrompt,
-  extractBugsFromResponse, isSelfRetracted,
+  extractBugsFromResponse, isSelfRetracted, runVerificationSnippet,
 } = require('./scripts/bug-scan-agent.js');
 
 function run() {
@@ -252,6 +252,101 @@ function run() {
   };
   check('extractBugsFromResponse drops an entry explicitly marked confirmed_genuine: false, even with an innocuous-looking description (the new primary, structural filter)',
     extractBugsFromResponse(notConfirmedResponse).length === 0);
+
+  // ══════════════════════════════════════════════════════════════════
+  // TERTIARY filter: found via a real false positive that survived
+  // both filters above — a claim about a regex capture-group index
+  // being wrong, where the model's own mental trace of the indices was
+  // itself incorrect (it miscounted which group was the function name
+  // vs. the first captured value). Neither the confirmed_genuine field
+  // nor the self-retraction regex can catch this class of error, since
+  // the model never recognized its own reasoning as flawed.
+  // ══════════════════════════════════════════════════════════════════
+
+  // runVerificationSnippet, tested directly first.
+  {
+    const ok = runVerificationSnippet('console.log("hello", 1 + 1);');
+    check('runVerificationSnippet: a genuinely valid snippet runs and captures its real stdout',
+      ok.success === true && ok.output === 'hello 2');
+
+    const runtimeErr = runVerificationSnippet('const x = null; console.log(x.foo);');
+    check('runVerificationSnippet: a snippet that throws at runtime is correctly reported as failed, not silently swallowed',
+      runtimeErr.success === false && runtimeErr.error.length > 0);
+
+    const syntaxErr = runVerificationSnippet('this is not valid javascript {{{');
+    check('runVerificationSnippet: a snippet with a genuine syntax error is correctly reported as failed',
+      syntaxErr.success === false);
+  }
+
+  // extractBugsFromResponse end-to-end: a bug whose own verification
+  // snippet fails to run gets automatically filtered out — the
+  // snippet's own failure is itself concrete signal about the claim.
+  {
+    const withBrokenSnippet = {
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [
+        { file: 'x.js', severity: 'medium', description: 'Genuine-sounding bug claim.',
+          old_code: 'a', new_code: 'b', confirmed_genuine: true,
+          verification_snippet: 'const y = undefined; y.someMethod();' },
+      ] } }],
+    };
+    check('extractBugsFromResponse: a bug whose verification_snippet throws at runtime is automatically filtered out',
+      extractBugsFromResponse(withBrokenSnippet).length === 0);
+  }
+
+  // extractBugsFromResponse end-to-end: a bug whose verification
+  // snippet runs successfully survives, WITH its real output attached
+  // to the finding for the human reviewer to see directly.
+  {
+    const withWorkingSnippet = {
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [
+        { file: 'x.js', severity: 'medium', description: 'Genuine-sounding bug claim.',
+          old_code: 'a', new_code: 'b', confirmed_genuine: true,
+          verification_snippet: 'console.log("r1:", 42);',
+          verification_expected: 'r1 should print an unexpected value' },
+      ] } }],
+    };
+    const result = extractBugsFromResponse(withWorkingSnippet);
+    check('extractBugsFromResponse: a bug whose verification_snippet runs successfully survives with its real output attached',
+      result.length === 1 && result[0].verification_output === 'r1: 42');
+  }
+
+  // extractBugsFromResponse end-to-end: a bug with NO verification
+  // snippet at all (the field is optional, not every bug class can be
+  // demonstrated this way) still passes through normally, unaffected.
+  {
+    const withNoSnippet = {
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'report_bugs', input: { bugs: [
+        { file: 'x.js', severity: 'medium', description: 'A cross-file bug with no standalone snippet possible.',
+          old_code: 'a', new_code: 'b', confirmed_genuine: true },
+      ] } }],
+    };
+    check('extractBugsFromResponse: a bug with no verification_snippet at all (optional field) passes through unaffected',
+      extractBugsFromResponse(withNoSnippet).length === 1);
+  }
+
+  // The exact real false positive this feature was built to catch,
+  // reproduced concretely: the actual regex and destructure from
+  // formula-pattern-consistency-check.js, run against a realistic
+  // sample — confirming what an honest verification_snippet for that
+  // exact claim would genuinely have shown (the claimed bug does NOT
+  // reproduce; r1 and r2 print the correct row numbers, not the
+  // claimed wrong values). Had the model run this before reporting,
+  // per the prompt's own instruction, it would not have reported the
+  // finding at all.
+  {
+    const realClaimSnippet = `
+const ROW_TOTAL_RE = /^(SUM|SUBTOTAL|AVERAGE)\\s*\\(\\s*(?:\\d+\\s*,\\s*)?\\$?([A-Z]{1,3})\\$?(\\d+)\\s*:\\s*\\$?([A-Z]{1,3})\\$?(\\d+)\\s*\\)$/i;
+const m = ROW_TOTAL_RE.exec('SUM(B5:D5)');
+const [, , , r1, , r2] = m;
+console.log('r1:', r1, 'r2:', r2);
+`;
+    const ok = runVerificationSnippet(realClaimSnippet);
+    check('the exact real false-positive claim, run empirically, correctly shows the destructure was fine all along (r1=5, r2=5 — the genuine row numbers)',
+      ok.success === true && ok.output === 'r1: 5 r2: 5');
+  }
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);

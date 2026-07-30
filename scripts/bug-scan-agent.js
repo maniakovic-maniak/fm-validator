@@ -35,6 +35,19 @@ require('dotenv').config(); // FIX: index.js/server.js both do this at
 //   project's own development) — this is what makes an automated apply
 //   safe: it either matches exactly once, or it refuses and says so,
 //   never guessing.
+// - For claims about computed/parsed/indexed behavior (regex capture
+//   groups, destructuring, off-by-ones), the model can provide a
+//   verification_snippet, which this script actually executes
+//   (runVerificationSnippet) rather than trusting the model's own
+//   prose trace of the logic. Found necessary via a real false
+//   positive: a miscounted regex capture-group index that survived
+//   both the confirmed_genuine field and the self-retraction regex
+//   backstop, since the model's own reasoning was confidently,
+//   genuinely wrong — no amount of asking it to double-check catches
+//   a mistake it doesn't recognize as one. A snippet that throws or
+//   times out auto-filters the finding; one that runs attaches its
+//   real output to the finding for the human reviewer to see directly,
+//   alongside (not instead of) the existing two filter layers.
 
 const { execSync } = require('child_process');
 const fs = require('fs');
@@ -245,6 +258,8 @@ If you find nothing wrong, return an empty bugs array — do not invent minor ni
 
 If you investigate something that looks suspicious and conclude it is NOT actually a bug, do not add it to the array at all — not even with a description explaining why it turned out to be fine. The bugs array must contain ONLY entries you are confident are genuine, confirmed bugs. Work through your reasoning before deciding, then only call the tool with the bugs that survive that reasoning. Each entry has a required confirmed_genuine field — set it to true only for something you are actually confident is a real bug after your own analysis; if you're not sure, or your reasoning concluded it's a false positive or benign, leave the entry out entirely rather than including it with confirmed_genuine set to false.
 
+For any bug whose claim rests on specific computed, parsed, or indexed behavior — a regex capture group's index, an array or object destructure, an off-by-one, a boundary condition, a sort comparator's ordering, a date or number computation — do not rely on mentally tracing the logic and asserting the result. Counting capture groups or array positions by eye is exactly the kind of step that is easy to get subtly wrong while still feeling confident about it, and no amount of re-reading your own reasoning catches a mistake you don't recognize as one. Instead, write the verification_snippet field: a small, standalone Node.js snippet that actually runs the real regex/expression/destructure (copied verbatim from the file, not paraphrased) against a realistic sample, and prints what it genuinely produces. Only include the bug at all if you have either run this snippet yourself and confirmed the printed output matches your claim, or are certain enough without it that you'd stake the finding on the snippet confirming it. A bug in this category reported without a verification_snippet, or with one whose output doesn't actually support the claim, is exactly the failure mode this field exists to catch.
+
 For each genuine bug found, you MUST provide old_code as an EXACT, VERBATIM, UNIQUE substring of the file it comes from (copy it exactly, whitespace and all) — this will be used for an automated, literal string-replacement fix, so it must match the file's actual content precisely and must not appear more than once in that file. old_code and new_code must both come from the SAME file (the one named in "file") — a cross-file bug still gets fixed one file at a time.
 
 Report your findings using the report_bugs tool.
@@ -293,6 +308,29 @@ const REPORT_BUGS_SCHEMA = {
             type: 'boolean',
             description: 'Set this to true ONLY if you are confident, after your own analysis, that this is a real, confirmed bug. If your own reasoning concluded this is NOT a bug, is a false positive, is benign, or you are not fully confident — do not add this entry to the array at all. Do not add an entry with this set to false; simply omit it.',
           },
+          // FIX: found via a real false positive that survived both
+          // existing filter layers (confirmed_genuine + the
+          // self-retraction regex backstop) — a claim about a regex
+          // capture-group index being wrong, where the model's own
+          // mental trace of the indices was itself incorrect. Neither
+          // existing layer catches this class of error, since the
+          // model never recognized its own reasoning as flawed; "are
+          // you sure" self-checking cannot fix a genuine analytical
+          // mistake the model doesn't know it made. These two optional
+          // fields let the model empirically demonstrate the bug
+          // instead of just asserting it — the script itself then
+          // deterministically executes the snippet, which is strictly
+          // more reliable than any amount of additional prose
+          // reasoning, since it's the actual behavior running, not a
+          // mental simulation of it.
+          verification_snippet: {
+            type: 'string',
+            description: 'OPTIONAL. Required whenever the bug claim involves specific computed, parsed, or indexed behavior that can be tested in isolation — a regex capture group, an array/object destructure, an off-by-one, a boundary condition, a sort comparator, a date/number computation. A small, self-contained, standalone Node.js snippet (using console.log to print concrete results) that reproduces the exact problematic logic from the file (copy the real regex/expression/destructure verbatim, not a paraphrase) against a realistic sample input, and prints what it actually produces. Must run standalone with `node -e` — no requiring the reviewed file or its project dependencies. Omit only for bugs that are genuinely about cross-file assumptions, architecture, or something no standalone snippet could meaningfully demonstrate.',
+          },
+          verification_expected: {
+            type: 'string',
+            description: 'OPTIONAL, only set alongside verification_snippet. One short sentence stating what the printed output shows that confirms the bug (e.g. "r1 prints as the second column letter, not the first row number"). Used to sanity-check the snippet actually demonstrates the claim, not just that it runs without error.',
+          },
         },
         required: ['file', 'severity', 'description', 'old_code', 'new_code', 'confirmed_genuine'],
       },
@@ -300,6 +338,33 @@ const REPORT_BUGS_SCHEMA = {
   },
   required: ['bugs'],
 };
+
+// Executes a model-provided verification snippet in an isolated,
+// separate node process (not in-process eval, which could crash or
+// corrupt this script's own state) with a short timeout (catches an
+// infinite loop or hang, not just a normal error). Written to a temp
+// file rather than passed via `node -e "..."` — shell-quoting a
+// multi-line snippet containing its own quotes has caused real,
+// concrete problems elsewhere in this codebase this session, and a
+// temp file sidesteps that class of bug entirely.
+function runVerificationSnippet(snippet) {
+  const tmpPath = path.join(require('os').tmpdir(), `bug-scan-verify-${Date.now()}-${Math.random().toString(36).slice(2)}.js`);
+  try {
+    fs.writeFileSync(tmpPath, snippet, 'utf8');
+    const output = execSync(`node ${JSON.stringify(tmpPath)}`, { timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { success: true, output: output.trim(), error: null };
+  } catch (e) {
+    // Covers a genuine runtime/syntax error in the snippet AND a
+    // timeout (execSync throws on both) — either way, the model's own
+    // attempt to demonstrate its claim did not succeed, which is
+    // itself meaningful signal about the claim's reliability.
+    const errText = (e.stderr ? e.stderr.toString() : '') || e.message || String(e);
+    return { success: false, output: null, error: errText.split('\n').slice(0, 3).join(' ').trim() };
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch (_) { /* best-effort cleanup */ }
+  }
+}
+
 
 async function reviewFileBatch(client, files, graph) {
   const prompt = buildReviewPrompt(files, graph);
@@ -414,7 +479,33 @@ function extractBugsFromResponse(response) {
     if (retracted.length > 0) {
       console.error(`   \u26a0\ufe0f  Filtered ${retracted.length} self-retracted entr${retracted.length === 1 ? 'y' : 'ies'} whose own description said it wasn't actually a bug, despite confirmed_genuine being true (${retracted.map(b => b.file).join(', ')})`);
     }
-    return structurallyConfirmed.filter(b => !isSelfRetracted(b));
+    const survivedRetraction = structurallyConfirmed.filter(b => !isSelfRetracted(b));
+
+    // TERTIARY filter: found via a real false positive (a miscounted
+    // regex capture-group index) that survived both layers above,
+    // since the model's own reasoning was confidently, genuinely
+    // wrong — no amount of asking it to double-check catches a
+    // mistake it doesn't recognize as one. Where the model provided a
+    // verification_snippet, actually run it (deterministic, not
+    // another round of the same model's own reasoning). A snippet
+    // that throws or times out is real, concrete signal the claim
+    // doesn't hold as stated — filtered out automatically. A snippet
+    // that runs successfully gets its genuine output attached to the
+    // finding, so --list and the console show actual empirical
+    // evidence next to the claim, not just prose asserting it.
+    const empiricallyVerified = [];
+    for (const b of survivedRetraction) {
+      if (!b.verification_snippet) { empiricallyVerified.push(b); continue; }
+      const result = runVerificationSnippet(b.verification_snippet);
+      if (!result.success) {
+        console.error(`   \u26a0\ufe0f  Filtered "${(b.description || '').slice(0, 70)}..." (${b.file}) — its own verification_snippet failed to run: ${result.error}`);
+        continue;
+      }
+      b.verification_output = result.output;
+      empiricallyVerified.push(b);
+    }
+
+    return empiricallyVerified;
   }
 
   // A forced tool_choice should make this path unreachable in normal
@@ -507,6 +598,11 @@ function printFindings(bugs) {
   bugs.forEach((b, i) => {
     console.log(`   [${i + 1}] ${b.severity.toUpperCase()} — ${b.file}`);
     console.log(`       ${b.description}`);
+    if (b.verification_output) {
+      console.log(`       Verified — ran the snippet below, actual output:`);
+      console.log(`         ${b.verification_output.split('\n').join('\n         ')}`);
+      if (b.verification_expected) console.log(`       (expected to show: ${b.verification_expected})`);
+    }
     console.log('');
   });
   console.log(`   Nothing has been changed. To review and apply a specific fix:`);
@@ -545,6 +641,12 @@ async function applyFinding(n) {
 
   console.log(`\n   [${n}] ${bug.severity.toUpperCase()} — ${bug.file}`);
   console.log(`   ${bug.description}\n`);
+  if (bug.verification_output) {
+    console.log(`   Verified — ran the snippet below, actual output:`);
+    console.log(`     ${bug.verification_output.split('\n').join('\n     ')}`);
+    if (bug.verification_expected) console.log(`   (expected to show: ${bug.verification_expected})`);
+    console.log('');
+  }
   console.log('   --- current ---');
   console.log('   ' + bug.old_code.split('\n').join('\n   '));
   console.log('   --- proposed ---');
@@ -614,5 +716,5 @@ module.exports = {
   getChangedFiles, getAllReviewableFiles,
   parseLocalRequires, buildDependencyGraph, orderByDependencyProximity,
   describeInBatchDependencies, batchFiles, buildReviewPrompt,
-  extractBugsFromResponse, isSelfRetracted,
+  extractBugsFromResponse, isSelfRetracted, runVerificationSnippet,
 };
