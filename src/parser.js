@@ -3,6 +3,7 @@ const { getAuth } = require('./auth');
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const EXCEL_ERROR_CODES = ['#REF!', '#VALUE!', '#DIV/0!', '#NAME?', '#N/A', '#NULL!', '#NUM!'];
 
@@ -233,11 +234,21 @@ function worksheetToRows(ws) {
     const row = ws.getRow(r);
     const obj = {};
     const cellRefs = {};
+    const formulas = {};
     let hasData = false;
     row.eachCell({ includeEmpty: false }, (cell, col) => {
       const key = headers[col] || `col${col}`;
       obj[key] = cellPlainValue(cell);
       cellRefs[key] = cell.address;
+      // R-8 fix: capture the actual formula text alongside the resolved
+      // value. Previously discarded entirely at this parsing stage —
+      // cellPlainValue only ever returns the resolved value, so no
+      // downstream consumer (including Tier 2's semantic review) could
+      // ever see formula logic, regardless of what the payload or
+      // prompt did with it. Left undefined for plain input cells (no
+      // formula), so downstream code can distinguish "has a formula"
+      // from "doesn't" without an extra check.
+      if (cell.formula) formulas[key] = cell.formula;
       hasData = true;
     });
     if (hasData) {
@@ -246,6 +257,7 @@ function worksheetToRows(ws) {
       // cell references instead of describing locations in plain English,
       // and so F-score lookups can match findings to formula complexity data.
       Object.defineProperty(obj, '_cellRefs', { value: cellRefs, enumerable: false });
+      Object.defineProperty(obj, '_formulas', { value: formulas, enumerable: false });
       Object.defineProperty(obj, '_rowNum', { value: r, enumerable: false });
       rows.push(obj);
     }

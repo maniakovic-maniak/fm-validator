@@ -179,4 +179,4 @@ function checkFormulaPatternConsistency(workbook) {
   };
 }
 
-module.exports = { checkFormulaPatternConsistency, normalizeFormula };
+module.exports = { checkFormulaPatternConsistency, normalizeFormula, colToNum };

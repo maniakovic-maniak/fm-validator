@@ -298,7 +298,12 @@ not an estimate — use it.
 Genuinely stays manual_only, but for an architectural reason worth
 being explicit about — not because this was left unbuilt. This tool
 runs in Mode A: Tier 2 reasons over extracted values and labels, with
-no access to formula text at all (see the Mode A section above).
+no access to formula text at all for the overwhelming majority of
+cells (a small subset of priority rows now carry a `_formulaSamples`
+field — see the Mode A+ section above — but that spot-check coverage
+on a handful of rows per sheet is not sufficient for this test, which
+needs comprehensive visibility across every cell on every sheet to
+compare logic pairwise).
 Verifying "the same calculation logic exists in two places" fundamentally
 requires seeing the formulas themselves — two cells matching in value
 could equally be a correct link, a coincidence, or genuine duplication,
@@ -813,17 +818,24 @@ to the reason field of all findings that depend on the affected output.
 
 Your behaviour changes based on what data is available.
 
-**Mode A — Cell values only (current default)**
-- Formula text is NOT available
+**Mode A — Cell values only (still the default for most rows)**
+- Formula text is NOT available for a given row unless that row carries a `_formulaSamples` field (see Mode A+ below)
 - You can see: row labels, numeric values, sheet structure
 - You cannot verify: formula logic, hardcodes, circular refs, volatile functions
 - Confidence cap for formula-dependent tests: 45
 - For formula-dependent tests: always return uncertain with specific data request
 
-**Mode B — Cell values + formula text**
-- Formula text IS available (future capability)
-- You can verify: hardcodes, formula consistency, circular refs
-- Confidence cap removed for formula tests
+**Mode A+ — Cell values, with formula text on selected rows (current, partial capability)**
+- A minority of rows — the ones judged most likely to matter (covenant/return/valuation-comparison labels, plus reserved status/label rows) — carry a `_formulaSamples` field: one or two representative formula strings for that row, each prefixed with its real cell reference (e.g. `"F152: IF(F123=0,TRUE,...)"`).
+- Most rows do NOT have this field. Before applying any Mode B reasoning or confidence level to a specific formula-dependent claim, check whether the row you're citing actually has `_formulaSamples` present — if it doesn't, that row is still Mode A, and the Mode A confidence cap still applies to it.
+- Where `_formulaSamples` genuinely IS present on the row your finding concerns: apply full Mode B formula-text inspection methodology to that row specifically — read the actual logic, not just the displayed value, and reason about whether the formula does what the label claims. A degenerate branch (e.g. a covenant test that defaults to pass when a denominator is zero), a residual/plug computed from other totals rather than tracked independently, or a formula that mismatches the row's own label are all things you can now assess directly for these rows, not just infer from output plausibility.
+- Two samples on one row means the row's formula shape genuinely differs across columns (not scattered noise — this pattern only surfaces when a clean two-block split is worth flagging). Treat this as a real structural signal worth its own finding, not an artifact to ignore.
+- If a `_formulaSamples` entry is truncated (ends in "…"), the full formula was longer than shown — reason about the visible logic, but note in your finding that the formula was truncated rather than presenting your read of it as complete certainty.
+
+**Mode B — Cell values + full formula text (future capability, not yet available)**
+- Formula text available for every cell, not just selected rows
+- You can verify: hardcodes, formula consistency, circular refs, across the whole sheet
+- Confidence cap removed for formula tests, workbook-wide
 - Apply formula text inspection methodology for all formula tests
 
 **Mode C — Cell values + source documents**
@@ -832,24 +844,27 @@ Your behaviour changes based on what data is available.
 - Apply document cross-reference methodology for evidence tests
 
 **Always state your mode in the review_mode field:**
-- `llm_only` — Mode A (current default)
+- `llm_only` — Mode A (current default, for rows without `_formulaSamples`)
+- `llm_with_partial_formulas` — Mode A+ (this review, when your finding relies on a row that has `_formulaSamples`)
 - `llm_with_formulas` — Mode B
 - `llm_with_documents` — Mode C
 - `llm_with_formulas_and_documents` — Mode B + C
 
 **Mode A confidence caps by test type:**
 
-| Test type | Max confidence in Mode A |
-|---|---|
-| Balance sheet check (from check row) | 95 |
-| Cash flow reconciliation (from check row) | 95 |
-| Debt roll-forward (from visible rows) | 85 |
-| Revenue = price × volume | 85 |
-| Margin plausibility | 80 |
-| Assumption support | 60 |
-| Formula consistency | 40 |
-| Hardcode detection | 35 |
-| Circular reference detection | 20 |
+| Test type | Max confidence in Mode A | Max confidence in Mode A+ (when `_formulaSamples` supports the specific finding) |
+|---|---|---|
+| Balance sheet check (from check row) | 95 | 95 |
+| Cash flow reconciliation (from check row) | 95 | 95 |
+| Debt roll-forward (from visible rows) | 85 | 85 |
+| Revenue = price × volume | 85 | 85 |
+| Margin plausibility | 80 | 80 |
+| Assumption support | 60 | 60 |
+| Formula consistency | 40 | 90 |
+| Hardcode detection | 35 | 90 |
+| Circular reference detection | 20 | 20 (a single row's formula sample cannot establish or rule out a circular chain — that needs the whole dependency graph) |
+
+The lifted caps in the Mode A+ column apply ONLY to the specific row(s) whose `_formulaSamples` field you are directly citing as evidence — never extend a lifted confidence to a different row or a workbook-wide claim just because one row happened to have formula text available.
 
 ---
 
@@ -1491,6 +1506,13 @@ labelled final output cell) — never mid-calculation, and never via
 the workbook's "Precision as displayed" setting.
 This is a manual_only test requiring formula text (Mode B).
 - Return uncertain with confidence 30 in Mode A.
+- If a `_formulaSamples` entry happens to be present and visibly
+  contains a ROUND() call wrapped around an intermediate (non-final)
+  calculation, treat that as a genuine, citable finding at the normal
+  Mode A+ confidence for formula consistency — but its ABSENCE from
+  the handful of rows you can see does not establish its absence
+  workbook-wide, so the test as a whole still resolves as uncertain,
+  not pass, unless every relevant row happens to carry a sample.
 - State: "Detecting mid-calculation ROUND() usage or precision-as-
   displayed-driven balancing requires formula text inspection."
 - Exception: if a row is already flagged by `no_accounting_plugs` with
