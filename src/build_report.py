@@ -450,6 +450,33 @@ def build_report(data_path, output_path):
     set_row(ws1,r,20); r+=1
     set_row(ws1,r,8); r+=1
 
+    # ── Tier 2 review-depth summary ─────────────────────────────────────────
+    # Requested after confirming (via a real production run) that Tier 2 can
+    # genuinely ground some findings in direct formula-text inspection
+    # (review_mode = llm_with_partial_formulas) rather than values/labels
+    # alone (llm_only) — a one-glance, ongoing check that this stays working,
+    # without needing to search finding text for formula-syntax clues by hand
+    # each time. Only counts T2-* findings — review_mode is specifically a
+    # Tier 2/LLM concept; deterministic Tier 0/Tier 1 checks don't have one.
+    _t2_findings_for_mode = [f for f in findings if str(f.get('id','')).startswith('T2-')]
+    if _t2_findings_for_mode:
+        _mode_counts = {}
+        for _f in _t2_findings_for_mode:
+            _m = _f.get('review_mode') or 'llm_only'
+            _mode_counts[_m] = _mode_counts.get(_m, 0) + 1
+        _total_t2 = len(_t2_findings_for_mode)
+        _formula_grounded = _mode_counts.get('llm_with_partial_formulas', 0) + _mode_counts.get('llm_with_formulas', 0)
+        if _formula_grounded > 0:
+            _pct = round(100 * _formula_grounded / _total_t2)
+            _depth_text = f'{_formula_grounded} of {_total_t2} Tier 2 finding(s) ({_pct}%) grounded in direct formula-text inspection; the remainder from values and labels alone.'
+            _depth_bg = PANEL_GREY
+        else:
+            _depth_text = f'All {_total_t2} Tier 2 finding(s) this run were based on values and labels alone (no formula-text-grounded findings) — see the Mode A+ section of skill.md for when direct formula inspection is expected to apply.'
+            _depth_bg = PANEL_GREY
+        merge_bold_prefix(ws1,f'B{r}:I{r}','Tier 2 review depth:   ',_depth_text,sz=10,col=CHARCOAL,bg=_depth_bg,v='center')
+        set_row(ws1,r,20); r+=1
+        set_row(ws1,r,8); r+=1
+
     # ── Key Takeaway box ──────────────────────────────────────────────────────
     _blockers=[]
     if p1_open>0: _blockers.append('open P1 findings')
