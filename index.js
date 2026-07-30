@@ -390,9 +390,21 @@ async function run() {
   const totalRangeCheck = (() => { try { return checkTotalRanges(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Total-range check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   if (totalRangeCheck.applicable && totalRangeCheck.findings.length > 0) {
-    totalRangeCheck.findings.forEach((f, i) => {
+    totalRangeCheck.findings.forEach((f) => {
+      // FIX: found via investigating a real "90 regressed" cross-run
+      // signal — a sequential-index ID (T0-TOTALRANGE-{i+1}) is
+      // inherently unstable whenever this check's finding count or
+      // order changes between runs, which the R-16 aggregation fix
+      // did dramatically (44 -> 2 findings). The same index number can
+      // point at a completely different underlying finding across
+      // runs, causing spurious regressed/new signals even when
+      // nothing about the model changed. A stable, content-addressed
+      // ID (sheet + cell) never shifts just because some OTHER
+      // finding earlier in the array appeared, disappeared, or got
+      // aggregated differently.
+      const id = `T0-TOTALRANGE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`;
       allFlagged.push({
-        id: `T0-TOTALRANGE-${String(i + 1).padStart(3, '0')}`,
+        id,
         label: `${f.sheet}!${f.cell} sums a range that excludes ${f.excludedCount} adjacent numeric row(s)`,
         severity: 'medium', status: 'fail',
         sheet: f.sheet, cell: f.cell, category: 'Structure',
@@ -905,8 +917,14 @@ async function run() {
   const dupCalcCheck = (() => { try { return checkDuplicateCalculationLogic(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate calculation logic check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   if (dupCalcCheck.applicable && dupCalcCheck.findings.length > 0) {
-    dupCalcCheck.findings.forEach((f, idx) => {
-      const groupId = `T0-DUPCALC-${String(idx + 1).padStart(3, '0')}`;
+    dupCalcCheck.findings.forEach((f) => {
+      // FIX: same class of bug as T0-TOTALRANGE above — a sequential-
+      // index ID is unstable whenever this check's finding count or
+      // order shifts between runs. Uses the first occurrence's sheet
+      // and cell as a stable, content-addressed identifier instead.
+      const firstOccurrence = f.occurrences[0];
+      const [occSheet, occCell] = firstOccurrence.includes('!') ? firstOccurrence.split('!') : [f.sheets[0], firstOccurrence];
+      const groupId = `T0-DUPCALC-${occSheet.replace(/[^A-Za-z0-9]/g, '')}-${occCell}`;
       allFlagged.push({
         id: groupId,
         label: `The same ${f.fnName}() aggregate is independently computed on ${f.sheets.length} different sheets`,
@@ -1569,11 +1587,17 @@ async function run() {
   const keyOutputChainCheck = (() => { try { return checkKeyOutputChains(parsed._raw, tier0.cellScoreIndex, parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Key-output chain check failed:', e.message); return { applicable:false, flaggedCount:0, results:[] }; } })();
   if (keyOutputChainCheck.applicable && keyOutputChainCheck.results.length > 0) {
-    keyOutputChainCheck.results.forEach((r, i) => {
+    keyOutputChainCheck.results.forEach((r) => {
       const affectedList = r.affectedOutputs.map(o => `${o.labelText} (${o.sheet}!${o.cell})`).join(', ');
       const isError = r.type === 'error_propagation';
+      // FIX: same class of bug as T0-TOTALRANGE/T0-DUPCALC above — a
+      // sequential-index ID is unstable whenever ANY upstream change
+      // adds or removes a finding earlier in this array, shifting
+      // every subsequent index even though this check itself didn't
+      // change. Uses the finding's own sheet+cell as a stable,
+      // content-addressed identifier instead.
       allFlagged.push({
-        id: `T0-CHAIN-${String(i + 1).padStart(3, '0')}`,
+        id: `T0-CHAIN-${r.sheet.replace(/[^A-Za-z0-9]/g, '')}-${r.cell}`,
         label: isError
           ? `${r.sheet}!${r.cell} holds a cached error (${r.value}) that ${r.affectedOutputs.length} key output(s) trace back through`
           : `${r.sheet}!${r.cell} is blank, and ${r.affectedOutputs.length} key output(s) trace back through it`,

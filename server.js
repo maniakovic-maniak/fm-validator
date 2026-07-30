@@ -506,9 +506,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const totalRangeCheck = (() => { try { return checkTotalRanges(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Total-range check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   if (totalRangeCheck.applicable && totalRangeCheck.findings.length > 0) {
-    totalRangeCheck.findings.forEach((f, i) => {
+    totalRangeCheck.findings.forEach((f) => {
+      const id = `T0-TOTALRANGE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`;
       allFlagged.push({
-        id: `T0-TOTALRANGE-${String(i + 1).padStart(3, '0')}`,
+        id,
         label: `${f.sheet}!${f.cell} sums a range that excludes ${f.excludedCount} adjacent numeric row(s)`,
         severity: 'medium', status: 'fail',
         sheet: f.sheet, cell: f.cell, category: 'Structure',
@@ -1016,8 +1017,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const dupCalcCheck = (() => { try { return checkDuplicateCalculationLogic(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate calculation logic check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   if (dupCalcCheck.applicable && dupCalcCheck.findings.length > 0) {
-    dupCalcCheck.findings.forEach((f, idx) => {
-      const groupId = `T0-DUPCALC-${String(idx + 1).padStart(3, '0')}`;
+    dupCalcCheck.findings.forEach((f) => {
+      const firstOccurrence = f.occurrences[0];
+      const [occSheet, occCell] = firstOccurrence.includes('!') ? firstOccurrence.split('!') : [f.sheets[0], firstOccurrence];
+      const groupId = `T0-DUPCALC-${occSheet.replace(/[^A-Za-z0-9]/g, '')}-${occCell}`;
       allFlagged.push({
         id: groupId,
         label: `The same ${f.fnName}() aggregate is independently computed on ${f.sheets.length} different sheets`,
@@ -1645,11 +1648,11 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const keyOutputChainCheck = (() => { try { return checkKeyOutputChains(parsed._raw, tier0.cellScoreIndex, parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Key-output chain check failed:', e.message); return { applicable:false, flaggedCount:0, results:[] }; } })();
   if (keyOutputChainCheck.applicable && keyOutputChainCheck.results.length > 0) {
-    keyOutputChainCheck.results.forEach((r, i) => {
+    keyOutputChainCheck.results.forEach((r) => {
       const affectedList = r.affectedOutputs.map(o => `${o.labelText} (${o.sheet}!${o.cell})`).join(', ');
       const isError = r.type === 'error_propagation';
       allFlagged.push({
-        id: `T0-CHAIN-${String(i + 1).padStart(3, '0')}`,
+        id: `T0-CHAIN-${r.sheet.replace(/[^A-Za-z0-9]/g, '')}-${r.cell}`,
         label: isError
           ? `${r.sheet}!${r.cell} holds a cached error (${r.value}) that ${r.affectedOutputs.length} key output(s) trace back through`
           : `${r.sheet}!${r.cell} is blank, and ${r.affectedOutputs.length} key output(s) trace back through it`,
