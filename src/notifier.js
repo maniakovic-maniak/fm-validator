@@ -76,14 +76,44 @@ async function sendNotification(outcome) {
     </div>
   `;
 
-  await getResendClient().emails.send({
-    from: 'FM Validator <onboarding@resend.dev>',
-    to: process.env.NOTIFY_EMAIL,
-    subject,
-    html
-  });
+  // FIX: found via investigating a report that email notifications had
+  // stopped arriving despite the console always logging "Notification
+  // sent" afterward. That log line only ever confirmed this call
+  // didn't throw — it never confirmed Resend genuinely delivered the
+  // email. Wrapped in a try/catch (there was none anywhere in this
+  // chain before) so a real send failure is visible with Resend's
+  // actual error detail, instead of either crashing the whole pipeline
+  // (this call has no wrapper at its own call site either) or being
+  // indistinguishable from genuine success. Also logs Resend's own
+  // response id on success — a request that was merely accepted but
+  // never delivered (a very plausible cause: 'onboarding@resend.dev'
+  // is Resend's sandbox/test sender address, which typically can only
+  // deliver to the account's own verified email, not an arbitrary
+  // NOTIFY_EMAIL recipient, unless a custom domain has been verified)
+  // is the leading suspect and should surface here directly.
+  let sendResult;
+  try {
+    sendResult = await getResendClient().emails.send({
+      from: 'FM Validator <onboarding@resend.dev>',
+      to: process.env.NOTIFY_EMAIL,
+      subject,
+      html
+    });
+  } catch (e) {
+    console.error(`   ⚠️  Email notification failed to send: ${e.message}`);
+    console.error(`   ⚠️  (Notification failure does not affect the report itself — it was already built and uploaded. If this keeps happening, check: NOTIFY_EMAIL is set to a real address; if using Resend's sandbox sender (onboarding@resend.dev), it can typically only deliver to the account's own verified email — a verified custom domain is needed to send to other recipients.)`);
+    return;
+  }
 
-  console.log(`Notification sent: ${subject}`);
+  if (sendResult && sendResult.error) {
+    // The Resend SDK can also return an error object in the response
+    // body rather than throwing — confirmed worth checking separately
+    // from the try/catch above, since not every failure mode raises.
+    console.error(`   ⚠️  Email notification was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
+    return;
+  }
+
+  console.log(`Notification sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
 }
 
 module.exports = { sendNotification };
