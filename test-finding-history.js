@@ -100,6 +100,53 @@ function run() {
   console.log(`${notFirstRunPass ? 'PASS' : 'FAIL'}: run 4 ("everything fixed"), despite having the identical zero-findings shape, is correctly flagged isFirstRun=false (real history existed)`);
   if (!notFirstRunPass) allPass = false;
 
+  // ══════════════════════════════════════════════════════════════
+  // Deterministic vs LLM split — found via a real investigation
+  // where a user ran the identical model twice with no fixes applied
+  // and the blended "18 closed, 19 new" number looked like genuine
+  // progress. Direct comparison confirmed every closed finding was
+  // Tier 2 (LLM); replicated that exact scenario here.
+  // ══════════════════════════════════════════════════════════════
+  {
+    const priorHistory = {};
+    for (let i = 1; i <= 18; i++) {
+      const id = 'T2-S' + i + '-001';
+      priorHistory[id] = { status: 'open', rootCauseId: id, cell: null };
+    }
+    const currentFindings = [];
+    for (let i = 1; i <= 12; i++) currentFindings.push({ id: 'T0-MASTERCONTROL-Sheet1-A' + i });
+    for (let i = 19; i <= 25; i++) currentFindings.push({ id: 'T2-S' + i + '-001' });
+
+    const splitStats = computeCrossRunStats(currentFindings, priorHistory);
+    const splitPass = splitStats.closedFindingCount === 18 && splitStats.closedDeterministicCount === 0 && splitStats.closedLlmCount === 18
+      && splitStats.newFindingCount === 19 && splitStats.newDeterministicCount === 12 && splitStats.newLlmCount === 7;
+    console.log(`${splitPass ? 'PASS' : 'FAIL'}: the real scenario (18 T2 closed, 12 T0 new + 7 T2 new) splits exactly correctly`);
+    if (!splitPass) allPass = false;
+  }
+
+  // Confirms a purely deterministic change (new Tier 0 checks
+  // deployed, no Tier 2 variance at all) shows zero LLM-side movement.
+  {
+    const stats = computeCrossRunStats(
+      [{ id: 'T0-GATECOVERAGE-Sheet1-A1' }],
+      { 'T0-OLDCHECK-Sheet1-B2': { status: 'open', rootCauseId: 'T0-OLDCHECK-Sheet1-B2', cell: null } }
+    );
+    const pass = stats.closedLlmCount === 0 && stats.newLlmCount === 0
+      && stats.closedDeterministicCount === 1 && stats.newDeterministicCount === 1;
+    console.log(`${pass ? 'PASS' : 'FAIL'}: a purely deterministic change shows zero LLM-side movement`);
+    if (!pass) allPass = false;
+  }
+
+  // Confirms a genuinely regressed deterministic finding is correctly
+  // attributed to the deterministic count, not the LLM count.
+  {
+    const priorHistory = { 'T0-MASTERCONTROL-Sheet1-A1': { status: 'closed', rootCauseId: 'T0-MASTERCONTROL-Sheet1-A1', cell: null } };
+    const stats = computeCrossRunStats([{ id: 'T0-MASTERCONTROL-Sheet1-A1' }], priorHistory);
+    const pass = stats.regressedDeterministicCount === 1 && stats.regressedLlmCount === 0;
+    console.log(`${pass ? 'PASS' : 'FAIL'}: a genuinely regressed deterministic finding is attributed to the deterministic count, not LLM`);
+    if (!pass) allPass = false;
+  }
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }

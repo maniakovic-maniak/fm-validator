@@ -429,6 +429,20 @@ def build_report(data_path, output_path):
     _crn_new = crossRunStats.get('newFindingCount', len(crossRunStats.get('new', [])))
     _crn_regressed = crossRunStats.get('regressedFindingCount', len(crossRunStats.get('regressed', [])))
     _crn_still_open = crossRunStats.get('stillOpenFindingCount', len(crossRunStats.get('stillOpen', [])))
+    # FIX: found via a real investigation — a user ran the identical
+    # model twice with no fixes applied and the blended "18 closed, 19
+    # new" number looked like genuine progress/regression. Direct
+    # comparison confirmed every closed finding was Tier 2 (LLM),
+    # which re-reasons from scratch each run and doesn't reliably
+    # reproduce the same borderline findings — real, inherent
+    # variance, not a bug. Falls back to the blended-only fields for a
+    # payload predating this split (backward compatible).
+    _crn_closed_det = crossRunStats.get('closedDeterministicCount', _crn_closed)
+    _crn_new_det = crossRunStats.get('newDeterministicCount', _crn_new)
+    _crn_regressed_det = crossRunStats.get('regressedDeterministicCount', _crn_regressed)
+    _crn_closed_llm = crossRunStats.get('closedLlmCount', 0)
+    _crn_new_llm = crossRunStats.get('newLlmCount', 0)
+    _crn_regressed_llm = crossRunStats.get('regressedLlmCount', 0)
     # FIX: found via a real bug-scan run. Previously inferred from the
     # counts above (new>0, everything else 0) — but a genuine first run
     # on a perfectly clean model has ZERO findings of every kind, which
@@ -442,12 +456,29 @@ def build_report(data_path, output_path):
         _crn_text = (f'First run for this model — no prior report to compare against ({_crn_new} finding(s) established as the baseline).'
                      if _crn_new > 0 else
                      'First run for this model — no prior report to compare against. No findings on this run.')
+        merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run:   ',_crn_text,sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+        set_row(ws1,r,20); r+=1
     else:
-        _crn_text = f'{_crn_closed} closed · {_crn_new} new · {_crn_still_open} still open since the last run'
-        if _crn_regressed > 0:
-            _crn_text += f' · \u26a0 {_crn_regressed} regressed (previously closed, now reappeared)'
-    merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run:   ',_crn_text,sz=10,col=CHARCOAL,bg=(LIGHT_RED if _crn_regressed>0 else PANEL_GREY),v='center')
-    set_row(ws1,r,20); r+=1
+        # Deterministic (Tier 0/Tier 1) line — the reliable signal.
+        # These checks produce the exact same result every time on an
+        # unchanged model, so a genuine change here means the model or
+        # the validator's own code genuinely changed.
+        _crn_text_det = f'{_crn_closed_det} closed · {_crn_new_det} new · {_crn_still_open} still open since the last run'
+        if _crn_regressed_det > 0:
+            _crn_text_det += f' · \u26a0 {_crn_regressed_det} regressed (previously closed, now reappeared)'
+        merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run (deterministic checks):   ',_crn_text_det,sz=10,col=CHARCOAL,bg=(LIGHT_RED if _crn_regressed_det>0 else PANEL_GREY),v='center')
+        set_row(ws1,r,20); r+=1
+        # Tier 2 (LLM) line — explicitly caveated, never uses the
+        # alarm-red background even when its own "regressed" count is
+        # nonzero, since this is expected, routine model variance, not
+        # a reliability signal the way the deterministic line is.
+        if _crn_closed_llm > 0 or _crn_new_llm > 0 or _crn_regressed_llm > 0:
+            _crn_text_llm = f'{_crn_closed_llm} closed · {_crn_new_llm} new'
+            if _crn_regressed_llm > 0:
+                _crn_text_llm += f' · {_crn_regressed_llm} reappeared'
+            _crn_text_llm += ' — Tier 2 (LLM) findings can vary between runs even with an unchanged model, since Tier 2 re-reasons from scratch each time; not necessarily a sign of genuine progress or regression.'
+            merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run (Tier 2 / LLM findings):   ',_crn_text_llm,sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+            set_row(ws1,r,20); r+=1
     set_row(ws1,r,8); r+=1
 
     # ── Tier 2 review-depth summary ─────────────────────────────────────────

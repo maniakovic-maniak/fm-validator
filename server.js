@@ -2446,7 +2446,14 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       }
     })();
     if (crossRunStats.regressed.length > 0) {
-      console.log(`   \u26a0\ufe0f  ${crossRunStats.regressed.length} previously-closed item(s) have reappeared (regressed) since a prior run`);
+      const regDet = crossRunStats.regressedDeterministicCount ?? crossRunStats.regressed.length;
+      const regLlm = crossRunStats.regressedLlmCount ?? 0;
+      if (regDet > 0) {
+        console.log(`   \u26a0\ufe0f  ${regDet} previously-closed deterministic item(s) have reappeared (regressed) since a prior run`);
+      }
+      if (regLlm > 0) {
+        console.log(`   \u2139\ufe0f  ${regLlm} previously-closed Tier 2 (LLM) item(s) have reappeared — Tier 2 findings can vary between runs even with an unchanged model, so this is not necessarily a genuine regression`);
+      }
     }
 
     console.log(`   ℹ️  ${allFlagged.length} items flagged`);

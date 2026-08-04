@@ -170,6 +170,30 @@ function distinctFindingCount(entries) {
  * model, returning { closed, new, regressed, stillOpen, updatedHistory }.
  * Does NOT save — call saveHistory(modelKey, updatedHistory) separately,
  * after confirming the run completed successfully. */
+// FIX: found via a real investigation — a user ran the identical
+// model twice with no fixes applied and saw "Since last run: 18
+// closed, 19 new". Direct comparison confirmed every single closed
+// finding was T2-* (Tier 2/LLM); zero T0/T1 (deterministic, code-
+// based) findings changed at all. Tier 2 re-reasons from scratch each
+// run and doesn't reliably reproduce the same borderline findings run
+// to run — a real, inherent property of LLM-based review, not a bug.
+// Blending this into one number misleads a reader into thinking
+// genuine progress or regression happened when it may just be
+// variance. Splits by whether the finding's own id starts with "T2-"
+// (LLM-derived) vs anything else (deterministic Tier 0/Tier 1 code).
+function isLlmDerived(rootCauseId) {
+  return typeof rootCauseId === 'string' && rootCauseId.startsWith('T2-');
+}
+
+function splitDeterministicVsLlm(entries) {
+  const deterministic = [];
+  const llm = [];
+  for (const e of entries) {
+    (isLlmDerived(e.rootCauseId) ? llm : deterministic).push(e);
+  }
+  return { deterministic, llm };
+}
+
 function computeCrossRunStats(findings, history) {
   const current = currentFingerprints(findings);
   const nowIso = new Date().toISOString();
@@ -210,12 +234,29 @@ function computeCrossRunStats(findings, history) {
   // which is the actual, unambiguous signal.
   const isFirstRun = Object.keys(history).length === 0;
 
+  const closedSplit = splitDeterministicVsLlm(closed);
+  const newSplit = splitDeterministicVsLlm(newOnes);
+  const regressedSplit = splitDeterministicVsLlm(regressed);
+
   return {
     closed, new: newOnes, regressed, stillOpen, updatedHistory, isFirstRun,
     closedFindingCount: distinctFindingCount(closed),
     newFindingCount: distinctFindingCount(newOnes),
     regressedFindingCount: distinctFindingCount(regressed),
     stillOpenFindingCount: distinctFindingCount(stillOpen),
+    // Deterministic (Tier 0/Tier 1, code-based) counts — a reliable
+    // signal of genuine progress or regression, since these checks
+    // produce the exact same result every time on an unchanged model.
+    closedDeterministicCount: distinctFindingCount(closedSplit.deterministic),
+    newDeterministicCount: distinctFindingCount(newSplit.deterministic),
+    regressedDeterministicCount: distinctFindingCount(regressedSplit.deterministic),
+    // LLM (Tier 2) counts — can shift run to run even on an unchanged
+    // model, since Tier 2 re-reasons from scratch each time. Reported
+    // separately so this variance is never mistaken for genuine
+    // progress or regression.
+    closedLlmCount: distinctFindingCount(closedSplit.llm),
+    newLlmCount: distinctFindingCount(newSplit.llm),
+    regressedLlmCount: distinctFindingCount(regressedSplit.llm),
   };
 }
 
