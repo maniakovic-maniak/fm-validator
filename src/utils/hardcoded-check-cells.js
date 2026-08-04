@@ -17,13 +17,26 @@
 // check is about the ABSENCE of a formula entirely in a cell whose whole
 // job is to verify something.
 
-const CHECK_LABEL_RE = /\b(check|reconciliation|recon|validation|balance[\s-]?check|error[\s-]?check|model[\s-]?control|tie[\s-]?out|cross[\s-]?foot)\b/i;
+// FIX (I-7): found via an independent review confirming several
+// hardcoded QA-status cells were not caught — DATA MAP!C475/C490/
+// C496/C497 are literal strings like "OK — 0 formula/name links" and
+// "OK — calculation complete" in rows labelled "External workbook
+// formula links" and "Workbook formula error scan". Broadened to
+// cover this genuine gap, prevalence-tested against all reference
+// files since both changes widen matching.
+const CHECK_LABEL_RE = /\b(check|reconciliation|recon|validation|balance[\s-]?check|error[\s-]?check|model[\s-]?control|tie[\s-]?out|cross[\s-]?foot|formula\s+(?:error|links)|circular[\s-]?reference)\b/i;
 
 // Text values that look like an actual check RESULT (pass/fail vocabulary),
 // as opposed to a hardcoded threshold or input that merely happens to sit
 // in a row whose label contains the word "check". A numeric 0 is included
 // since "difference = 0" is the most common numeric check-passed pattern.
-const CHECK_RESULT_VALUE_RE = /^(ok|pass(ed)?|fail(ed)?|error|true|false|balanced|yes|no|tie[sd]?|clean|reconciled)$/i;
+// Matches either a bare status word ("OK", "PASS") or that word
+// followed by a dash/colon separator and explanatory detail (e.g.
+// "OK — 0 formula/name links", "PASS: all references resolve") —
+// deliberately requires the separator, not just any word boundary,
+// so a casual sentence that happens to start with "No" or "Yes"
+// without being a genuine status value is not falsely matched.
+const CHECK_RESULT_VALUE_RE = /^(ok|pass(ed)?|fail(ed)?|error|true|false|balanced|yes|no|tie[sd]?|clean|reconciled)(\s*[-\u2013\u2014:]|$)/i;
 
 function looksLikeCheckResult(value) {
   if (typeof value === 'boolean') return true;
@@ -61,25 +74,47 @@ function checkHardcodedCheckCells(workbook) {
 
   workbook.eachSheet((worksheet) => {
     worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      // Find the leftmost non-empty cell in the row as the candidate label.
+      // Find the leftmost non-empty cell in the row as the candidate
+      // label. FIX (I-7): a row can have a short ID code before the
+      // genuine descriptive label (confirmed directly: this model uses
+      // "CHK-050" in column A, with the real label "Defined names
+      // contain no broken references" in column B) — checks up to the
+      // first 3 non-empty string cells for one matching CHECK_LABEL_RE,
+      // rather than assuming the very first non-empty cell is always
+      // the genuine label.
       let labelCell = null;
       let labelColNumber = null;
+      let candidatesChecked = 0;
       row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-        if (labelCell === null && cellHasContent(cell) && typeof cell.value === 'string') {
+        if (labelCell !== null || candidatesChecked >= 3) return;
+        if (!cellHasContent(cell) || typeof cell.value !== 'string') return;
+        candidatesChecked++;
+        if (cell.value.length <= MAX_LABEL_LENGTH && CHECK_LABEL_RE.test(cell.value)) {
           labelCell = cell;
           labelColNumber = colNumber;
         }
       });
-      if (!labelCell || labelCell.value.length > MAX_LABEL_LENGTH || !CHECK_LABEL_RE.test(labelCell.value)) return;
+      if (!labelCell) return;
 
       // Scan the rest of the row (to the right of the label) for the
-      // first non-empty candidate "result" cell.
+      // FIRST non-empty candidate "result" cell. FIX (I-7): found via
+      // investigating over-matching on multi-column metadata/control-
+      // register rows (Formula/Inputs/Source/Method/Weight-style
+      // columns) — this loop's own comment always said "the first"
+      // result cell, but the implementation never stopped after
+      // finding one, pushing a separate finding for every qualifying
+      // cell in the row instead of just the genuine result position.
+      let resultCell = null, resultColNumber = null;
       row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        if (resultCell !== null) return;
         if (colNumber <= labelColNumber) return;
         if (isMergeSlave(cell)) return;
         if (!cellHasContent(cell)) return;
         if (hasFormula(cell)) return; // real, recalculating check — fine
-
+        resultCell = cell;
+        resultColNumber = colNumber;
+      });
+      if (resultCell) {
         // Reached a non-empty, non-formula cell after a check-labeled
         // row — this is a false-assurance candidate. Confidence is high
         // when the value itself looks like check-result vocabulary
@@ -88,12 +123,12 @@ function checkHardcodedCheckCells(workbook) {
         // static check result.
         findings.push({
           sheet: worksheet.name,
-          cell: cell.address || `${colLetter(colNumber)}${rowNumber}`,
+          cell: resultCell.address || `${colLetter(resultColNumber)}${rowNumber}`,
           label: String(labelCell.value).trim(),
-          value: cell.value,
-          confidence: looksLikeCheckResult(cell.value) ? 'high' : 'low',
+          value: resultCell.value,
+          confidence: looksLikeCheckResult(resultCell.value) ? 'high' : 'low',
         });
-      });
+      }
     });
   });
 
