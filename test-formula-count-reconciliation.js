@@ -69,20 +69,20 @@ const check = (desc, pass) => {
   // ══════════════════════════════════════════════════════════════
   const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
   const KNOWN_EXPECTATIONS = {
-    'The_Bend_FInancial_Model_3_8_2026.xlsx': 1,
-    'CarlsbergFinancialModel_1.xlsm': 0,
-    'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': 0,
-    'Qantas_1.xlsx': 0,
+    'f6faab1ac4cee3fe56abb4a8a05c7c41463c72d5dc7203f2ba30732064c7e122': 1, // The_Bend_FInancial_Model_3_8_2026.xlsx
+    '8493d1e338d6978b6be482588aba151550eec9a7efb3f6ee93418f0f3e96c6af': 0, // CarlsbergFinancialModel_1.xlsm
+    '60b4f4f44a599b0120c7494d6d537a371e9b142ced0faef72d5620c2793233f5': 0, // Financial_Model_The_Bend_13_7_2026_Audited.xlsx
+    '25b1897007a1bee37d3927fd0ac24398b5d7857933a291649e9cbd89916bafe5': 0, // Qantas_1.xlsx
   };
   const fixtures = getFixtureFiles();
   if (fixtures.length === 0) {
     console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
   }
-  for (const { path: filePath, filename } of fixtures) {
+  for (const { path: filePath, filename, hash } of fixtures) {
     const p = await parseWorkbook(filePath);
     const t0 = await runTier0(p);
     const r = checkFormulaCountReconciliation(p._raw, t0.stats);
-    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, hash);
     if (expected !== undefined) {
       check(`end-to-end: ${filename} — flaggedCount === ${expected}`, r.flaggedCount === expected);
     } else {

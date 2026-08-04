@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const FIXTURE_EXTENSIONS = /\.(xlsx|xlsm)$/i;
 
@@ -35,28 +36,46 @@ function resolveFixturesDir() {
   return repoLocal; // will simply return zero files below — callers handle this gracefully
 }
 
+// FIX: found via a real deployment — the user's re-downloaded
+// reference files arrived with different names (spaces/hyphens
+// instead of underscores, "(1)" dedup suffixes added by the browser),
+// which silently broke every KNOWN_EXPECTATIONS lookup keyed by exact
+// filename, even though the underlying file content was byte-
+// identical. A SHA-256 content hash is immune to any renaming — it's
+// computed from the file's actual bytes, not its name, so a file can
+// be renamed however a browser or a person wants without breaking
+// its known, hand-verified expectation. Confirmed the overhead is
+// negligible even for the largest (~11MB) reference file (~90ms).
+function hashFile(filePath) {
+  const buf = fs.readFileSync(filePath);
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
 // Returns every reference file currently available, as
-// { path, filename } objects — dynamically discovered, not a fixed
-// list. Call this fresh each time (not cached at module load) so a
-// file dropped in mid-session during local development is picked up
-// without restarting anything.
+// { path, filename, hash } objects — dynamically discovered, not a
+// fixed list. Call this fresh each time (not cached at module load)
+// so a file dropped in mid-session during local development is
+// picked up without restarting anything.
 function getFixtureFiles() {
   const dir = resolveFixturesDir();
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir)
     .filter(f => FIXTURE_EXTENSIONS.test(f))
     .sort()
-    .map(f => ({ path: path.join(dir, f), filename: f }));
+    .map(f => {
+      const filePath = path.join(dir, f);
+      return { path: filePath, filename: f, hash: hashFile(filePath) };
+    });
 }
 
-// Looks up a known, hand-verified expected value for a given
-// filename from a test's own expectations map (keyed by filename, not
-// full path, so it works regardless of which directory the file was
-// actually found in). Returns undefined for a filename with no known
-// expectation — callers should treat this as "run it, log the result,
-// don't assert a specific number" rather than a failure.
-function getKnownExpectation(expectations, filename) {
-  return expectations[filename];
+// Looks up a known, hand-verified expected value for a given file's
+// content hash from a test's own expectations map (keyed by hash, not
+// filename — a file renamed by a browser download or a person still
+// matches its known baseline). Returns undefined for a hash with no
+// known expectation — callers should treat this as "run it, log the
+// result, don't assert a specific number" rather than a failure.
+function getKnownExpectation(expectations, hash) {
+  return expectations[hash];
 }
 
-module.exports = { getFixtureFiles, getKnownExpectation, resolveFixturesDir };
+module.exports = { getFixtureFiles, getKnownExpectation, resolveFixturesDir, hashFile };

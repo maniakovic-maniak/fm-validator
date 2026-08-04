@@ -68,20 +68,20 @@ const fs = require('fs');
 (async () => {
   const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
   const KNOWN_EXPECTATIONS = {
-    'The_Bend_Precinct_Model_Investor_Ready_12.xlsm': 3,
-    'CarlsbergFinancialModel_1.xlsm': 0,
-    'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': 0,
-    'Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm': 0,
+    '383ae8eea3dbc878ef7472a1b3d1a5bc31c468371141c01dc62b215a8652c0eb': 3, // The_Bend_Precinct_Model_Investor_Ready_12.xlsm
+    '8493d1e338d6978b6be482588aba151550eec9a7efb3f6ee93418f0f3e96c6af': 0, // CarlsbergFinancialModel_1.xlsm
+    '60b4f4f44a599b0120c7494d6d537a371e9b142ced0faef72d5620c2793233f5': 0, // Financial_Model_The_Bend_13_7_2026_Audited.xlsx
+    'ae49e8710986a491e6b11f1c12bb7ac3a6279e9fc97b84895f8a9e75d54bbd09': 0, // Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm
   };
   const fixtures = getFixtureFiles();
   if (fixtures.length === 0) {
     console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
   }
-  for (const { path: filePath, filename } of fixtures) {
+  for (const { path: filePath, filename, hash } of fixtures) {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(filePath);
     const result = checkDateGatedRatioZero(wb);
-    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, hash);
     if (expected !== undefined) {
       check(`end-to-end: ${filename} — flaggedCount === ${expected}`, result.flaggedCount === expected);
     } else {

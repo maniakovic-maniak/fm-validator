@@ -89,20 +89,20 @@ const fs = require('fs');
 (async () => {
   const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
   const KNOWN_EXPECTATIONS = {
-    'The_Bend_Precinct_Model_Investor_Ready_12.xlsm': false,
-    'CarlsbergFinancialModel_1.xlsm': false,
-    'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': false,
-    'Qantas_1.xlsx': false,
+    '383ae8eea3dbc878ef7472a1b3d1a5bc31c468371141c01dc62b215a8652c0eb': false, // The_Bend_Precinct_Model_Investor_Ready_12.xlsm
+    '8493d1e338d6978b6be482588aba151550eec9a7efb3f6ee93418f0f3e96c6af': false, // CarlsbergFinancialModel_1.xlsm
+    '60b4f4f44a599b0120c7494d6d537a371e9b142ced0faef72d5620c2793233f5': false, // Financial_Model_The_Bend_13_7_2026_Audited.xlsx
+    '25b1897007a1bee37d3927fd0ac24398b5d7857933a291649e9cbd89916bafe5': false, // Qantas_1.xlsx
   };
   const fixtures = getFixtureFiles();
   if (fixtures.length === 0) {
     console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
   }
-  for (const { path: filePath, filename } of fixtures) {
+  for (const { path: filePath, filename, hash } of fixtures) {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(filePath);
     const result = checkNpvSignConsistency(wb);
-    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, hash);
     if (expected !== undefined) {
       check(`end-to-end: ${filename} — found === ${expected}`, result.found === expected);
     } else {

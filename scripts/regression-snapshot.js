@@ -53,13 +53,21 @@ const CHECK_REGISTRY = [
 async function buildSnapshot() {
   const fixtures = getFixtureFiles();
   const snapshot = {};
-  const workbookCache = new Map(); // filename -> loaded workbook, so each file is only parsed once across all checks
+  const workbookCache = new Map(); // hash -> loaded workbook, so each file is only parsed once across all checks
 
-  for (const { path: filePath, filename } of fixtures) {
-    if (!workbookCache.has(filename)) {
+  // FIX: found via the same rename fragility discovered in the 15
+  // reference-file test suites — a snapshot keyed by filename would
+  // show a renamed file as "no longer present" (old filename) AND
+  // "new file/check combination" (new filename) even though the
+  // underlying content, and therefore the genuinely correct finding
+  // count, never changed at all. Keyed by content hash instead, which
+  // is immune to any renaming; filename is still stored alongside
+  // purely for human-readable log output.
+  for (const { path: filePath, hash } of fixtures) {
+    if (!workbookCache.has(hash)) {
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.readFile(filePath);
-      workbookCache.set(filename, wb);
+      workbookCache.set(hash, wb);
     }
   }
 
@@ -72,13 +80,13 @@ async function buildSnapshot() {
       continue;
     }
     snapshot[name] = {};
-    for (const { filename } of fixtures) {
-      const wb = workbookCache.get(filename);
+    for (const { filename, hash } of fixtures) {
+      const wb = workbookCache.get(hash);
       try {
         const result = fn(wb);
-        snapshot[name][filename] = result.flaggedCount ?? (result.found ? 1 : 0);
+        snapshot[name][hash] = { filename, count: result.flaggedCount ?? (result.found ? 1 : 0) };
       } catch (e) {
-        snapshot[name][filename] = `ERROR: ${e.message}`;
+        snapshot[name][hash] = { filename, count: `ERROR: ${e.message}` };
       }
     }
   }
@@ -97,10 +105,13 @@ function diffSnapshots(baseline, current) {
   for (const checkName of allChecks) {
     const baseFiles = (baseline && baseline[checkName]) || {};
     const curFiles = current[checkName] || {};
-    const allFiles = new Set([...Object.keys(baseFiles), ...Object.keys(curFiles)]);
-    for (const filename of allFiles) {
-      const before = baseFiles[filename];
-      const after = curFiles[filename];
+    const allHashes = new Set([...Object.keys(baseFiles), ...Object.keys(curFiles)]);
+    for (const hash of allHashes) {
+      const beforeEntry = baseFiles[hash];
+      const afterEntry = curFiles[hash];
+      const filename = (afterEntry && afterEntry.filename) || (beforeEntry && beforeEntry.filename) || hash.slice(0, 12) + '...';
+      const before = beforeEntry ? beforeEntry.count : undefined;
+      const after = afterEntry ? afterEntry.count : undefined;
       if (before === undefined) {
         changes.push({ checkName, filename, kind: 'new file/check combination', before: 'n/a', after });
       } else if (after === undefined) {
