@@ -230,6 +230,7 @@ async function runTier0(parsed) {
   const cellScoreIndex = {};
   // Risk accumulators
   let totalFormulaCells = 0;
+  let totalDataTableCells = 0;
   let totalValueCells   = 0;
   let totalIferrorCount = 0;
   let totalOffsetCount  = 0;
@@ -278,6 +279,21 @@ async function runTier0(parsed) {
         const formula = cell.formula
           ? (typeof cell.formula === 'object' ? cell.formula.formula : cell.formula)
           : null;
+
+        // FIX (I-10): Excel Data Table (What-If Analysis) cells are
+        // genuine formula-driven cells but ExcelJS does not expose
+        // them via cell.formula at all — only via
+        // cell.value.shareType === 'dataTable'. Confirmed directly
+        // via raw OOXML parsing: this caused a silent 4-cell (of a
+        // confirmed 5-cell total) undercount relative to the actual
+        // <c><f>...</f></c> count in the file. Counted separately
+        // rather than silently folded into totalFormulaCells, so the
+        // methodology stays transparent and reconcilable against a
+        // different tool's raw formula-cell count.
+        const isDataTableCell = cell.value && typeof cell.value === 'object' && cell.value.shareType === 'dataTable';
+        if (isDataTableCell) {
+          totalDataTableCells++;
+        }
 
         if (formula) {
           formulaCount++;
@@ -465,7 +481,19 @@ async function runTier0(parsed) {
   const highCritCount = fscoreDist.High + fscoreDist.Critical;
 
   console.log(`   Tier 0 complete in ${elapsed}s:`);
-  console.log(`   Formula cells: ${totalFormulaCells.toLocaleString()} | Unique formulas: ${uniqueFormulas.length}`);
+  // FIX (I-10): found via reconciling a real discrepancy between this
+  // count and other tools' formula-cell counts on the same file —
+  // traced precisely to Excel Data Table (What-If Analysis) cells,
+  // which are genuine formula-driven cells this count previously
+  // silently excluded (ExcelJS exposes them differently from an
+  // ordinary formula). Now shown explicitly and added to the total,
+  // rather than left as an undocumented, unexplained gap.
+  const formulaCellsIncludingDataTables = totalFormulaCells + totalDataTableCells;
+  if (totalDataTableCells > 0) {
+    console.log(`   Formula cells: ${totalFormulaCells.toLocaleString()} (+ ${totalDataTableCells.toLocaleString()} Data Table cell(s) = ${formulaCellsIncludingDataTables.toLocaleString()} total) | Unique formulas: ${uniqueFormulas.length}`);
+  } else {
+    console.log(`   Formula cells: ${totalFormulaCells.toLocaleString()} | Unique formulas: ${uniqueFormulas.length}`);
+  }
   console.log(`   IFERROR: ${totalIferrorCount.toLocaleString()} | OFFSET: ${totalOffsetCount.toLocaleString()} | INDIRECT: ${totalIndirectCount.toLocaleString()} | External links: ${totalExternalLinks}`);
   console.log(`   F-score: ${fscoreDist.Low} Low · ${fscoreDist.Moderate} Moderate · ${fscoreDist.High} High · ${fscoreDist.Critical} Critical`);
   if (highCritCount > 0) {
@@ -481,6 +509,8 @@ async function runTier0(parsed) {
     // Summary statistics
     stats: {
       totalFormulaCells,
+      totalDataTableCells,
+      formulaCellsIncludingDataTables,
       totalValueCells,
       totalIferrorCount,
       totalOffsetCount,
