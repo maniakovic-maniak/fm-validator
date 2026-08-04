@@ -84,26 +84,36 @@ const check = (desc, pass) => {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// End-to-end confirmation against all real reference files — the
+// End-to-end confirmation against every discovered reference file —
+// dynamically found via fixtures-helper.js, not a fixed list. The
 // fix must reduce or hold steady the count everywhere, never increase
 // it due to the multi-column over-matching this fix specifically
 // closes. Confirmed directly: Bend 13-7 Audited went from 29 (pre-fix)
 // to 16 (post-fix); Hidden Gem from 18 to 17.
 // ══════════════════════════════════════════════════════════════════
+const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
+const KNOWN_EXPECTATIONS = {
+  'The_Bend_FInancial_Model_3_8_2026.xlsx': 42,
+  'CarlsbergFinancialModel_1.xlsm': 0,
+  'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': 16,
+  'Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm': 17,
+  'Qantas_1.xlsx': 0,
+};
 (async () => {
-  const files = [
-    ['/mnt/user-data/uploads/The_Bend_FInancial_Model_3_8_2026.xlsx', 42],
-    ['/mnt/project/CarlsbergFinancialModel_1.xlsm', 0],
-    ['/mnt/project/Financial_Model_The_Bend_13_7_2026_Audited.xlsx', 16],
-    ['/mnt/project/Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm', 17],
-    ['/mnt/project/Qantas_1.xlsx', 0],
-  ];
-  for (const [file, expectCount] of files) {
-    if (!fs.existsSync(file)) { console.log(`SKIPPED: ${file} not present in this environment`); continue; }
+  const fixtures = getFixtureFiles();
+  if (fixtures.length === 0) {
+    console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
+  }
+  for (const { path: filePath, filename } of fixtures) {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(file);
+    await wb.xlsx.readFile(filePath);
     const result = checkHardcodedCheckCells(wb);
-    check(`end-to-end: ${file.split('/').pop()} — flaggedCount === ${expectCount}`, result.flaggedCount === expectCount);
+    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    if (expected !== undefined) {
+      check(`end-to-end: ${filename} — flaggedCount === ${expected}`, result.flaggedCount === expected);
+    } else {
+      check(`end-to-end: ${filename} — ran without crashing (no known expected count yet; actual flaggedCount: ${result.flaggedCount} — review and add to KNOWN_EXPECTATIONS once verified)`, true);
+    }
   }
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));

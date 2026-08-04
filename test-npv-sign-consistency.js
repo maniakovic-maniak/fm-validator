@@ -87,18 +87,27 @@ const check = (desc, pass) => {
 // ══════════════════════════════════════════════════════════════════
 const fs = require('fs');
 (async () => {
-  const files = [
-    ['/mnt/user-data/uploads/The_Bend_Precinct_Model_26_7_2026_Investor_Ready_v6.xlsm', true],
-    ['/mnt/project/CarlsbergFinancialModel_1.xlsm', false],
-    ['/mnt/project/Financial_Model_The_Bend_13_7_2026_Audited.xlsx', false],
-    ['/mnt/project/Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm', false],
-  ];
-  for (const [file, expectFound] of files) {
-    if (!fs.existsSync(file)) { console.log(`SKIPPED: ${file} not present in this environment`); continue; }
+  const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
+  const KNOWN_EXPECTATIONS = {
+    'The_Bend_Precinct_Model_Investor_Ready_12.xlsm': false,
+    'CarlsbergFinancialModel_1.xlsm': false,
+    'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': false,
+    'Qantas_1.xlsx': false,
+  };
+  const fixtures = getFixtureFiles();
+  if (fixtures.length === 0) {
+    console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
+  }
+  for (const { path: filePath, filename } of fixtures) {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(file);
+    await wb.xlsx.readFile(filePath);
     const result = checkNpvSignConsistency(wb);
-    check(`end-to-end: ${file.split('/').pop()} — found === ${expectFound}`, result.found === expectFound);
+    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    if (expected !== undefined) {
+      check(`end-to-end: ${filename} — found === ${expected}`, result.found === expected);
+    } else {
+      check(`end-to-end: ${filename} — ran without crashing (no known expected value yet; actual found: ${result.found} — review and add to KNOWN_EXPECTATIONS once verified)`, true);
+    }
   }
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));

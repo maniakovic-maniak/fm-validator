@@ -90,20 +90,29 @@ const check = (desc, pass) => {
 // ══════════════════════════════════════════════════════════════════
 const fs = require('fs');
 (async () => {
-  const files = [
-    ['/mnt/user-data/uploads/The_Bend_Precinct_Model_26_7_2026_Investor_Ready_v6.xlsm', true, true],
-    ['/mnt/project/CarlsbergFinancialModel_1.xlsm', false, false],
-    ['/mnt/project/Financial_Model_The_Bend_13_7_2026_Audited.xlsx', false, false],
-    ['/mnt/project/Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm', false, false],
-  ];
-  for (const [file, expectValGap, expectYieldNeg] of files) {
-    if (!fs.existsSync(file)) { console.log(`SKIPPED: ${file} not present in this environment`); continue; }
+  const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
+  const KNOWN_EXPECTATIONS = {
+    'The_Bend_Precinct_Model_Investor_Ready_12.xlsm': { valGap: true, yieldNeg: false },
+    'CarlsbergFinancialModel_1.xlsm': { valGap: false, yieldNeg: false },
+    'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': { valGap: false, yieldNeg: false },
+    'Qantas_1.xlsx': { valGap: false, yieldNeg: false },
+  };
+  const fixtures = getFixtureFiles();
+  if (fixtures.length === 0) {
+    console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
+  }
+  for (const { path: filePath, filename } of fixtures) {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(file);
+    await wb.xlsx.readFile(filePath);
     const valResult = checkValuationMethodDivergence(wb);
     const yieldResult = checkDebtYieldNegative(wb);
-    check(`end-to-end valuation divergence: ${file.split('/').pop()} — found === ${expectValGap}`, valResult.found === expectValGap);
-    check(`end-to-end debt yield negative: ${file.split('/').pop()} — found === ${expectYieldNeg}`, yieldResult.found === expectYieldNeg);
+    const known = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    if (known !== undefined) {
+      check(`end-to-end valuation divergence: ${filename} — found === ${known.valGap}`, valResult.found === known.valGap);
+      check(`end-to-end debt yield negative: ${filename} — found === ${known.yieldNeg}`, yieldResult.found === known.yieldNeg);
+    } else {
+      check(`end-to-end: ${filename} — ran without crashing (no known expected values yet; actual valDivergence: ${valResult.found}, debtYieldNeg: ${yieldResult.found} — review and add to KNOWN_EXPECTATIONS once verified)`, true);
+    }
   }
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));

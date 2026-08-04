@@ -64,19 +64,30 @@ const check = (desc, pass) => {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // End-to-end confirmation against other real reference files.
+  // End-to-end confirmation against every discovered reference file —
+  // dynamically found via fixtures-helper.js, not a fixed list.
   // ══════════════════════════════════════════════════════════════
-  const files = [
-    ['/mnt/project/CarlsbergFinancialModel_1.xlsm', 0],
-    ['/mnt/project/Financial_Model_The_Bend_13_7_2026_Audited.xlsx', 0],
-    ['/mnt/project/Qantas_1.xlsx', 0],
-  ];
-  for (const [file, expectCount] of files) {
-    if (!fs.existsSync(file)) { console.log(`SKIPPED: ${file} not present in this environment`); continue; }
-    const p = await parseWorkbook(file);
+  const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
+  const KNOWN_EXPECTATIONS = {
+    'The_Bend_FInancial_Model_3_8_2026.xlsx': 1,
+    'CarlsbergFinancialModel_1.xlsm': 0,
+    'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': 0,
+    'Qantas_1.xlsx': 0,
+  };
+  const fixtures = getFixtureFiles();
+  if (fixtures.length === 0) {
+    console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
+  }
+  for (const { path: filePath, filename } of fixtures) {
+    const p = await parseWorkbook(filePath);
     const t0 = await runTier0(p);
     const r = checkFormulaCountReconciliation(p._raw, t0.stats);
-    check(`end-to-end: ${file.split('/').pop()} — flaggedCount === ${expectCount}`, r.flaggedCount === expectCount);
+    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    if (expected !== undefined) {
+      check(`end-to-end: ${filename} — flaggedCount === ${expected}`, r.flaggedCount === expected);
+    } else {
+      check(`end-to-end: ${filename} — ran without crashing (no known expected count yet; actual flaggedCount: ${r.flaggedCount} — review and add to KNOWN_EXPECTATIONS once verified)`, true);
+    }
   }
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));

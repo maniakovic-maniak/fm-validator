@@ -62,18 +62,27 @@ const check = (desc, pass) => {
 // ══════════════════════════════════════════════════════════════════
 const fs = require('fs');
 (async () => {
-  const files = [
-    ['/tmp/test_fixed2.xlsm', 2],
-    ['/mnt/project/CarlsbergFinancialModel_1.xlsm', 0],
-    ['/mnt/project/Financial_Model_The_Bend_13_7_2026_Audited.xlsx', 0],
-    ['/mnt/project/Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm', 0],
-  ];
-  for (const [file, expectCount] of files) {
-    if (!fs.existsSync(file)) { console.log(`SKIPPED: ${file} not present in this environment`); continue; }
+  const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
+  const KNOWN_EXPECTATIONS = {
+    'The_Bend_Precinct_Model_Investor_Ready_12.xlsm': 2,
+    'CarlsbergFinancialModel_1.xlsm': 0,
+    'Financial_Model_The_Bend_13_7_2026_Audited.xlsx': 0,
+    'Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm': 0,
+  };
+  const fixtures = getFixtureFiles();
+  if (fixtures.length === 0) {
+    console.log('SKIPPED: no reference files found (checked test-fixtures/ and the sandbox fallback)');
+  }
+  for (const { path: filePath, filename } of fixtures) {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(file);
+    await wb.xlsx.readFile(filePath);
     const result = checkExceptionStatusRows(wb);
-    check(`end-to-end: ${file.split('/').pop()} — flaggedCount === ${expectCount}`, result.flaggedCount === expectCount);
+    const expected = getKnownExpectation(KNOWN_EXPECTATIONS, filename);
+    if (expected !== undefined) {
+      check(`end-to-end: ${filename} — flaggedCount === ${expected}`, result.flaggedCount === expected);
+    } else {
+      check(`end-to-end: ${filename} — ran without crashing (no known expected count yet; actual flaggedCount: ${result.flaggedCount} — review and add to KNOWN_EXPECTATIONS once verified)`, true);
+    }
   }
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
