@@ -1,0 +1,59 @@
+name: Weekly Regression Check
+
+# Found necessary via a direct conversation about running check tuning
+# "continuously" without a human in the loop: dynamic fixture
+# discovery (fixtures-helper.js) means new files drop into
+# test-fixtures/ and get tested automatically, but nothing was
+# comparing an UNKNOWN file's finding count run-over-run — so a
+# silent spike (this session genuinely produced one: 1,307 findings
+# on one check attempt, caught only by manual review) would never be
+# caught by the test suite alone.
+#
+# This is deliberately read-only: it never fixes anything, never
+# auto-commits, never silently accepts a new number as correct. A
+# genuine, intended change to a check's behavior still needs a human
+# to review the diff and run `node scripts/regression-snapshot.js
+# --update-baseline` themselves, then commit the result — the same
+# explicit-confirmation discipline used throughout this project's own
+# development.
+#
+# How you'll actually find out about drift: this job fails (exits
+# non-zero) when anything changes. GitHub surfaces a failed scheduled
+# workflow as a red X in the repo's Actions tab, and — if you have
+# GitHub's default notification settings — an email to the repo
+# owner/watchers. No custom notification wiring needed for that part.
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC. Adjust the day/time by changing the
+    # cron expression — https://crontab.guru is the easiest way to
+    # build a different schedule without memorizing cron syntax.
+    - cron: '0 6 * * 1'
+  workflow_dispatch: {}
+    # Lets you trigger this manually from the Actions tab any time,
+    # without waiting for the schedule — useful right after adding a
+    # new file to test-fixtures/, or after tuning a check, to see the
+    # diff immediately rather than waiting until next Monday.
+
+jobs:
+  regression-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository (including test-fixtures/)
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run regression snapshot
+        run: node scripts/regression-snapshot.js
+        # No --update-baseline here on purpose — this job only ever
+        # compares and reports. Updating the baseline is a deliberate,
+        # separate, human action (see the script's own usage notes).

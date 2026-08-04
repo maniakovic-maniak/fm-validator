@@ -1,0 +1,65 @@
+{
+  "checkMasterControlFailure": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 2
+  },
+  "checkImpossibleCountaTarget": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 0
+  },
+  "checkMismatchedBasisComparison": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 2
+  },
+  "checkReleaseGateCoverage": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 0
+  },
+  "checkHardcodedCheckCells": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 16,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 17,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 38
+  },
+  "checkNonexistentSheetReferences": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 0
+  },
+  "checkDegenerateCovenantBranch": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 2
+  },
+  "checkEquityComponentBackwardSolved": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 1
+  },
+  "checkHardcodedMajorAsset": {
+    "CarlsbergFinancialModel_1.xlsm": 0,
+    "Financial_Model_The_Bend_13_7_2026_Audited.xlsx": 0,
+    "Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm": 0,
+    "Qantas_1.xlsx": 0,
+    "The_Bend_Precinct_Model_Investor_Ready_12.xlsm": 1
+  }
+}
