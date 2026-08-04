@@ -75,6 +75,12 @@ const { checkZeroBaseRates } = require('./src/utils/zero-base-rate-check');
 const { checkDateGatedRatioZero } = require('./src/utils/date-gated-ratio-zero-check');
 const { checkExceptionStatusRows } = require('./src/utils/exception-status-check');
 const { checkHardcodedMajorAsset } = require('./src/utils/hardcoded-major-asset-check');
+const { checkMasterControlFailure } = require('./src/utils/master-control-failure-check');
+const { checkImpossibleCountaTarget } = require('./src/utils/impossible-counta-target-check');
+const { checkMismatchedBasisComparison } = require('./src/utils/mismatched-basis-comparison-check');
+const { checkReleaseGateCoverage } = require('./src/utils/release-gate-coverage-check');
+const { checkNonexistentSheetReferences } = require('./src/utils/nonexistent-sheet-reference-check');
+const { checkFormulaCountReconciliation } = require('./src/utils/formula-count-reconciliation-check');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
@@ -288,6 +294,18 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Exception-status scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const hardcodedMajorAsset = (() => { try { return checkHardcodedMajorAsset(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Hardcoded-major-asset scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const masterControlFailure = (() => { try { return checkMasterControlFailure(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Master-control-failure scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const impossibleCountaTarget = (() => { try { return checkImpossibleCountaTarget(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Impossible-COUNTA-target scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const mismatchedBasisComparison = (() => { try { return checkMismatchedBasisComparison(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Mismatched-basis-comparison scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const releaseGateCoverage = (() => { try { return checkReleaseGateCoverage(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Release-gate-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const nonexistentSheetReferences = (() => { try { return checkNonexistentSheetReferences(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Nonexistent-sheet-reference scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const formulaCountReconciliation = (() => { try { return checkFormulaCountReconciliation(parsed._raw, tier0.stats); }
+    catch (e) { console.error('   \u26a0\ufe0f  Formula-count-reconciliation scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const formulaDeepDive = wantsDeepDive
     ? await (async () => { try { return await runFormulaDeepDive(parsed, tier0, {}); }
         catch (e) { console.error('   \u26a0\ufe0f  Formula Deep Dive failed:', e.message); return { applicable:false, note:e.message, reviewed:0, findings:[] }; } })()
@@ -2300,6 +2318,103 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
             model_risk: 'A large asset line disconnected from its own cost/basis schedule will silently diverge from it over time with no warning, directly misstating the balance sheet and any leverage/coverage ratio computed from it.',
             key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Major asset line hardcoded rather than linked to a cost schedule',
             escalation_flag: true, urgency: 'Before next reliance', confidence: 75
+          });
+        }
+      }
+      if (masterControlFailure.applicable && masterControlFailure.flaggedCount > 0) {
+        for (const f of masterControlFailure.findings) {
+          allFlagged.push({
+            id: `T0-MASTERCONTROL-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+            label: `${f.label}: FAIL`,
+            severity: 'critical', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Governance', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Investigate and resolve the underlying cause of this control failure before relying on any output that depends on it. Do not treat this as a lower-confidence query — this is the model\'s own explicit, self-labelled control result, not an inference.',
+            workstream: 'Governance', issue_type: 'Master control failure',
+            model_risk: `The model itself explicitly reports that ${f.label.toLowerCase()} has failed (${f.instanceCount} cell(s) across ${f.allSheets.join(', ')}) — this is a direct, reliance-blocking signal from the model's own logic, not an audit inference.`,
+            key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: `Model's own ${f.label} evaluates to FAIL`,
+            escalation_flag: true, urgency: 'Immediate', confidence: 98,
+            investment_grade_blocker: true,
+          });
+        }
+      }
+      if (impossibleCountaTarget.applicable && impossibleCountaTarget.flaggedCount > 0) {
+        for (const f of impossibleCountaTarget.findings) {
+          allFlagged.push({
+            id: `T0-IMPOSSIBLETARGET-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+            label: `Control target (${f.target}) mathematically exceeds the max achievable sum (${f.maxAchievable})`,
+            severity: 'high', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Governance', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Confirm the correct target value against the ranges as currently sized, or correct the ranges if they were meant to cover more cells. As written, this control can never pass regardless of the model\'s actual state.',
+            workstream: 'Governance', issue_type: 'Impossible control target',
+            model_risk: `A control gate that can mathematically never pass will always show as failed or excepted, regardless of whether the underlying model is actually correct — this can mask genuine issues among the noise, or cause reviewers to distrust a genuinely important control.`,
+            key_output_impact: 'No', method: 'automated', needs_retest: true, root_cause: 'Control target exceeds the mathematical maximum of its own referenced ranges',
+            escalation_flag: true, urgency: 'Before next reliance', confidence: 99,
+          });
+        }
+      }
+      if (mismatchedBasisComparison.applicable && mismatchedBasisComparison.flaggedCount > 0) {
+        for (const f of mismatchedBasisComparison.findings) {
+          allFlagged.push({
+            id: `T0-BASISMISMATCH-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+            label: `Control compares a fixed link (${f.linkArg}) against a differently-computed actual (${f.computedArg})`,
+            severity: 'medium', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Governance', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Confirm both sides of this equality test genuinely represent the same underlying concept on the same basis (same denominator, same aggregation method) before treating a mismatch here as a value defect rather than a control-design issue.',
+            workstream: 'Governance', issue_type: 'Mismatched-basis control comparison',
+            model_risk: 'A control comparing a fixed target against a differently-computed actual is structurally unlikely to ever show a genuine pass, which can mask whether the underlying figures are actually reasonable.',
+            key_output_impact: 'No', method: 'automated', needs_retest: true, root_cause: 'Control compares values computed on different bases for exact equality',
+            escalation_flag: false, urgency: 'Before next reliance', confidence: 70,
+          });
+        }
+      }
+      if (releaseGateCoverage.applicable && releaseGateCoverage.flaggedCount > 0) {
+        for (const f of releaseGateCoverage.findings) {
+          allFlagged.push({
+            id: `T0-GATECOVERAGE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+            label: `Release gate tests ${f.testedRange} only — ${f.uncoveredCount} other status cell(s) on the sheet are outside its coverage`,
+            severity: 'high', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Governance', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Extend the gate\'s tested range (or its precedent logic) to cover every control/status cell on the sheet, or explicitly document why the excluded cells are out of scope for this particular gate.',
+            workstream: 'Governance', issue_type: 'Release gate coverage gap',
+            model_risk: 'A release or status gate that does not cover all mandatory controls can report a clean status while later, uncovered controls remain untested, failed, or excepted — undermining the very purpose of a single consolidated gate.',
+            key_output_impact: 'No', method: 'automated', needs_retest: true, root_cause: 'Release gate\'s tested range does not cover all status-like cells on the same sheet',
+            escalation_flag: true, urgency: 'Before next reliance', confidence: 90,
+          });
+        }
+      }
+      if (nonexistentSheetReferences.applicable && nonexistentSheetReferences.flaggedCount > 0) {
+        for (const f of nonexistentSheetReferences.findings) {
+          allFlagged.push({
+            id: `T0-MISSINGSHEETREF-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+            label: `References a sheet named "${f.referencedSheet}" that does not exist in this workbook`,
+            severity: 'medium', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Governance', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Confirm whether this sheet was renamed, removed, or never created, and update the documentation accordingly — or clarify if this is intentionally referencing a separate, external working file rather than a sheet within this workbook.',
+            workstream: 'Governance', issue_type: 'Nonexistent sheet reference',
+            model_risk: 'Documentation that references a sheet which does not exist misleads a reader trying to navigate or understand the actual workbook structure, and may indicate the model has been restructured without the guide being updated to match.',
+            key_output_impact: 'No', method: 'automated', needs_retest: true, root_cause: `Guide/navigational text references a nonexistent sheet named "${f.referencedSheet}"`,
+            escalation_flag: false, urgency: 'Before next reliance', confidence: 85,
+          });
+        }
+      }
+      if (formulaCountReconciliation.applicable && formulaCountReconciliation.flaggedCount > 0) {
+        for (const f of formulaCountReconciliation.findings) {
+          allFlagged.push({
+            id: `T0-FORMULACOUNTMISMATCH-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+            label: `Model's self-reported formula count (${f.selfReportedCount.toLocaleString()}) differs from this audit's count (${f.tier0Count.toLocaleString()}) by ${f.pctDiff}%`,
+            severity: 'low', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Governance', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Confirm which count is authoritative, or investigate why the two counting methods diverge by this much before relying on either figure for scope/coverage claims.',
+            workstream: 'Governance', issue_type: 'Formula count discrepancy',
+            model_risk: 'An unreconciled formula-count discrepancy between the model\'s own self-report and an independent audit count undermines confidence in either figure being used as a coverage or completeness metric.',
+            key_output_impact: 'No', method: 'automated', needs_retest: false, root_cause: 'Model\'s self-reported formula count does not match this audit\'s own scan',
+            escalation_flag: false, urgency: 'Informational', confidence: 80,
           });
         }
       }
