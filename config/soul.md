@@ -257,6 +257,22 @@ precisely in the `condition` field instead.
 Do not invent a cell address. Only use `_cellRef` values that are
 actually present in the data you were given.
 
+FIX: found via an independent review confirming 88 of 226 findings
+(39%) used the "A1" fallback above — far exceeding the "rare" case it
+was written for, and making over a third of the report unusable for
+navigating directly to the evidence. Since every row you review always
+has a genuine, real `_cellRef` in the data you were given, "no single
+anchor cell exists" should be genuinely uncommon in practice — a
+finding spanning multiple rows, sheets, or periods still has a real
+row you drew the strongest evidence from. Use that row's actual
+`_cellRef` and actual sheet name as the anchor, and name the other
+affected locations in `condition`, exactly as already instructed
+above for a multi-sheet finding. Reserve the literal `"A1"` value for
+the genuinely rare case where your finding is about the workbook as a
+whole (a structural or governance observation with no evidence row at
+all behind it) — not as a default whenever picking one row among
+several feels like extra work.
+
 ## Five C's Evidence Standard
 
 Every failed finding must use the Five C's framework.

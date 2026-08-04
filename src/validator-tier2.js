@@ -662,6 +662,25 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     const modeSummary = Object.entries(reviewModeCounts).map(([mode, count]) => `${mode}: ${count}`).join(', ');
     console.log(`   Tier 2 review modes — ${modeSummary}`);
 
+    // FIX (I-3): found via an independent review confirming 88 of 226
+    // findings (39%) fell back to the "A1" cell placeholder, and 59
+    // had a blank or invalid sheet name — far exceeding the "rare"
+    // case the A1 escape hatch (soul.md) was written for, and making
+    // over a third of the report unusable for navigating directly to
+    // the evidence. Cannot auto-correct an invalid sheet (there's no
+    // way to know the genuinely correct one after the fact), but logs
+    // the frequency directly and objectively on every run — the same
+    // "make it monitorable, not just inferable from prose" pattern
+    // that made R-8's usage directly verifiable via review_mode above.
+    const validSheetSet = new Set((parsed.sheetNames || []).map(s => s.toLowerCase()));
+    const badLocationCount = normalised.filter(r =>
+      r.cell === 'A1' || !r.sheet || !validSheetSet.has(String(r.sheet).toLowerCase())
+    ).length;
+    if (badLocationCount > 0) {
+      const pct = Math.round(100 * badLocationCount / normalised.length);
+      console.log(`   \u26a0\ufe0f  ${badLocationCount} of ${normalised.length} Tier 2 finding(s) (${pct}%) have an unusable location — cell defaulted to "A1", or sheet is blank/not a real sheet name in this workbook.`);
+    }
+
     return normalised;
 
   } catch (e) {
