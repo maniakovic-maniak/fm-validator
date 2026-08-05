@@ -186,7 +186,18 @@ async function familiariseModel(parsed) {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       if (attempt > 1) console.log(`   Retrying familiarisation (attempt ${attempt}/${MAX_ATTEMPTS})...`);
-      const response = await client.messages.create({
+      // FIX: found via a genuine production failure on a 37-sheet model —
+      // this non-streaming call was rejected outright by the Anthropic SDK
+      // ("Streaming is required for operations that may take longer than
+      // 10 minutes"), on BOTH retry attempts, causing the model type to
+      // fall back to "generic — unknown" and cascading into missing
+      // key-sheets and deep-accounting categories for the entire run.
+      // Converted to streaming, matching the exact pattern already
+      // established in validator-tier2.js's runBatch — that code has
+      // handled this same class of long-running request correctly all
+      // along; familiarisation had simply never been updated to match.
+      let rawText = '';
+      const stream = await client.messages.stream({
         model: 'claude-sonnet-5',
         max_tokens: familiariserMaxTokens,
         system: FAMILIARISER_PROMPT,
@@ -195,6 +206,12 @@ async function familiariseModel(parsed) {
           content: JSON.stringify(finalPayload)
         }]
       });
+      for await (const chunk of stream) {
+        if (chunk.type === 'content_block_delta' && chunk.delta && chunk.delta.type === 'text_delta') {
+          rawText += chunk.delta.text;
+        }
+      }
+      const response = await stream.finalMessage();
 
       // Sonnet 5 can split output across MULTIPLE text blocks — reading only
       // the first silently truncates the JSON mid-string (root cause of the
@@ -202,7 +219,7 @@ async function familiariseModel(parsed) {
       const textBlocks = response.content.filter(b => b.type === 'text');
       if (textBlocks.length === 0) throw new Error('No text block in familiarisation response');
       if (textBlocks.length > 1) console.log(`   (response arrived in ${textBlocks.length} text blocks — concatenated)`);
-      const fullText = textBlocks.map(b => b.text).join('');
+      const fullText = rawText;
       if (response.stop_reason === 'max_tokens') console.error('   \u26a0\ufe0f  Familiarisation response hit max_tokens — output truncated');
       let summary;
       try {
