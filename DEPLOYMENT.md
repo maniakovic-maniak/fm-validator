@@ -224,6 +224,15 @@ rm package-lock.json
 npm install
 ```
 
+### A Finding or Report Looks Wrong (Not an Operational Failure)
+The sections above cover the app not running. If the app runs fine but a
+specific finding, count, or report field looks incorrect, that's a
+different kind of problem — see **[TRIAGE.md](TRIAGE.md)** before
+changing any code. The same visible symptom can originate in the check
+logic, the Tier 2 prompt guidance, the data Tier 2 was given, the
+report-builder's presentation logic, or a stale deployment — each needs
+a different fix, and guessing wrong wastes a cycle.
+
 ## Production Deployment
 
 ### Using PM2 (Recommended)

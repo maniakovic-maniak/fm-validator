@@ -82,3 +82,5 @@ test-*.js / test_*.py      per-module test suites
 ## Maintaining this project
 
 A `post-commit` hook (`.githooks/post-commit`, opt in with `git config core.hooksPath .githooks`) runs a lightweight Claude-based code review on whatever a commit just changed, and lists any genuine bugs found — it never fixes anything automatically. Run `node scripts/bug-scan-agent.js --all` for a full-repo pass instead of the routine per-commit one.
+
+When a finding, a report, or a run looks wrong and it isn't immediately obvious why, see **[TRIAGE.md](TRIAGE.md)** before fixing anything — the same visible symptom can come from a check-logic bug, a `skill.md` gap, an incomplete payload, a report-builder bug, or a deployment issue, and each needs a genuinely different fix.

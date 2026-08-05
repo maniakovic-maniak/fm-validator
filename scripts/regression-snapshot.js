@@ -159,6 +159,7 @@ async function main() {
   }
   console.log('\n   This does not mean something is broken — it means something changed and a human should look at it.');
   console.log('   If the change is genuine and intended, review it, then run: node scripts/regression-snapshot.js --update-baseline');
+  console.log('   If it is NOT obviously intended (you did not add a file or tune a check), see TRIAGE.md before assuming a cause — trace it back one hop before fixing anything.');
   process.exitCode = 1;
 }
 
