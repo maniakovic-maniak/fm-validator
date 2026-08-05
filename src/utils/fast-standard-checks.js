@@ -94,24 +94,67 @@ function checkMergedCells(workbook) {
 // Distinct from the existing no_hidden_sheets check (hidden SHEETS only)
 // — this covers hidden rows/columns within an otherwise-visible sheet,
 // which the existing check doesn't look at.
+//
+// FIX (I-17): found via an independent review confirming that not
+// every hidden row/column represents the same kind of concern.
+// Confirmed directly on a real model: VALUATION & RETURNS' hidden
+// rows 66-73 contain a live downside/base/upside scenario-sensitivity
+// calculation feeding real valuation outputs — genuinely concerning,
+// since a reviewer would never see this logic exists at all. URWLD
+// COMPANY INPUTS' hidden columns 8-17, by contrast, are purely
+// provenance/metadata headers ("Business", "Section", "Source
+// workbook", "Notes", "Consolidated ID") with zero formula cells —
+// a common, benign presentation choice to keep a visible sheet clean
+// while preserving audit-trail data. Classifies each hidden row/
+// column by whether it contains at least one formula cell, so
+// downstream reporting can distinguish these two genuinely different
+// situations rather than treating every hidden row/column as an
+// equally-concerning finding.
+function hiddenRowHasFormula(ws, rowNum) {
+  let found = false;
+  const row = ws.getRow(rowNum);
+  row.eachCell({ includeEmpty: false }, cell => { if (cell.formula) found = true; });
+  return found;
+}
+function hiddenColHasFormula(ws, colNum) {
+  let found = false;
+  ws.eachRow({ includeEmpty: false }, row => {
+    if (found) return;
+    const cell = row.getCell(colNum);
+    if (cell.formula) found = true;
+  });
+  return found;
+}
+
 function checkHiddenRowsColumns(workbook) {
   const findings = [];
   workbook.eachSheet(ws => {
     const hiddenRows = [];
+    const hiddenRowsWithLogic = [];
     ws.eachRow({ includeEmpty: true }, (row, rowNum) => {
-      if (row.hidden) hiddenRows.push(rowNum);
+      if (!row.hidden) return;
+      hiddenRows.push(rowNum);
+      if (hiddenRowHasFormula(ws, rowNum)) hiddenRowsWithLogic.push(rowNum);
     });
     const hiddenCols = [];
+    const hiddenColsWithLogic = [];
     const colCount = ws.columnCount || 0;
     for (let i = 1; i <= colCount; i++) {
       const col = ws.getColumn(i);
-      if (col && col.hidden) hiddenCols.push(i);
+      if (!col || !col.hidden) continue;
+      hiddenCols.push(i);
+      if (hiddenColHasFormula(ws, i)) hiddenColsWithLogic.push(i);
     }
     if (hiddenRows.length > 0 || hiddenCols.length > 0) {
       findings.push({
         sheet: ws.name,
         hiddenRowCount: hiddenRows.length, hiddenRows: hiddenRows.slice(0, 10),
         hiddenColCount: hiddenCols.length, hiddenCols: hiddenCols.slice(0, 10),
+        // The genuinely concerning subset — hidden rows/columns that
+        // contain live formula logic, not just metadata/presentation
+        // content, capped the same way as the full lists above.
+        hiddenRowsWithLogicCount: hiddenRowsWithLogic.length, hiddenRowsWithLogic: hiddenRowsWithLogic.slice(0, 10),
+        hiddenColsWithLogicCount: hiddenColsWithLogic.length, hiddenColsWithLogic: hiddenColsWithLogic.slice(0, 10),
       });
     }
   });
