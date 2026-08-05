@@ -82,6 +82,19 @@ Common contradictions to check:
 When a contradiction is found, report both sides and their
 financial impact. Do not flag only one side.
 
+FIX (I-14): before flagging a "Total"/summary row's aggregation
+formula as broken because it uses MIN or MAX instead of SUM, check
+each column's own header first — confirmed directly via an independent
+review that this is a genuinely correct, common pattern, not a defect:
+a schedule row can legitimately use MIN(start dates) and MAX(end
+dates) to compute the overall bounds of a date range spanning several
+sub-items, while a separate monetary column on the exact same row
+correctly uses SUM for its total. Different columns can hold
+genuinely different kinds of data (dates versus amounts) that require
+different, individually-correct aggregation functions — a MIN/MAX
+formula is not evidence of a broken SUM unless the column it sits in
+is itself a monetary/quantity column, confirmed from its own header.
+
 ---
 
 ## Step 5: Evidence gathering
@@ -101,6 +114,25 @@ Example of a correctly evidenced finding:
 - Evidence: Cons sheet row 42, columns D through P, Q3 2027 onwards
 - Impact: Total revenue understated by approximately $4.2M in year 3
 - Recommendation: Review Cons sheet revenue aggregation formula in row 42
+
+FIX (I-15): before concluding a metric is genuinely ABSENT from the
+model (rather than merely not visible in the specific rows you were
+given), consider that the same economic concept is frequently present
+under a different label, in a narrative/text formula rather than a
+labeled numeric cell, or on a sheet outside your current row subset —
+confirmed directly via an independent review: a check concluded a
+revenue-per-unit metric was "absent" when the model genuinely computed
+it, just as a ratio formula on a different sheet with a different
+label than the check was searching for, and separately as part of a
+narrative "Operating interpretation" text cell rather than a single
+labeled numeric cell. An "absent" finding is a claim about the whole
+model, not just the rows you happened to see — when your evidence is
+limited to a subset of rows/sheets, frame the finding as "not visible
+in the reviewed subset" (manual_only/uncertain, with the specific
+sheets you did check named) rather than a confident "absent", unless
+you have positive evidence (e.g. an explicit statement elsewhere in
+the payload that no other sheet computes this) that it's genuinely
+missing model-wide.
 
 ---
 
@@ -273,23 +305,41 @@ Business assumptions must not be hard-coded in formula areas.
 
 Check `workbookStats.totalHardcodes` in the payload — a workbook-wide
 count of formula cells containing hardcoded numeric literals, computed
-directly from formula text (Tier 0). This is a real, aggregate signal,
-not an estimate — use it.
+directly from formula text (Tier 0). This is a real, aggregate signal
+of the model's overall hardcoding hygiene — use it to calibrate your
+overall confidence and framing, not as evidence for a standalone
+finding in its own right.
 
 - If `totalHardcodes` is 0 or very low relative to `totalFormulaCells`:
   pass, confidence 70-85. State the ratio as evidence.
 - If `totalHardcodes` is high relative to `totalFormulaCells` (a rough
   guide, not a hard threshold — judge against the model's own scale):
-  fail or flag, confidence 70-85, citing the aggregate count as evidence
-  of widespread hardcoding. State the count.
-- You still cannot identify WHICH specific cells are hardcoded, or
-  whether each individual instance is a genuine assumption embedded in
-  a formula (a real issue) versus a legitimate fixed constant (a unit
-  conversion, a statutory rate — not an issue). Do not name a specific
-  cell as the finding location unless you can see it directly in the
-  row data provided; cite the sheet/cell you can see plus the aggregate
-  count as corroborating context, or use "A1" with the aggregate
-  reasoning in `condition` if no single cell is visible.
+  this tells you widespread hardcoding is *plausible* and worth
+  actively looking for elsewhere in the rows you're reviewing — it is
+  NOT itself a citable finding. A single aggregate number, with no
+  cell you can actually point to, gives a reader nothing to act on and
+  cannot be verified or remediated as stated.
+- FIX (I-19): only raise a no_hardcodes finding when you can name a
+  specific cell you can see directly in the row data provided,
+  containing a genuine embedded assumption (a rate, a price, a
+  quantity) rather than a legitimate fixed constant (a unit
+  conversion, a statutory rate, a structural 0/1 flag — these are not
+  issues even when hardcoded). Never use "A1" or any other placeholder
+  location to carry the aggregate count as if it were a located
+  finding — this project's own report generation has specifically
+  worked to eliminate unusable "A1" locations elsewhere, and doing it
+  deliberately here undermines that. The aggregate ratio can still
+  appear in your `condition` text as supporting context for a finding
+  that DOES have a real, visible cell — just never as the sole basis
+  for one.
+- If you cannot see any specific hardcoded cell in the data provided
+  (even though `totalHardcodes` is high): fall back to manual_only,
+  uncertain, confidence 30-40, stating the aggregate ratio and that
+  cell-level formula-text inspection (or the Formula Deep Dive) would
+  be required to name specific instances. This is the same honest
+  "I can see a signal but not its location" framing used elsewhere in
+  this methodology — it is a more useful and more accurate result than
+  a confident-sounding but unlocatable "finding".
 - If `workbookStats` is empty or `totalHardcodes` is absent: fall back
   to manual_only, uncertain, confidence 30, stating formula text
   inspection is required — the same as before.
@@ -518,8 +568,17 @@ Check Dashboard or cover sheet for model purpose documentation.
 Check Dashboard for core KPIs: revenue, EBITDA, cash, leverage,
 coverage, IRR, NPV, scenario comparisons.
 - If core metrics are visible → pass on presence
-- Pasted values vs live links cannot be verified from row data → note as uncertain
-  on link integrity
+- FIX (I-18): whether a specific KPI cell is a pasted value versus a
+  live formula link is NOT categorically unavailable — Tier 0 already
+  scans every formula cell in the workbook directly and knows this for
+  the entire model (see `workbookStats.totalHardcodes` /
+  `totalFormulaCells` for the aggregate picture), and where
+  `_formulaSamples` is present on a specific KPI row, you can inspect
+  the actual formula text directly rather than only the displayed
+  value. Only fall back to uncertain on link integrity for a specific
+  KPI cell if you genuinely cannot see its formula text (no
+  `_formulaSamples` for that row and no aggregate signal worth citing)
+  — don't default to uncertain as a blanket statement about every KPI.
 
 ### test: cover_sheet_complete
 Check sheet names for cover sheet, README, Introduction, or About tab.
@@ -547,11 +606,20 @@ Check AFS balance sheet extract for deferred tax line items.
 - If deferred tax is zero with no disclosure → uncertain
 
 ### test: no_calcs_on_outputs
-Formula origins cannot be verified from row data alone.
-This is a manual_only test.
-Return uncertain with confidence 30.
-State: "Whether financial statement sheets contain original calculations
-or only reference links requires formula text inspection."
+FIX (I-18): whether a financial-statement cell contains an original
+calculation versus only a reference link is NOT categorically
+unavailable from row data alone — Tier 0 already scans every formula
+cell directly and knows this for the entire workbook. Where
+`_formulaSamples` is present for the specific output rows you're
+reviewing, inspect the formula text directly: a pure single-cell
+reference (`='Cons'!D42`) is a reference link, while a formula
+combining multiple inputs or applying an operation is an original
+calculation performed on that sheet. Only fall back to manual_only,
+uncertain, confidence 30 if you genuinely cannot see formula text for
+the relevant rows (no `_formulaSamples` present), stating "Whether
+this specific output row contains an original calculation or only a
+reference link requires formula text access, which was not available
+for these rows."
 
 ### test: reverse_stress_test_exists
 Sourced from a 2026-07-25 gap-analysis review, not the ICAEW/FAST/PwC
