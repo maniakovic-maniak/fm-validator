@@ -14,6 +14,97 @@
 //      deleted range), independent of whether anything tries to use it.
 //      Catches the problem before a formula ever hits #REF!/#NAME?.
 
+const fs = require('fs');
+const path = require('path');
+
+// FIX: found via investigating a real, confirmed false positive from
+// an independent review — the reported "83 defined names" undercounted
+// the workbook's true population of 99. Traced precisely: 12 genuine
+// names use a range syntax ExcelJS's own defined-name parser silently
+// drops entirely rather than exposing malformed — a dynamic range
+// using INDEX() as its own upper bound (e.g.
+// "Underwriting!$L$75:INDEX(Underwriting!$L$75:$EN$75,1,Timing_Reversion_Month+1)"),
+// a whole-row reference with no column letters at all
+// ("Underwriting!$80:$84"), or a named constant holding a literal text
+// string rather than any cell reference ("Units_Ind" = "Units"). None
+// of these are malformed — they're valid Excel constructs ExcelJS's
+// parser doesn't support. Re-parses xl/workbook.xml directly (a
+// lightweight, dependency-free zip+regex extraction, not a full XML
+// parser) to recover exactly the names ExcelJS silently dropped.
+function extractRawDefinedNames(filePath) {
+  try {
+    // xlsx/xlsm files are zip archives; xl/workbook.xml is stored
+    // uncompressed-enough to regex-scan directly in the common case,
+    // but to stay dependency-free and robust, use the same yauzl-free
+    // approach: read the .xlsx as a zip via Node's zlib is non-trivial
+    // without a library already in this project's dependencies, so
+    // this uses a minimal, self-contained zip central-directory walk
+    // limited to extracting exactly one entry (xl/workbook.xml).
+    const buf = fs.readFileSync(filePath);
+    const xml = extractZipEntryText(buf, 'xl/workbook.xml');
+    if (!xml) return [];
+
+    const names = [];
+    const dnBlockRe = /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g;
+    let m;
+    while ((m = dnBlockRe.exec(xml))) {
+      const attrs = m[1];
+      const nameMatch = /\bname="([^"]*)"/.exec(attrs);
+      if (!nameMatch) continue;
+      const name = decodeXmlEntities(nameMatch[1]);
+      const text = decodeXmlEntities(m[2].trim());
+      names.push({ name, text });
+    }
+    return names;
+  } catch (_) {
+    return []; // best-effort supplement — never let this break the audit itself
+  }
+}
+
+function decodeXmlEntities(s) {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+// Minimal ZIP central-directory walk to extract one named entry's
+// text content, without pulling in a new dependency for a single
+// lightweight lookup. xlsx/xlsm defined-names XML is small (a few KB
+// at most even in a large workbook), so this is cheap.
+function extractZipEntryText(buf, entryName) {
+  const zlib = require('zlib');
+  // Find End of Central Directory record to locate the central directory.
+  let eocdOffset = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocdOffset = i; break; }
+  }
+  if (eocdOffset === -1) return null;
+  const cdOffset = buf.readUInt32LE(eocdOffset + 16);
+  const cdEntryCount = buf.readUInt16LE(eocdOffset + 10);
+
+  let offset = cdOffset;
+  for (let i = 0; i < cdEntryCount; i++) {
+    if (buf.readUInt32LE(offset) !== 0x02014b50) break; // not a central-directory entry
+    const compMethod = buf.readUInt16LE(offset + 10);
+    const compSize = buf.readUInt32LE(offset + 20);
+    const nameLen = buf.readUInt16LE(offset + 28);
+    const extraLen = buf.readUInt16LE(offset + 30);
+    const commentLen = buf.readUInt16LE(offset + 32);
+    const localHeaderOffset = buf.readUInt32LE(offset + 42);
+    const name = buf.toString('utf8', offset + 46, offset + 46 + nameLen);
+
+    if (name === entryName) {
+      // Read the local file header to find where actual data starts.
+      const lfhNameLen = buf.readUInt16LE(localHeaderOffset + 26);
+      const lfhExtraLen = buf.readUInt16LE(localHeaderOffset + 28);
+      const dataStart = localHeaderOffset + 30 + lfhNameLen + lfhExtraLen;
+      const compData = buf.subarray(dataStart, dataStart + compSize);
+      const raw = compMethod === 0 ? compData : zlib.inflateRawSync(compData);
+      return raw.toString('utf8');
+    }
+    offset += 46 + nameLen + extraLen + commentLen;
+  }
+  return null;
+}
+
 const POOR_NAME_RE = /^(range|var|data|temp|tmp|x|y|z|val|value|name|item|list|table)\d*$/i;
 const SYSTEM_NAME_RE = /^_xlnm\./i;   // Excel-managed (Print_Area etc.) — not a user choice
 
@@ -49,8 +140,19 @@ function rangeToSheets(ranges) {
   return [...sheets];
 }
 
+function isNamedConstant(ranges) {
+  if (!ranges || ranges.length !== 1) return false;
+  const text = ranges[0];
+  // A genuine range/cell reference always contains "!" (a sheet
+  // qualifier) or at minimum a "$" (an absolute reference) — a bare
+  // word or short string with neither is a named constant holding a
+  // literal value, not a range that failed to parse.
+  return typeof text === 'string' && !text.includes('!') && !text.includes('$');
+}
+
 function isBrokenRange(workbook, ranges) {
   if (!ranges || ranges.length === 0) return true;   // no target at all
+  if (isNamedConstant(ranges)) return false;          // holds a literal value, not meant to resolve to a range
   for (const r of ranges) {
     const m = /^'?([^'!]+)'?!(.+)$/.exec(r);
     if (!m) return true;                              // unparseable reference
@@ -61,10 +163,25 @@ function isBrokenRange(workbook, ranges) {
   return false;
 }
 
-function detectNamedRangeIssues(workbook) {
+function detectNamedRangeIssues(workbook, filePath) {
   let definedNames;
   try { definedNames = workbook.definedNames.model || []; }
   catch (_) { return emptyResult('Workbook has no accessible defined-names model.'); }
+
+  // FIX: supplement with names ExcelJS's own parser silently dropped
+  // (dynamic-range/whole-row/named-constant syntax it doesn't support)
+  // — confirmed directly this closes a real 12-name undercount. Only
+  // attempted when a file path is available; deduplicates by name so
+  // one ExcelJS already exposed correctly isn't double-counted.
+  if (filePath) {
+    const existingNames = new Set(definedNames.map(dn => dn.name));
+    const rawNames = extractRawDefinedNames(filePath);
+    for (const { name, text } of rawNames) {
+      if (existingNames.has(name) || !name) continue;
+      existingNames.add(name);
+      definedNames = definedNames.concat([{ name, ranges: [text], _rawSupplement: true }]);
+    }
+  }
 
   if (definedNames.length === 0) {
     return emptyResult('No named ranges are defined in this model.');
