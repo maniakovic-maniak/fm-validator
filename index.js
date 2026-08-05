@@ -68,6 +68,8 @@ const { checkMismatchedBasisComparison } = require('./src/utils/mismatched-basis
 const { checkReleaseGateCoverage } = require('./src/utils/release-gate-coverage-check');
 const { checkNonexistentSheetReferences } = require('./src/utils/nonexistent-sheet-reference-check');
 const { checkFormulaCountReconciliation } = require('./src/utils/formula-count-reconciliation-check');
+const { consolidateTier2Duplicates } = require('./src/utils/tier2-duplicate-consolidation');
+const { computeFindingBreakdown, formatBreakdownLine } = require('./src/utils/finding-priority-breakdown');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier');
@@ -208,7 +210,7 @@ async function run() {
   const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Error scan failed:', e.message); return []; } })();
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
   const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
-  const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
+  const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw, parsed._filePath); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
   // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
   // Deep Dive) but genuinely async since it spawns a Python subprocess, so
   // it needs its own await rather than fitting the synchronous IIFE
@@ -275,8 +277,23 @@ async function run() {
     namedRangeAudit,
     vbaReview
   });
-  const t2Pass     = t2Results.filter(r => r.status === 'pass').length;
-  const t2Failures = t2Results.filter(r => r.status !== 'pass');
+  const t2Pass         = t2Results.filter(r => r.status === 'pass').length;
+  const t2FailuresRaw  = t2Results.filter(r => r.status !== 'pass');
+  // FIX (I-11): found via an independent review confirming at least 3
+  // Tier 2 findings explicitly self-identify as duplicates of another
+  // finding (Tier 2's own text literally begins "Same as T2-XXX"),
+  // inflating the headline count even though Tier 2 itself already
+  // recognized them as the same root cause. Consolidates these before
+  // they reach allFlagged, so every downstream count (console,
+  // report headline, Top 5 Blockers) reflects the true, de-duplicated
+  // total.
+  const { consolidated: t2Failures, removed: t2DuplicatesRemoved } = (() => {
+    try { return consolidateTier2Duplicates(t2FailuresRaw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Tier 2 duplicate consolidation failed:', e.message); return { consolidated: t2FailuresRaw, removed: [] }; }
+  })();
+  if (t2DuplicatesRemoved.length > 0) {
+    console.log(`   \u2139\ufe0f  ${t2DuplicatesRemoved.length} Tier 2 finding(s) consolidated — self-identified by Tier 2 itself as \"Same as\" another finding, so counted once, not separately`);
+  }
 
   console.log(`   Tier 1: ${t1Pass} pass, ${t1Failures.length} fail`);
   console.log(`   Tier 2: ${t2Pass} pass, ${t2Failures.length} issues`);
@@ -1726,21 +1743,53 @@ async function run() {
   const hiddenCheck = (() => { try { return checkHiddenRowsColumns(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Hidden rows/columns check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   if (hiddenCheck.applicable && hiddenCheck.findings.length > 0) {
-    const sheetSummary = hiddenCheck.findings.slice(0, 8).map(f => `${f.sheet} (${f.hiddenRowCount} row(s), ${f.hiddenColCount} col(s))`).join(', ');
-    allFlagged.push({
-      id: 'T0-HIDDEN-001',
-      label: `${hiddenCheck.findings.length} sheet(s) contain hidden rows or columns`,
-      severity: 'medium', status: 'fail',
-      sheet: '', cell: 'A1', category: 'Structure',
-      condition: `Hidden rows and/or columns found on: ${sheetSummary}${hiddenCheck.findings.length > 8 ? ' and others' : ''}. This is distinct from the separate check for entirely hidden sheets — these are hidden ranges within otherwise-visible sheets. The FAST Standard names this explicitly (FAST 2.01-08): hidden ranges can conceal stale, overridden, or manipulated values from a reviewer who is only looking at what's visible.`,
-      reason: `Hidden rows/columns found on ${hiddenCheck.findings.length} sheet(s)`,
-      corrective_action: 'Unhide and review the contents of each hidden range to confirm nothing material is being concealed from a normal review.',
-      workstream: 'Structure', category: 'Structure', issue_type: 'Hidden rows or columns',
-      model_risk: 'A hidden row or column is invisible during a normal visual review, and any manual override or stale value sitting inside one would not be caught without deliberately unhiding it.',
-      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
-      root_cause: 'Hidden rows or columns present', escalation_flag: false,
-      urgency: 'Before next reliance', confidence: 100
-    });
+    // FIX (I-17): found via an independent review confirming these are
+    // genuinely different situations, not one undifferentiated defect
+    // class — confirmed directly on a real model: hidden content
+    // containing live formula logic (a scenario-sensitivity
+    // calculation feeding real valuation outputs) versus hidden
+    // content that's purely provenance/metadata columns (Business,
+    // Section, Source workbook, Notes) with zero formula cells. Split
+    // into two findings by severity rather than blending both into
+    // one, matching the established high/low confidence-tiering
+    // pattern already used by G1 below.
+    const withLogic = hiddenCheck.findings.filter(f => (f.hiddenRowsWithLogicCount || 0) > 0 || (f.hiddenColsWithLogicCount || 0) > 0);
+    const metadataOnly = hiddenCheck.findings.filter(f => (f.hiddenRowsWithLogicCount || 0) === 0 && (f.hiddenColsWithLogicCount || 0) === 0);
+
+    if (withLogic.length > 0) {
+      const sheetSummary = withLogic.slice(0, 8).map(f => `${f.sheet} (${f.hiddenRowsWithLogicCount} row(s), ${f.hiddenColsWithLogicCount} col(s) with live formula logic)`).join(', ');
+      allFlagged.push({
+        id: 'T0-HIDDEN-001',
+        label: `${withLogic.length} sheet(s) contain hidden rows or columns with live formula logic`,
+        severity: 'high', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: `Hidden rows and/or columns containing at least one formula cell found on: ${sheetSummary}${withLogic.length > 8 ? ' and others' : ''}. This is distinct from the separate check for entirely hidden sheets — these are hidden ranges within otherwise-visible sheets, and unlike a purely presentational hidden range, these specifically contain live calculation logic a normal review would never see. The FAST Standard names this explicitly (FAST 2.01-08): hidden ranges can conceal stale, overridden, or manipulated values from a reviewer who is only looking at what's visible.`,
+        reason: `Hidden rows/columns containing live formula logic found on ${withLogic.length} sheet(s)`,
+        corrective_action: 'Unhide and review the contents of each hidden range to confirm the calculation logic inside it is genuinely intentional and correctly reflected in any downstream, visible output that depends on it.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Hidden rows or columns with live formula logic',
+        model_risk: 'A hidden row or column containing live formula logic is invisible during a normal visual review, and any manual override, stale value, or calculation error sitting inside one would not be caught without deliberately unhiding it.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+        root_cause: 'Hidden rows or columns containing live formula logic present', escalation_flag: false,
+        urgency: 'Before next reliance', confidence: 100
+      });
+    }
+    if (metadataOnly.length > 0) {
+      const sheetSummary = metadataOnly.slice(0, 8).map(f => `${f.sheet} (${f.hiddenRowCount} row(s), ${f.hiddenColCount} col(s))`).join(', ');
+      allFlagged.push({
+        id: 'T0-HIDDEN-002',
+        label: `${metadataOnly.length} sheet(s) contain hidden rows or columns with no formula content (likely presentation/provenance metadata)`,
+        severity: 'low', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Structure',
+        condition: `Hidden rows and/or columns with no formula cells at all found on: ${sheetSummary}${metadataOnly.length > 8 ? ' and others' : ''}. Contains no live calculation logic — consistent with intentionally-hidden presentation or supporting-register content (e.g. provenance/documentation columns) rather than concealed calculations, but still worth a quick confirmation.`,
+        reason: `Hidden rows/columns with no formula content found on ${metadataOnly.length} sheet(s)`,
+        corrective_action: 'Spot-confirm this hidden content is genuinely presentation/metadata only, not a hardcoded value that should be a live formula.',
+        workstream: 'Structure', category: 'Structure', issue_type: 'Hidden rows or columns (metadata only)',
+        model_risk: 'Lower risk than hidden live logic, but a hardcoded value sitting in a hidden, metadata-style range would still not be caught without deliberately unhiding it.',
+        key_output_impact: 'No', method: 'automated', needs_retest: false,
+        root_cause: 'Hidden rows or columns present, containing no formula cells', escalation_flag: false,
+        urgency: 'Informational', confidence: 100
+      });
+    }
   }
 
   // G1 — hardcoded check/reconciliation cells: a false-assurance risk
@@ -1758,13 +1807,24 @@ async function run() {
     if (highConf.length > 0) {
       const sample = highConf.slice(0, 8).map(f => `${f.sheet}!${f.cell} ("${f.label}" = ${JSON.stringify(f.value)})`).join(', ');
       const lowNote = lowConf.length > 0 ? ` A further ${lowConf.length} lower-confidence candidate(s) were also found but are more likely to be column headers or period labels than genuine check results — not included above, worth a manual glance if time allows.` : '';
+      // FIX: found via investigating an apparent deployment
+      // discrepancy that turned out to be a misreading of this exact
+      // ambiguity — a report headline read "3 check/reconciliation
+      // cell(s)" while 39 more genuine, lower-confidence findings
+      // existed only in a footnote one field over, easy to miss even
+      // when looking directly at the underlying logic. The headline
+      // now states the true total up front, with the confidence split
+      // as an explicit parenthetical, so a reader never has to open a
+      // second field to learn the full scope.
+      const totalCount = highConf.length + lowConf.length;
+      const breakdown = lowConf.length > 0 ? ` (${highConf.length} high-confidence, ${lowConf.length} lower-confidence)` : '';
       allFlagged.push({
         id: 'T0-HARDCHECK-001',
-        label: `${highConf.length} check/reconciliation cell(s) appear hardcoded rather than formula-driven`,
+        label: `${totalCount} check/reconciliation cell(s) appear hardcoded rather than formula-driven${breakdown}`,
         severity: 'high', status: 'fail',
         sheet: '', cell: 'A1', category: 'Structure',
-        condition: `${highConf.length} cell(s) in a check- or reconciliation-labeled row show a static, typed-in pass/fail-style value with no formula behind them: ${sample}.${lowNote} A hardcoded check result will keep showing the same outcome forever, regardless of what the underlying numbers actually do — the model could stop passing this test and the cell would never reflect it.`,
-        reason: `${highConf.length} check cell(s) appear to be hardcoded rather than live`,
+        condition: `${highConf.length} of ${totalCount} cell(s) in a check- or reconciliation-labeled row show a static, typed-in pass/fail-style value with no formula behind them, with high confidence: ${sample}.${lowNote} A hardcoded check result will keep showing the same outcome forever, regardless of what the underlying numbers actually do — the model could stop passing this test and the cell would never reflect it.`,
+        reason: `${totalCount} check cell(s) appear to be hardcoded rather than live${breakdown}`,
         corrective_action: 'Replace each flagged cell with a formula that genuinely compares the observed result against the expected result, rather than a static status.',
         workstream: 'Structure', category: 'Structure', issue_type: 'Hardcoded check cell',
         model_risk: 'A check cell that cannot fail gives false assurance — a reviewer sees "PASS" and trusts it, without realising the cell never actually recalculates.',
@@ -2515,7 +2575,7 @@ async function run() {
     }
   }
 
-  console.log(`   ℹ️  ${allFlagged.length} items flagged`);
+  console.log(`   ℹ️  ${formatBreakdownLine(computeFindingBreakdown(allFlagged))}`);
   // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
   const ruleResults = [...t1Results, ...t2Results].map(r => ({
     id: r.id, status: r.status || 'uncertain',
