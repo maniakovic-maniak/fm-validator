@@ -135,6 +135,20 @@ async function classifyModel(parsed) {
 const DOMAIN_ALIASES = {
   property: ['property', 'real estate', 'development', 'hospitality', 'entertainment venue', 'venue development', 'mixed-use', 'mixed use', 'corporate'],
   mining: ['mining', 'coal', 'resources', 'minerals'],
+  // FIX: found via a direct review of a new skill-infrastructure.md
+  // draft — confirmed against the real Financial_Model_for_Railways
+  // model that its content (sheet map, dates, structure toggle, cash-
+  // accumulation pattern) is genuinely accurate, but the file as
+  // uploaded had no matching alias at all, so it would never actually
+  // be loaded — Familiarisation's own wording ("railway", "rail",
+  // "rail transport") is LLM-generated and not guaranteed consistent
+  // run to run, so this maps the plausible variants to the one
+  // canonical name the file is actually named for. Deliberately scoped
+  // to railway-specific terms rather than generic "transport" or
+  // "transportation", since those could also describe an airline,
+  // shipping, or trucking model this file's freight/passenger/
+  // infrastructure-entity-split content does not cover.
+  infrastructure: ['infrastructure', 'railway', 'rail', 'rail transport', 'rail infrastructure'],
   // Add further canonical domains here as they're identified. 'corporate'
   // is deliberately mapped to 'property' rather than kept as its own
   // canonical domain — confirmed on real evidence that the two labels
