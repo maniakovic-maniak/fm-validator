@@ -176,6 +176,30 @@ const DASHBOARD_NAME_RE = /dashboard/i;
 // references entirely rather than requiring a name match too.
 const SOURCE_COL_RE = /\bsource\s*(sheet|cell|range)\b/i;
 const TARGET_COL_RE = /\btarget\s*(sheet|cell|range)\b/i;
+// FIX (I-16): matches self-labeled audit/tracking statistics that
+// occasionally sit within an otherwise genuine input sheet — confirmed
+// directly: URWLD COMPANY INPUTS row 3 has "VISIBLE LINES" 716, "BEND
+// RECORDS" 877, "ROWS COLLAPSED" 180, "QC PASS" — audit-tracking
+// numbers about the sheet itself, not a genuine assumption a modeler
+// would set or a formula would reference.
+const META_STATISTIC_LABEL_RE = /\b(visible lines|bend records|rows collapsed|qc pass|used cells|record count|line count)\b/i;
+// FIX (I-16): matches a timing/milestone marker — confirmed directly:
+// Summary!E11 ("Analysis Start"=1) and E12 ("Construction Start"=1)
+// are period-index markers (which period a milestone occurs in), not
+// a genuine numeric assumption a modeler would set like a rate or
+// price. Scoped narrowly to the label pattern; the value itself must
+// also be a small, low integer (checked separately below) so this
+// doesn't exclude a genuine low-value assumption that happens to
+// share a timing word incidentally.
+const TIMING_MILESTONE_LABEL_RE = /\b(start|begin|commence|stabilization|stabilisation)\b/i;
+const TIMING_MILESTONE_MAX_VALUE = 24; // a period index rarely exceeds this for a typical model's timeline
+// FIX (I-16): matches an all-caps, multi-word section-header-style
+// label — confirmed directly: Summary!A19 (value 0) sits immediately
+// beside B19's title "KEY ASSUMPTIONS & RETURN METRICS", the same
+// pattern repeating at A37/B37 ("PROPERTY-LEVEL CASH FLOW"). A numeric
+// 0 sitting directly beside an all-caps, multi-word section header is
+// a formatting/outline helper cell, not a genuine assumption.
+const ALL_CAPS_HEADER_LABEL_RE = /^[A-Z0-9 &\-\/]{6,}$/;
 
 function isTraceabilityMappingSheet(ws) {
   let hasSource = false, hasTarget = false;
@@ -237,6 +261,17 @@ function detectRedundantInputs(workbook) {
   const mappingSheets = new Set();
   workbook.eachSheet(ws => { if (isTraceabilityMappingSheet(ws)) mappingSheets.add(ws.name.trim()); });
 
+  // FIX (I-16): a mapping sheet must also be excluded from inputSheets
+  // itself, not just from contributing references — confirmed directly
+  // that DATA MAP matches BOTH isTraceabilityMappingSheet AND
+  // sheetHasInputTitleText (its own text happens to mention "input"),
+  // so its cross-reference-tracking values (recording OTHER cells'
+  // source/target locations, not genuine assumptions) were being
+  // walked and flagged as candidate assumptions in their own right.
+  for (let i = inputSheets.length - 1; i >= 0; i--) {
+    if (mappingSheets.has(inputSheets[i].trim())) inputSheets.splice(i, 1);
+  }
+
   workbook.eachSheet(ws => {
     if (mappingSheets.has(ws.name.trim())) return;
     const ownIsInput = inputSet.has(ws.name.trim());
@@ -262,15 +297,28 @@ function detectRedundantInputs(workbook) {
         const v = cell.value;
         if (typeof v !== 'number') return;              // constants only; labels/dates excluded
         if (v instanceof Date) return;
+        // Nearby label — see cell-label.js for the search order (left,
+        // then right) and why both directions matter.
+        const label = findNearbyLabel(row, colNum).slice(0, 60);
+        // FIX (I-16): confirmed directly against the real model —
+        // some "input" sheets carry a self-labeled meta-statistics
+        // header block (e.g. URWLD COMPANY INPUTS row 3: "VISIBLE
+        // LINES" 716, "BEND RECORDS" 877, "ROWS COLLAPSED" 180, "QC
+        // PASS") that are audit-tracking numbers about the sheet
+        // itself, not genuine assumptions — distinct from the real
+        // inputs starting several rows later. Excluded from both the
+        // denominator and the flagged list, since counting these as
+        // candidate assumptions at all (even as "referenced") would
+        // still distort the reported population.
+        if (META_STATISTIC_LABEL_RE.test(label)) return;
+        if (TIMING_MILESTONE_LABEL_RE.test(label) && Number.isInteger(v) && v >= 0 && v <= TIMING_MILESTONE_MAX_VALUE) return;
+        if (v === 0 && ALL_CAPS_HEADER_LABEL_RE.test(label.trim())) return;
         totalInputs++;
         if (!refs.has(sheetName, colNum, rowNum)) {
           // No cap — every redundant cell is reported. This tab's entire
           // purpose is "every listed input must be linked, removed or
           // relabelled"; silently dropping some past an arbitrary limit
           // would leave real findings invisible to the client.
-          // Nearby label — see cell-label.js for the search order (left,
-          // then right) and why both directions matter.
-          const label = findNearbyLabel(row, colNum).slice(0, 60);
           redundant.push({ sheet: sheetName, cell: cell.address, value: v, label, _col: colNum, _row: rowNum });
         }
       });
@@ -351,4 +399,4 @@ function detectRedundantInputs(workbook) {
   };
 }
 
-module.exports = { detectRedundantInputs };
+module.exports = { detectRedundantInputs, isTraceabilityMappingSheet, sheetHasInputTitleText };
