@@ -673,8 +673,16 @@ def build_report(data_path, output_path):
 
     # ── Review area status — soft badges, Reference Tab column ─────────────────
     status_areas=[
-        ('Formula integrity',t0.get('stats',{}).get('totalExternalLinks',0)>0 or t0.get('stats',{}).get('totalRefInFormula',0)>0,'formula errors or external links detected'),
-        ('Unique formula review',t0.get('stats',{}).get('fscoreDist',{}).get('High',0)>0,'Complex formulas found — see Formula Analysis tab for detail'),
+        ('Formula integrity',
+         t0.get('stats',{}).get('totalExternalLinks',0)>0 or t0.get('stats',{}).get('totalRefInFormula',0)>0,
+         (f"Formula errors or external links detected — {t0.get('stats',{}).get('totalExternalLinks',0)} external link(s), {t0.get('stats',{}).get('totalRefInFormula',0)} #REF! occurrence(s)"
+          if t0.get('stats',{}).get('totalExternalLinks',0)>0 or t0.get('stats',{}).get('totalRefInFormula',0)>0
+          else 'No formula errors or external links detected')),
+        ('Unique formula review',
+         t0.get('stats',{}).get('fscoreDist',{}).get('High',0)>0,
+         (f"{t0.get('stats',{}).get('fscoreDist',{}).get('High',0)} high-complexity formula(s) found — see Formula Analysis tab for detail"
+          if t0.get('stats',{}).get('fscoreDist',{}).get('High',0)>0
+          else 'No high-complexity formulas found')),
         ('Dependency flow',False,'Dependency flow assessed'),
         ('Scenario logic',False,'Scenario checks completed'),
         ('Debt / funding logic',any(f.get('category')=='Debt' and priority(f)=='P1' for f in findings),'Debt checks completed'),
