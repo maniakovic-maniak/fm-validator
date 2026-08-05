@@ -57,6 +57,52 @@ async function main() {
       result.resolvedMap['Cash Flow'] === 'DEVELOPMENT CF');
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // The real defect this fixes: confirmed directly on
+  // Financial_Model_The_Bend_13_7_2026_Audited.xlsx that Depreciation
+  // & Tax and Leases both genuinely have real content (P&L!C84
+  // "Depreciation", Balance Sheet!D21 "Accumulated depreciation",
+  // P&L!C44-C59 multiple real lease line items) but no dedicated
+  // schedule sheet — both previously came back unresolved.
+  // ══════════════════════════════════════════════════════════════════
+  {
+    const sheetNames = ['Readme', 'KEY OUTPUTS >>', 'Equity Dashboard', 'Debt Dashboard', 'Cashflow', 'P&L', 'Balance Sheet', 'Valuation', 'Inputs', 'Debt', 'GST Calculation'];
+    const result = resolveDeepAccountingSheets(sheetNames);
+    check('real defect fixed: "Depreciation & Tax" now resolves to "P&L" instead of coming back unresolved',
+      result.resolvedMap['Depreciation & Tax'] === 'P&L');
+    check('real defect fixed: "Leases" now resolves to "P&L" instead of coming back unresolved',
+      result.resolvedMap['Leases'] === 'P&L');
+    check('no other category regressed on this exact sheet list',
+      result.resolvedMap['Balance Sheet'] === 'Balance Sheet' &&
+      result.resolvedMap['Cash Flow'] === 'Cashflow' &&
+      result.resolvedMap['Debt'] === 'Debt' &&
+      result.resolvedMap['Equity'] === 'Equity Dashboard');
+    check('zero unresolved categories remain for this exact sheet list',
+      result.unresolvedCategories.length === 0);
+  }
+
+  // Confirms a genuine dedicated schedule, when one exists, still wins
+  // over the new P&L/Financial Statements fallback — the fallback must
+  // never override a more specific, correct match.
+  {
+    const sheetNames = ['P&L', 'Balance Sheet', 'Depreciation and Tax', 'Lease Schedule'];
+    const result = resolveDeepAccountingSheets(sheetNames);
+    check('a genuine dedicated "Depreciation and Tax" schedule still wins over the P&L fallback when both exist',
+      result.resolvedMap['Depreciation & Tax'] === 'Depreciation and Tax');
+    check('a genuine dedicated "Lease Schedule" still wins over the P&L fallback when both exist',
+      result.resolvedMap['Leases'] === 'Lease Schedule');
+  }
+
+  // Confirms a model with neither a dedicated schedule NOR any
+  // P&L/Financial-Statements-style sheet correctly stays unresolved —
+  // the fallback must not over-match on unrelated sheet names.
+  {
+    const sheetNames = ['Revenue Model', 'Cost Model', 'Summary Dashboard'];
+    const result = resolveDeepAccountingSheets(sheetNames);
+    check('a model with no matching sheet at all for either category correctly stays unresolved, not falsely matched',
+      result.unresolvedCategories.includes('Depreciation & Tax') && result.unresolvedCategories.includes('Leases'));
+  }
+
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));
   if (!allPass) process.exit(1);
 }

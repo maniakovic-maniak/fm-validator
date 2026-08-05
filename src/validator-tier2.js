@@ -426,8 +426,21 @@ const DEEP_ACCOUNTING_CATEGORIES = {
   'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Development CF', 'Development Cash Flow'],
   'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
   'Equity':             ['Financial Statements', 'Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors'],
-  'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T'],
-  'Leases':             ['Lease Schedule', 'Leases', 'Lease'],
+  // FIX: found via investigating a real, confirmed gap on
+  // Financial_Model_The_Bend_13_7_2026_Audited.xlsx — this model has no
+  // dedicated Depreciation/Tax or Lease schedule sheet, but genuinely
+  // contains both: confirmed directly, P&L!C84 has "Depreciation",
+  // Balance Sheet!D21 has "Accumulated depreciation", and P&L!C44-C59
+  // has multiple real lease line items ("Annual Venue Lease", "Lease
+  // deposit", "Leased equipment"). Same archetype-level pattern as the
+  // "Financial Statements" fix above — a model consolidating a
+  // category's data into the P&L/income-statement sheet rather than a
+  // separate schedule. Added as fallback aliases, after the dedicated-
+  // schedule terms, so a genuine dedicated schedule (when one exists)
+  // still wins the match — matching the established ordering
+  // discipline documented above for exactly this reason.
+  'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T', 'Financial Statements', 'P&L', 'Profit and Loss'],
+  'Leases':             ['Lease Schedule', 'Leases', 'Lease', 'Financial Statements', 'P&L', 'Profit and Loss'],
 };
 
 /**
