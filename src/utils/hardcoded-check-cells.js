@@ -24,7 +24,21 @@
 // formula links" and "Workbook formula error scan". Broadened to
 // cover this genuine gap, prevalence-tested against all reference
 // files since both changes widen matching.
-const CHECK_LABEL_RE = /\b(check|reconciliation|recon|validation|balance[\s-]?check|error[\s-]?check|model[\s-]?control|tie[\s-]?out|cross[\s-]?foot|formula\s+(?:error|links)|circular[\s-]?reference)\b/i;
+// FIX: broadened further after a genuine production discovery on
+// DATA MAP!C170 ("No Excel errors in target workbook") — the same row
+// that independently motivated the error-scan-coverage check (MR-005)
+// as a genuine whole-workbook check control, phrased as an outcome
+// statement ("No Excel errors...") rather than a category name like
+// its neighboring rows ("Workbook formula error scan"). The original
+// pattern required "error" to be immediately followed by "check" as a
+// compound phrase, which this row's phrasing never matches. Added
+// standalone "error(s)" as its own trigger — the strict pass/fail-
+// vocabulary requirement on the value side (CHECK_RESULT_VALUE_RE)
+// already does the heavy lifting for precision here, so this
+// broadening is safe: a label mentioning "error(s)" combined with a
+// genuine check-result-style value is a strong enough signal on its
+// own, without also requiring the word "check" to appear.
+const CHECK_LABEL_RE = /\b(check|reconciliation|recon|validation|balance[\s-]?check|error[\s-]?check|errors?|model[\s-]?control|tie[\s-]?out|cross[\s-]?foot|formula\s+(?:error|links)|circular[\s-]?reference)\b/i;
 
 // Text values that look like an actual check RESULT (pass/fail vocabulary),
 // as opposed to a hardcoded threshold or input that merely happens to sit
@@ -36,7 +50,15 @@ const CHECK_LABEL_RE = /\b(check|reconciliation|recon|validation|balance[\s-]?ch
 // deliberately requires the separator, not just any word boundary,
 // so a casual sentence that happens to start with "No" or "Yes"
 // without being a genuine status value is not falsely matched.
-const CHECK_RESULT_VALUE_RE = /^(ok|pass(ed)?|fail(ed)?|error|true|false|balanced|yes|no|tie[sd]?|clean|reconciled)(\s*[-\u2013\u2014:]|$)/i;
+// FIX: "manual review" added after a genuine production discovery —
+// a model owner replaced a live SUMPRODUCT(--ISERROR(...)) formula
+// control with a static "MANUAL REVIEW — 0 displayed Excel error
+// values across 17 used ranges..." text value. The original word
+// list didn't recognize "MANUAL REVIEW" as a check-result status
+// prefix at all, so this slipped through entirely. Arguably a more
+// important pattern to catch than "OK"/"PASS" — it's the cell's own
+// explicit admission it isn't a live, automated check at all.
+const CHECK_RESULT_VALUE_RE = /^(ok|pass(ed)?|fail(ed)?|error|true|false|balanced|yes|no|tie[sd]?|clean|reconciled|manual(?:ly)?\s*review(?:ed)?)(\s*[-\u2013\u2014:]|$)/i;
 
 function looksLikeCheckResult(value) {
   if (typeof value === 'boolean') return true;

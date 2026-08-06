@@ -83,20 +83,40 @@ const check = (desc, pass) => {
     result.flaggedCount === 0);
 }
 
+{
+  // Real production discovery: a model owner replaced a live
+  // SUMPRODUCT(--ISERROR(...)) formula control with a static
+  // "MANUAL REVIEW — 0 displayed Excel error values..." text value,
+  // in a row labelled "No Excel errors in target workbook" — neither
+  // the original label pattern (required "error" immediately
+  // followed by "check") nor the original value pattern (no "manual
+  // review" in its word list) caught this at all.
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('DATA MAP');
+  ws.getCell('B170').value = 'No Excel errors in target workbook';
+  ws.getCell('C170').value = 'MANUAL REVIEW — 0 displayed Excel error values across 17 used ranges; 265,604 cells and 65,584 formula cells scanned; Copilot 2026-08-05';
+
+  const result = checkHardcodedCheckCells(wb);
+  check('real defect fixed: a "No Excel errors..." label (standalone "errors", not "error check") combined with a "MANUAL REVIEW —" value is now correctly caught, high-confidence',
+    result.flaggedCount === 1 && result.findings[0].confidence === 'high');
+}
+
 // ══════════════════════════════════════════════════════════════════
 // End-to-end confirmation against every discovered reference file —
 // dynamically found via fixtures-helper.js, not a fixed list. The
 // fix must reduce or hold steady the count everywhere, never increase
 // it due to the multi-column over-matching this fix specifically
-// closes. Confirmed directly: Bend 13-7 Audited went from 29 (pre-fix)
-// to 16 (post-fix); Hidden Gem from 18 to 17.
+// closes. Confirmed directly: Bend 13-7 Audited went from 29 (pre
+// stop-at-first-match fix) to 18 (post-fix, including the later
+// "manual review"/standalone-"errors" broadening); Hidden Gem
+// similarly settled at 18.
 // ══════════════════════════════════════════════════════════════════
 const { getFixtureFiles, getKnownExpectation } = require('./fixtures-helper.js');
 const KNOWN_EXPECTATIONS = {
   'f6faab1ac4cee3fe56abb4a8a05c7c41463c72d5dc7203f2ba30732064c7e122': 42, // The_Bend_FInancial_Model_3_8_2026.xlsx
   '8493d1e338d6978b6be482588aba151550eec9a7efb3f6ee93418f0f3e96c6af': 0, // CarlsbergFinancialModel_1.xlsm
-  '60b4f4f44a599b0120c7494d6d537a371e9b142ced0faef72d5620c2793233f5': 16, // Financial_Model_The_Bend_13_7_2026_Audited.xlsx
-  'ae49e8710986a491e6b11f1c12bb7ac3a6279e9fc97b84895f8a9e75d54bbd09': 17, // Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm
+  '60b4f4f44a599b0120c7494d6d537a371e9b142ced0faef72d5620c2793233f5': 18, // Financial_Model_The_Bend_13_7_2026_Audited.xlsx
+  'ae49e8710986a491e6b11f1c12bb7ac3a6279e9fc97b84895f8a9e75d54bbd09': 18, // Hidden_Gem_Base_Case_Financial_Model_1_9Mtpa4032026_v_2_VBA_FIX.xlsm
   '25b1897007a1bee37d3927fd0ac24398b5d7857933a291649e9cbd89916bafe5': 0, // Qantas_1.xlsx
 };
 (async () => {
