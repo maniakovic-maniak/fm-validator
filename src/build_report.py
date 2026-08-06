@@ -133,6 +133,12 @@ def build_report(data_path, output_path):
     formulaDeepIn = d.get('formulaDeepDive',{'applicable':False,'reviewed':0,'findings':[]})
     deepAcctSheets = d.get('deepAccountingResolvedSheets',{'resolvedMap':{},'unresolvedCategories':[]})
     vbaIn        = d.get('vbaReview',{'applicable':False,'hasVbaProject':False,'moduleCount':0,'note':'','findings':[]})
+    # FIX (PG-001): found via investigating a scope-disclosure gap —
+    # the A1/Formualizer recalculation check's methodology and outcome
+    # were entirely invisible to a report reader when it succeeded
+    # cleanly (the common case), since it previously only ever
+    # produced a finding when a genuine mismatch was found.
+    recalcIn     = d.get('recalcCheckResult',{'status':'unavailable','reason':'not run for this session'})
 
     # Checklist rules for the Validation Matrix — loaded from config
     checklist_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','config','checklist.json')
@@ -803,8 +809,18 @@ def build_report(data_path, output_path):
     set_row(ws1,r,8); r+=1
 
     # ── Scope footer — short, links to detail tab ───────────────────────────────
+    # FIX: found via investigating a P3 item — this static string had
+    # gone stale, the same bug class as I-13's scope-statement
+    # contradictions. Confirmed directly: "named-range audit" and "VBA
+    # review" are both genuinely, actively performed checks producing
+    # real findings (T0-RI-*, T0-VBA-*) with their own dedicated tabs —
+    # the very next row's own navigation links to a "Named Range
+    # Audit" tab, directly contradicting this footer's own claim it
+    # "was not included". "Formula text inspection" is now partial
+    # (Mode A+ formula-sample grounding), not absent. Only "source
+    # document testing" remains a genuine, complete limitation.
     merge(ws1,f'B{r}:I{r}',
-          'Scope limitations: formula text inspection, named-range audit, VBA review and source document testing were not included. Full detail: Scope and Reliance tab.',
+          'Scope limitations: comprehensive formula-text inspection of every cell and source document testing (contracts, leases, cost plans, lender terms) were not included. Full detail: Scope and Reliance tab.',
           sz=8,col=GREY_TXT2,bg=PANEL_GREY,italic=True,wrap=True)
     set_row(ws1,r,26); r+=1
     set_row(ws1,r,10); r+=1
@@ -1002,6 +1018,42 @@ def build_report(data_path, output_path):
         _vba_summary = (f"Extracted and risk-scanned {_vba_module_count} VBA module(s); {_vba_finding_count} finding(s) raised (see Issue Log). "
                          f"This reads and pattern-scans macro source — it does not execute the macros, so any behaviour that only manifests at runtime is still outside this review's scope.")
         _vba_next = 'None for the scanned modules — engage a manual VBA code reviewer if runtime behaviour needs verification'
+    # FIX (PG-001): found via investigating a real scope-disclosure gap
+    # — the A1/Formualizer full-workbook recalculation check's own
+    # methodology and outcome were entirely invisible to a report
+    # reader when it succeeded cleanly (the common, expected case),
+    # since it previously only ever produced a finding when a genuine
+    # mismatch was found. This row makes the check's actual coverage
+    # and result explicit on every run, not only when something's
+    # wrong — directly answering "was this actually recalculated in a
+    # real engine, or only ever compared against its own cached
+    # values" for a reader of the report itself, not just the console.
+    _recalc_status_raw = recalcIn.get('status', 'unavailable')
+    if _recalc_status_raw == 'unavailable':
+        _recalc_status = 'Not performed'
+        _recalc_summary = (f"A genuine, independent recalculation (via the Formualizer engine, not Excel itself) did not run for this session: {recalcIn.get('reason','no reason recorded')}. "
+                            f"Without this, conclusions rest on the workbook's own cached, displayed values — not an independently recalculated result.")
+        _recalc_next = 'Install the recalculation engine on the server (pip install formualizer openpyxl) to enable this check'
+    elif _recalc_status_raw == 'skipped_too_large':
+        _recalc_status = 'Not performed'
+        _recalc_summary = (f"This model's {recalcIn.get('formula_cells',0):,} formula cells exceed the {recalcIn.get('threshold',0):,}-cell safety threshold for this check, so it was skipped to avoid an excessive run time. "
+                            f"Conclusions rest on the workbook's own cached, displayed values for this run.")
+        _recalc_next = 'Raise the safety threshold if server resources allow, or accept cached-value reliance for this model size'
+    else:
+        _mismatch_count = recalcIn.get('mismatch_count', 0)
+        _cells_checked = recalcIn.get('formula_cells_checked', 0)
+        _circular_groups = recalcIn.get('genuine_circular_groups', 0)
+        _sanitized_count = recalcIn.get('sanitized_defined_names_count', 0)
+        _sanitized_note = (f" {_sanitized_count} defined name(s) containing unparseable characters were excluded first — formula cells referencing them are not covered by this comparison."
+                            if _sanitized_count > 0 else '')
+        if _mismatch_count == 0:
+            _recalc_status = 'Performed'
+            _recalc_summary = (f"A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) checked {_cells_checked:,} formula cell(s), correctly resolving {_circular_groups} genuine circular dependency group(s) via iterative calculation, and found zero cells where the displayed result differs from what the formula actually computes.{_sanitized_note}")
+            _recalc_next = 'None for the cells checked'
+        else:
+            _recalc_status = 'Performed'
+            _recalc_summary = (f"A genuine, independent full-workbook recalculation checked {_cells_checked:,} formula cell(s) and found {_mismatch_count} cell(s) where the displayed, cached value differs from what the formula actually computes — see the Issue Log for the specific cells.{_sanitized_note}")
+            _recalc_next = 'Investigate each mismatch — see Issue Log'
     # B1 — 7 mining-specific commercial omission patterns (revenue-to-Ops
     # linkage, capex post-commissioning, tax shield, debt sculpting,
     # rehabilitation provision, royalty treatment, FX consistency) were
@@ -1033,6 +1085,18 @@ def build_report(data_path, output_path):
         ('Assumption and output reasonableness', 'Performed (targeted)' if _reason_performed else 'Not performed',
          _reason_summary,
          'None for the tested metrics — extend threshold coverage or add domain-specific benchmarks if deeper testing is wanted' if _reason_performed else 'Label key output metrics clearly in the model so they can be located and tested'),
+        # FIX (PG-007/PG-008/PG-009): found via the same audit discipline
+        # already applied to PG-001 — these three genuine limitations
+        # had zero mention anywhere in the report's scope language.
+        ('Commercial benchmark verification', 'Not performed',
+         "A genuinely different check to the row above: that one tests whether disclosed figures are internally consistent against this model's OWN stated rule-of-thumb thresholds, not against live external market data. This review has no access to current market rents, cap rates, construction cost indices, comparable transactions, or other third-party commercial benchmarks — an assumption can be internally consistent and still be stale or unrealistic relative to the actual market.",
+         'Commission a market benchmarking review from a valuer, quantity surveyor, or other relevant specialist'),
+        ('Specialist tax, GST and accounting sign-off', 'Not performed',
+         "This review checks whether tax/GST-related formulas are internally consistent and correctly linked — it does not verify that the model's tax treatment is correct under the applicable tax law, or that GST/duty/withholding positions taken are the right ones for this transaction structure and jurisdiction. Tax and accounting treatment can be internally consistent and still be wrong.",
+         'Engage a tax specialist and/or the model\'s external accountant to review and sign off on the tax and GST treatment applied'),
+        ('Full lender-style credit underwriting', 'Not performed',
+         "This review tests model mechanics and internal consistency — it does not perform the broader judgement a lender's own credit process applies: covenant structuring appropriateness, security package adequacy, sponsor track record, market cycle positioning, or the lender's own risk appetite. A model can be mechanically sound and still fail a lender's credit committee on grounds this review does not test.",
+         'A lender-style credit assessment requires the lender\'s own underwriting process, informed by this review as one input among several'),
         ('Commercial omission testing',
          'Partial (mining-specific)' if _omission_rules_present else 'Not performed',
          (f"{len(_omission_rules_present)} mining-specific omission pattern(s) (revenue-to-operations linkage, capex phasing post-commissioning, tax shield modelling, debt sculpting, rehabilitation provision, royalty treatment, FX consistency) are graded, mandatory checklist rules for this model — see the T2-S10-09x rows in the Validation Matrix. This is domain-specific and only covers 7 named patterns: only models using the mining domain skill get even this partial coverage today, and it does not extend to other missing line items (a cost category, a risk, a required schedule) a domain expert might separately expect to see."
@@ -1040,6 +1104,7 @@ def build_report(data_path, output_path):
           'Different question to output reasonableness above: this is about line items missing from the model entirely (a cost category, a risk, a required schedule) that a domain expert would expect to see — not whether the stated figures are plausible. Requires a challenger model and commercial judgment.'),
          'Extend to other domains or add further patterns as they are identified, or commission a challenger-model review for full coverage' if _omission_rules_present else 'Commission a challenger-model review'),
         ('VBA and macro audit',_vba_status,_vba_summary,_vba_next),
+        ('Independent formula recalculation',_recalc_status,_recalc_summary,_recalc_next),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
     _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Partial (mining-specific)':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT)}
@@ -1397,6 +1462,43 @@ def build_report(data_path, output_path):
         ws5.conditional_formatting.add(_pri_rng2,
             CellIsRule(operator='equal', formula=['"P1"'],
                        fill=PatternFill(start_color=P1_FILL,end_color=P1_FILL,fill_type='solid'), font=Font(color=P1_TXT,bold=True)))
+
+    # ── Owner/Specialist Closure Items (ER-010) ──────────────────────────────
+    # FIX: found via an independent review — a model's own owner/
+    # specialist closure items (e.g. Summary!O17: "OWNER DECISIONS:
+    # executed lender terms; written Australian tax/GST advice; ...")
+    # sat as a single narrative text cell with no accountable owner or
+    # target date attached to each item, rather than a genuinely
+    # trackable checklist. Only rendered when the source model actually
+    # has this pattern — ownerDecisionChecklist is None otherwise, so
+    # this never adds an empty section to a model without one.
+    _odc = d.get('ownerDecisionChecklist')
+    if _odc and _odc.get('items'):
+        _odc_start = _rem_last_row + 3
+        r5b = _odc_start
+        merge(ws5,f'B{r5b}:{get_column_letter(n_rem_cols-1)}{r5b}','OWNER / SPECIALIST CLOSURE ITEMS',bold=True,sz=12,col=WHITE,bg=DARK_BLUE,v='center')
+        fill_range(ws5,r5b,2,r5b,n_rem_cols-1,DARK_BLUE); set_row(ws5,r5b,22); r5b+=1
+        merge(ws5,f'B{r5b}:{get_column_letter(n_rem_cols-1)}{r5b}',
+              f'Sourced from {_odc.get("sheet","")}!{_odc.get("cell","")} — the model\'s own narrative list of owner/specialist decisions still outstanding, presented here as a trackable checklist. Owner and Target Date are blank for manual entry; Status defaults to Open.',
+              sz=8,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
+        set_row(ws5,r5b,18); r5b+=1
+        _odc_headers = ['#','Item','Owner','Target Date','Status']
+        _odc_header_row = r5b
+        for i,h in enumerate(_odc_headers):
+            c = ws5.cell(r5b, 2+i); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE)
+            c.fill=F(DARK_BLUE); c.alignment=A(h='center',v='center'); c.border=B(col=WHITE)
+        set_row(ws5,r5b,20); r5b+=1
+        for i,item in enumerate(_odc['items'],1):
+            row_bg = WHITE if i%2==1 else 'FAFBFC'
+            vals = [i, item, '', '', 'Open']
+            for ci,val in enumerate(vals):
+                c = ws5.cell(r5b, 2+ci); c.value=val; c.font=Fn(sz=9)
+                c.fill=F(row_bg); c.alignment=A(h='center' if ci in (0,2,3,4) else 'left', v='center', wrap=(ci==1))
+                c.border=B(col=PANEL_BORDER)
+            set_row(ws5,r5b,20); r5b+=1
+        _odc_status_dv = DataValidation(type='list', formula1='"Open,In Progress,Closed"', allow_blank=False)
+        ws5.add_data_validation(_odc_status_dv)
+        _odc_status_dv.add(f'F{_odc_header_row+1}:F{r5b-1}')
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB 5B — VALIDATION MATRIX (B6) — every checklist rule with its outcome

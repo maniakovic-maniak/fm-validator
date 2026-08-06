@@ -70,6 +70,9 @@ const { checkNonexistentSheetReferences } = require('./src/utils/nonexistent-she
 const { checkFormulaCountReconciliation } = require('./src/utils/formula-count-reconciliation-check');
 const { consolidateTier2Duplicates } = require('./src/utils/tier2-duplicate-consolidation');
 const { computeFindingBreakdown, formatBreakdownLine } = require('./src/utils/finding-priority-breakdown');
+const { checkErrorScanCoverage } = require('./src/utils/error-scan-coverage-check');
+const { findOwnerDecisionChecklist } = require('./src/utils/owner-decision-checklist');
+const { checkSourceQuarantine } = require('./src/utils/source-quarantine-check');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier');
@@ -211,6 +214,22 @@ async function run() {
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
   const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
   const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw, parsed._filePath); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
+  // FIX (MR-005/P3): a whole-workbook "no Excel errors" control whose
+  // own tested range/sheet coverage doesn't cover the actual model.
+  const errorScanCoverage = (() => { try { return checkErrorScanCoverage(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Error-scan-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  // FIX (ER-010): a model's own "OWNER DECISIONS:"-style closure-item
+  // cell, parsed into a structured checklist for the report to
+  // present as a tracked table rather than a single narrative cell.
+  const ownerDecisionChecklist = (() => { try { return findOwnerDecisionChecklist(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Owner-decision-checklist scan failed:', e.message); return null; } })();
+  // FIX (ER-009): a source-data migration register disclosing cells
+  // deliberately quarantined during import for containing genuine
+  // formula errors — surfaced as a normal T0-* finding so the
+  // existing cross-run tracking automatically provides an ongoing
+  // regression control on every future source-data refresh.
+  const sourceQuarantine = (() => { try { return checkSourceQuarantine(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Source-quarantine scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
   // Deep Dive) but genuinely async since it spawns a Python subprocess, so
   // it needs its own await rather than fitting the synchronous IIFE
@@ -2466,7 +2485,50 @@ async function run() {
         });
       }
     }
-    // ── Nonexistent sheet reference (I-9, MR-001's pattern) — a guide/
+    // ── Error scan coverage (MR-005/P3) — a whole-workbook "no Excel
+    // errors" control formula (SUMPRODUCT(--ISERROR(...))) whose own
+    // covered sheet/range list doesn't cover the actual model. ──
+    if (errorScanCoverage.applicable && errorScanCoverage.flaggedCount > 0) {
+      for (const f of errorScanCoverage.findings) {
+        const gapSummary = [
+          f.missingSheets.length > 0 ? `${f.missingSheets.length} sheet(s) entirely missing` : null,
+          f.insufficientRanges.length > 0 ? `${f.insufficientRanges.length} sheet(s) with a narrower checked range than their actual used range` : null,
+        ].filter(Boolean).join(', ');
+        allFlagged.push({
+          id: `T0-ERRSCANCOVERAGE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+          label: `Whole-workbook error-scan control has incomplete coverage — ${gapSummary}`,
+          severity: 'high', status: 'fail', sheet: f.sheet, cell: f.cell,
+          category: 'Governance', condition: f.note,
+          reason: f.note,
+          corrective_action: 'Extend the error-scan formula to cover every sheet with formula content, and expand each covered range to match (or exceed) that sheet\'s actual used range.',
+          workstream: 'Governance', issue_type: 'Error-scan coverage gap',
+          model_risk: 'A "no Excel errors" control that does not cover the full model can report a clean status while a genuine #REF!/#VALUE!/#DIV/0! error sits undetected in an uncovered sheet or row/column range.',
+          key_output_impact: 'No', method: 'automated', needs_retest: true, root_cause: 'Error-scan control\'s covered sheets/ranges do not match the model\'s actual structure',
+          escalation_flag: true, urgency: 'Before next reliance', confidence: 90,
+        });
+      }
+    }
+    // ── Source quarantine disclosure (ER-009/P3) — a source-data
+    // migration register disclosing cells deliberately excluded
+    // during import for containing genuine formula errors. Surfaced
+    // as a normal T0-* finding so it participates in the existing
+    // cross-run tracking, providing an ongoing regression control on
+    // every future source-data refresh without a separate mechanism. ──
+    if (sourceQuarantine.applicable && sourceQuarantine.flaggedCount > 0) {
+      const sqSample = sourceQuarantine.findings.map(f => `${f.sheet}!${f.cell} (${f.count} cell(s)${f.sourceSheetLabel ? `, source: ${f.sourceSheetLabel}` : ''})`).join('; ');
+      allFlagged.push({
+        id: `T0-SRCQUARANTINE-${sourceQuarantine.findings[0].sheet.replace(/[^A-Za-z0-9]/g, '')}-${sourceQuarantine.findings[0].cell}`,
+        label: `${sourceQuarantine.totalCount} source cell(s) disclosed as deliberately quarantined during import (${sourceQuarantine.flaggedCount} disclosure row(s))`,
+        severity: 'low', status: 'fail', sheet: sourceQuarantine.findings[0].sheet, cell: sourceQuarantine.findings[0].cell,
+        category: 'Governance', condition: `${sqSample}. Disclosed as genuine, deliberately-isolated source formula errors from a prior data migration — not a current active defect while isolation holds, but nothing currently confirms these specific cells remain excluded on a future source-data refresh.`,
+        reason: `${sourceQuarantine.totalCount} source cell(s) disclosed as quarantined across ${sourceQuarantine.flaggedCount} disclosure row(s)`,
+        corrective_action: 'Maintain a prohibited-source-cell list matching this disclosure, and re-run this check after every source-book refresh — the deterministic cross-run tracking on this exact finding will flag any change to the disclosed count or cells automatically.',
+        workstream: 'Governance', issue_type: 'Source quarantine disclosure',
+        model_risk: 'No active defect is established while isolation holds, but a future source-data refresh could silently reintroduce the corrupted data this disclosure describes, with nothing currently confirming the quarantine remains intact.',
+        key_output_impact: 'No', method: 'automated', needs_retest: false, root_cause: 'Source-data migration register discloses cells deliberately quarantined for containing genuine formula errors',
+        escalation_flag: false, urgency: 'Informational', confidence: 95,
+      });
+    }
     // navigational sheet references a sheet by name that doesn't
     // exist anywhere in the actual workbook. ──
     if (nonexistentSheetReferences.applicable && nonexistentSheetReferences.flaggedCount > 0) {
@@ -2650,7 +2712,9 @@ async function run() {
     reasonableness,
     duplicateSheets,
     vbaReview,
-    deepAccountingResolvedSheets
+    deepAccountingResolvedSheets,
+    recalcCheckResult,
+    ownerDecisionChecklist
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────

@@ -83,6 +83,8 @@ const { checkNonexistentSheetReferences } = require('./src/utils/nonexistent-she
 const { checkFormulaCountReconciliation } = require('./src/utils/formula-count-reconciliation-check');
 const { consolidateTier2Duplicates } = require('./src/utils/tier2-duplicate-consolidation');
 const { computeFindingBreakdown, formatBreakdownLine } = require('./src/utils/finding-priority-breakdown');
+const { checkErrorScanCoverage } = require('./src/utils/error-scan-coverage-check');
+const { findOwnerDecisionChecklist } = require('./src/utils/owner-decision-checklist');
 const { detectDuplicateSheets } = require('./src/utils/sheet-linkage');
 const { familiariseModel, formatSummaryAsContext } = require('./src/familiariser');
 const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
@@ -316,6 +318,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
   const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
   const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw, parsed._filePath); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
+  const errorScanCoverage = (() => { try { return checkErrorScanCoverage(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Error-scan-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  const ownerDecisionChecklist = (() => { try { return findOwnerDecisionChecklist(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Owner-decision-checklist scan failed:', e.message); return null; } })();
     // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
     // Deep Dive) but genuinely async since it spawns a Python subprocess,
     // so it needs its own await rather than fitting the synchronous IIFE
@@ -2424,6 +2430,26 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
           });
         }
       }
+      if (errorScanCoverage.applicable && errorScanCoverage.flaggedCount > 0) {
+        for (const f of errorScanCoverage.findings) {
+          const gapSummary = [
+            f.missingSheets.length > 0 ? `${f.missingSheets.length} sheet(s) entirely missing` : null,
+            f.insufficientRanges.length > 0 ? `${f.insufficientRanges.length} sheet(s) with a narrower checked range than their actual used range` : null,
+          ].filter(Boolean).join(', ');
+          allFlagged.push({
+            id: `T0-ERRSCANCOVERAGE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.cell}`,
+            label: `Whole-workbook error-scan control has incomplete coverage — ${gapSummary}`,
+            severity: 'high', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Governance', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Extend the error-scan formula to cover every sheet with formula content, and expand each covered range to match (or exceed) that sheet\'s actual used range.',
+            workstream: 'Governance', issue_type: 'Error-scan coverage gap',
+            model_risk: 'A "no Excel errors" control that does not cover the full model can report a clean status while a genuine #REF!/#VALUE!/#DIV/0! error sits undetected in an uncovered sheet or row/column range.',
+            key_output_impact: 'No', method: 'automated', needs_retest: true, root_cause: 'Error-scan control\'s covered sheets/ranges do not match the model\'s actual structure',
+            escalation_flag: true, urgency: 'Before next reliance', confidence: 90,
+          });
+        }
+      }
       if (nonexistentSheetReferences.applicable && nonexistentSheetReferences.flaggedCount > 0) {
         for (const f of nonexistentSheetReferences.findings) {
           allFlagged.push({
@@ -2565,7 +2591,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       reasonableness,
       duplicateSheets,
       vbaReview,
-      deepAccountingResolvedSheets
+      deepAccountingResolvedSheets,
+      recalcCheckResult,
+      ownerDecisionChecklist
     });
 
     let driveResult = null;

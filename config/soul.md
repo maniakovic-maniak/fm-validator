@@ -320,8 +320,18 @@ to comment on high-complexity formulas.
 **key_output_impact** — one of: `Yes` `No` `Unknown`
 Set to Yes if the finding affects a key output such as revenue, EBITDA,
 free cash flow, debt balance, DSCR, tax payable, NPV, IRR, or equity
-distributions. Set to Unknown if this cannot be determined from
-available evidence.
+distributions.
+FIX (PG-006): set to No when the finding is confidently, structurally
+disconnected from any key output — a presentation/formatting issue
+(font, merged cell, colour), a label or documentation typo, a
+cosmetic inconsistency, or a finding about a sheet/cell that plainly
+has no formula path into any key output at all. Do not default to
+Unknown just because the finding isn't obviously Yes — Unknown is for
+genuine uncertainty (the finding *could* plausibly reach a key output,
+but the available evidence doesn't let you trace whether it actually
+does), not a safe middle ground for anything you haven't traced. If
+you can confidently rule impact out, say No; only say Unknown when you
+genuinely can't tell either way.
 
 ## Behaviour
 
@@ -462,7 +472,7 @@ Use `[]` for empty periods_affected.
 Use `false` for escalation_flag when not applicable.
 Set review_mode to `"llm_with_partial_formulas"` on a per-result basis, ONLY when THIS SPECIFIC finding's reasoning actually relied on a `_formulaSamples` field present on the row it concerns — otherwise `"llm_only"` (see skill.md's Mode A+ section for full detail on when this applies).
 Use `true` for needs_retest when the finding requires verification after fix.
-Use `"Unknown"` for key_output_impact when this cannot be determined.
+Use `"Unknown"` for key_output_impact only when impact genuinely cannot be determined either way — use `"No"` when you can confidently rule impact out (see the fuller guidance above).
 
 ## Confidence Scoring Guide
 
