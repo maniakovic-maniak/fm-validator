@@ -25,6 +25,23 @@ check('extractOwnerDecisionItems is case-insensitive and tolerates minor spacing
   JSON.stringify(extractOwnerDecisionItems('owner decisions:  item one; item two')) === JSON.stringify(['item one', 'item two']));
 
 // ══════════════════════════════════════════════════════════════════
+// Real production discovery on a newer model version: the label can
+// carry a status annotation between "OWNER DECISIONS" and the colon,
+// and a trailing sentence can follow the item list itself.
+// ══════════════════════════════════════════════════════════════════
+check('real defect fixed: a status annotation between the label and the colon ("OWNER DECISIONS — 6/6 OPEN:") is now correctly parsed',
+  JSON.stringify(extractOwnerDecisionItems('OWNER DECISIONS — 6/6 OPEN: item one; item two.'))
+  === JSON.stringify(['item one', 'item two']));
+
+check('real defect fixed: a trailing sentence after the item list ("Controlled closure register: ...") is correctly excluded, not swallowed into the last item',
+  JSON.stringify(extractOwnerDecisionItems('OWNER DECISIONS: item one; item two. Controlled closure register: DATA MAP!A524:H533.'))
+  === JSON.stringify(['item one', 'item two']));
+
+check('both real-world gaps together (status annotation AND trailing sentence) are handled correctly at once',
+  JSON.stringify(extractOwnerDecisionItems('OWNER DECISIONS — 6/6 OPEN: executed lender terms; written Australian tax/GST advice; independent property valuation; approved OpCo margin and multiple; final QS cost plan; executed shareholder and waterfall terms. Controlled closure register: DATA MAP!A524:H533.'))
+  === JSON.stringify(['executed lender terms', 'written Australian tax/GST advice', 'independent property valuation', 'approved OpCo margin and multiple', 'final QS cost plan', 'executed shareholder and waterfall terms']));
+
+// ══════════════════════════════════════════════════════════════════
 // End-to-end confirmation against real models. FIX: found via a real
 // deployment crash on the user's own server — these paths only exist
 // in the analysis sandbox that originally verified this check, not on

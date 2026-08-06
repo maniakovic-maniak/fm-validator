@@ -14,16 +14,34 @@
 // pass/fail check — there's nothing to flag as broken here, only
 // information to surface more usefully.
 
-// Matches a cell whose text begins with an "OWNER DECISIONS"-style
-// label (allowing minor punctuation/casing variation), followed by a
-// colon and the semicolon-separated item list.
-const OWNER_DECISIONS_RE = /^\s*OWNER\s+DECISIONS?\s*:\s*(.+)$/i;
+// FIX: found via a genuine production discovery on a newer model
+// version. Two real gaps, confirmed directly against
+// Summary!O17: "OWNER DECISIONS — 6/6 OPEN: executed lender terms;
+// ...; executed shareholder and waterfall terms. Controlled closure
+// register: DATA MAP!A524:H533."
+// (1) the label can carry a status annotation between "OWNER
+// DECISIONS" and the colon (here, "— 6/6 OPEN") — the original
+// pattern required the colon immediately after "DECISIONS", so this
+// entire cell was silently missed.
+// (2) a trailing sentence can follow the semicolon-separated item
+// list itself (here, "Controlled closure register: ...") — the
+// original "strip one trailing period" logic only handled a period
+// at the very end of the string, so this trailing sentence would
+// have been swallowed into the last item's text.
+// Matches an "OWNER DECISIONS"-style label, optionally followed by a
+// "— <status text>" segment, then a colon and the item list.
+const OWNER_DECISIONS_RE = /^\s*OWNER\s+DECISIONS?\s*(?:[\u2014\u2013-]\s*[^:]*)?\s*:\s*(.+)$/i;
 
 function extractOwnerDecisionItems(text) {
   if (typeof text !== 'string') return null;
   const m = OWNER_DECISIONS_RE.exec(text.trim());
   if (!m) return null;
-  const itemsText = m[1].trim().replace(/\.$/, ''); // drop a single trailing period, not periods within items
+  // Stop at the first sentence-ending period (one followed by
+  // whitespace-then-a-capital-letter, or the end of the string) —
+  // this is the boundary between the genuine item list and any
+  // trailing sentence that follows it, not just "the last period".
+  const listMatch = /^([\s\S]+?)(?:\.\s+[A-Z]|\.\s*$)/.exec(m[1].trim());
+  const itemsText = listMatch ? listMatch[1].trim() : m[1].trim().replace(/\.$/, '');
   const items = itemsText.split(';').map(s => s.trim()).filter(Boolean);
   return items.length > 0 ? items : null;
 }
