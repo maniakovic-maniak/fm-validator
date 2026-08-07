@@ -255,21 +255,6 @@ def build_report(data_path, output_path):
         elif any(r.get('status')=='uncertain' for r in _rres): cov_unc+=1
         else: cov_pass+=1
 
-    # FIX: found via investigating an independent review's claim that
-    # "Uncertain" outcomes get counted toward the headline completeness
-    # percentage. Directly tracing igReadiness's own calculation found
-    # it partly depends on Tier 2's own self-reported
-    # audit_completion_percent (an LLM-generated value, not something
-    # deterministically auditable from this code alone) — so rather
-    # than claim to have fully resolved that specific ambiguity, this
-    # adds a second, explicit, wholly deterministic figure computed
-    # only from the counts immediately above: genuinely-concluded
-    # procedures (Passed + Raised Issue) as a share of all planned
-    # procedures, with Uncertain and Not Run excluded by construction,
-    # not by assumption.
-    cov_total_planned = cov_pass + cov_issue + cov_unc + cov_np
-    cov_conclusive_pct = round(((cov_pass + cov_issue) / cov_total_planned) * 100) if cov_total_planned > 0 else 0
-
     # KPMG verdict
     # Neutral audit completion header — no verdict or reliance conclusion
     p1_open = len(p1)
@@ -302,10 +287,10 @@ def build_report(data_path, output_path):
         if igReadiness >= 60:
             verdict_short='RELIANCE-READY FOR INTERNAL REVIEW ONLY'; verdict_bg=DARK_BLUE
             verdict_text=(f'{_blocker_desc} remain open — this model cannot be classified reliance-ready for management, lender or investor use until these are resolved (or, for a Critical Query, confirmed either way) and retested. '
-                          f'{igReadiness}% of planned procedures completed ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run) — {cov_conclusive_pct}% concluded (passed or raised issue) once Uncertain and Not Run are excluded.')
+                          f'{igReadiness}% of planned procedures completed ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run).')
         else:
             verdict_short='NOT RELIANCE-READY'; verdict_bg=DARK_BLUE
-            verdict_text=(f'{_blocker_desc} open and {igReadiness}% of planned procedures completed ({cov_conclusive_pct}% concluded, Uncertain/Not Run excluded). Both open reliance blockers and audit coverage prevent reliance at any level. '
+            verdict_text=(f'{_blocker_desc} open and {igReadiness}% of planned procedures completed. Both open reliance blockers and audit coverage prevent reliance at any level. '
                           f'Resolve these items and complete outstanding procedures before reassessment.')
     elif igReadiness >= 95 and not reviewer_approval_gap:
         verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=MID_BLUE
@@ -408,8 +393,8 @@ def build_report(data_path, output_path):
     if key_output_gap: _open_parts.append('an unreconciled key output')
     _open_desc = ', '.join(_open_parts)
     _has_blocker = p1_open>0 or critical_query_open>0 or other_gates_open
-    _reason = (f'{_open_desc} and {igReadiness}% audit completion ({cov_conclusive_pct}% concluded)' if _has_blocker
-               else f'{igReadiness}% audit completion ({cov_conclusive_pct}% concluded), {cov_unc} procedure(s) uncertain, {cov_np} not run' if igReadiness<100 or cov_unc or cov_np
+    _reason = (f'{_open_desc} and {igReadiness}% audit completion' if _has_blocker
+               else f'{igReadiness}% audit completion, {cov_unc} procedure(s) uncertain, {cov_np} not run' if igReadiness<100 or cov_unc or cov_np
                else 'All planned procedures completed with no open P1 findings or unresolved Critical Queries')
     _next_step = ('Close all P1 items, resolve all Critical Queries (confirming whether a defect exists either way), and clear any incomplete mandatory procedures, unaudited critical modules, and unreconciled key outputs — then complete outstanding procedures and reassess.' if _has_blocker
                   else 'Resolve remaining P2 items and complete outstanding procedures before wider reliance.' if igReadiness<95
