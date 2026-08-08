@@ -310,6 +310,11 @@
           <span class="drop-hint">.xlsx · .xlsm · .xlsb · .xls &nbsp;·&nbsp; max 20 MB</span>
         </div>
 
+        <p class="page-sub" id="uploadError" style="display:none;color:var(--danger-text);margin-top:-4px;margin-bottom:16px;">
+          <i class="ti ti-alert-circle" style="font-size:14px;vertical-align:-2px;margin-right:4px" aria-hidden="true"></i>
+          <span id="uploadErrorText"></span>
+        </p>
+
         <div class="file-pill" id="filePill" style="display:none">
           <i class="ti ti-file" style="font-size:18px;color:var(--text-2)"></i>
           <span class="file-pill-name" id="fileName">—</span>
@@ -321,6 +326,59 @@
           <button class="btn-primary" id="runBtn" disabled onclick="runValidation()">
             <i class="ti ti-player-play" style="font-size:15px"></i>Run validation
           </button>
+          <button class="btn-ghost" id="uniqueFormulaBtn" disabled onclick="showScreen('unique-formula'); loadUniqueFormulas();" style="margin-left:auto">
+            Unique formula
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SCREEN: UNIQUE FORMULA ESTIMATION ── -->
+  <div class="screen" id="screen-unique-formula">
+    <div class="screen-block">
+      <div class="screen-label">Unique formula estimation (F-score based)</div>
+      <div class="card">
+        <p class="page-title">Unique formula estimation (F-score based)</p>
+        <p class="page-sub">Select min/max values to estimate the audit cost</p>
+
+        <div class="stats-grid" style="grid-template-columns: 1fr 1fr; margin-top: 20px;">
+          <div class="stat-card">
+            <div class="stat-lbl" style="margin-top:0;margin-bottom:4px;">Unique formulas total</div>
+            <div class="stat-val" id="uf-total">0</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div>
+              <div class="stat-lbl" style="margin-top:0;margin-bottom:4px;">Min$</div>
+              <select id="uf-min" style="width:100%"></select>
+            </div>
+            <div>
+              <div class="stat-lbl" style="margin-top:0;margin-bottom:4px;">Max$</div>
+              <select id="uf-max" style="width:100%"></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats-grid" style="grid-template-columns: 1fr 1fr;">
+          <div class="stat-card">
+            <div class="stat-lbl" style="margin-top:0;margin-bottom:4px;">Price total</div>
+            <div class="stat-val" id="uf-price">$0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-lbl" style="margin-top:0;margin-bottom:8px;">F-score breakdown</div>
+            <div id="uf-fscore-list" style="font-size:13px;color:var(--text-2)">—</div>
+          </div>
+        </div>
+
+        <div class="file-pill" id="uf-file-pill" style="display:flex;margin-top:4px;">
+          <i class="ti ti-file" style="font-size:18px;color:var(--text-2)"></i>
+          <span class="file-pill-name" id="uf-file-name">—</span>
+          <span class="file-pill-size" id="uf-file-size">—</span>
+        </div>
+
+        <div class="actions-row">
+          <button class="btn-ghost" onclick="showScreen('upload')">Back</button>
+          <button class="btn-primary" id="uf-estimate-btn" onclick="estimateUniqueFormulaPrice()" style="margin-left:auto">Estimate $</button>
         </div>
       </div>
     </div>
@@ -486,6 +544,63 @@
 
 <script>
   let selectedFile = null;
+  let ufFscoreDist = null; // cached from the last /api/unique-formulas fetch
+
+  function populateDollarSelect(id) {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '';
+    for (let i = 0; i <= 10; i++) {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = '$' + i;
+      sel.appendChild(opt);
+    }
+  }
+  populateDollarSelect('uf-min');
+  populateDollarSelect('uf-max');
+
+  async function loadUniqueFormulas() {
+    if (!selectedFile) return;
+    document.getElementById('uf-file-name').textContent = selectedFile.name;
+    document.getElementById('uf-file-size').textContent = formatSize(selectedFile.size);
+    document.getElementById('uf-total').textContent = '0';
+    document.getElementById('uf-price').textContent = '$0';
+    document.getElementById('uf-fscore-list').textContent = '—';
+    ufFscoreDist = null;
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    try {
+      const res = await fetch('api/unique-formulas', { method: 'POST', body: formData });
+      const result = await res.json();
+      if (result.status === 'error') {
+        document.getElementById('uf-fscore-list').textContent = result.message || 'Could not scan file.';
+        return;
+      }
+      document.getElementById('uf-total').textContent = result.uniqueFormulaTotal.toLocaleString();
+      ufFscoreDist = result.fscoreDist;
+      renderFscoreList(ufFscoreDist);
+    } catch (err) {
+      document.getElementById('uf-fscore-list').textContent = err.message || 'Could not connect to the validator.';
+    }
+  }
+
+  function renderFscoreList(dist) {
+    const el = document.getElementById('uf-fscore-list');
+    el.innerHTML = ['Low', 'Moderate', 'High', 'Critical'].map(band =>
+      `<div style="display:flex;justify-content:space-between;padding:2px 0">${band}<span style="font-family:'DM Mono',monospace">${(dist[band]||0).toLocaleString()}</span></div>`
+    ).join('');
+  }
+
+  function estimateUniqueFormulaPrice() {
+    if (!ufFscoreDist) return;
+    const min = parseInt(document.getElementById('uf-min').value, 10);
+    const max = parseInt(document.getElementById('uf-max').value, 10);
+    const bandPrice = { Low: min, Moderate: (min + max) / 2, High: max, Critical: max };
+    let price = 0;
+    Object.entries(ufFscoreDist).forEach(([band, count]) => { price += count * (bandPrice[band] || 0); });
+    document.getElementById('uf-price').textContent = '$' + Math.round(price).toLocaleString();
+  }
 
   // ── File handling ─────────────────────────────────────────────────────────
   const fileInput  = document.getElementById('fileInput');
@@ -499,10 +614,34 @@
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
     e.preventDefault(); dropZone.classList.remove('dragover');
-    if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files[0]) validateAndSetFile(e.dataTransfer.files[0]);
   });
 
-  fileInput.addEventListener('change', e => { if (e.target.files[0]) setFile(e.target.files[0]); });
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) validateAndSetFile(e.target.files[0]); });
+
+  // FIX: the input's accept=".xlsx,.xlsm,.xlsb,.xls" attribute only
+  // constrains the OS file picker for Browse files — it has no effect
+  // on drag-and-drop at all, confirmed directly. A single shared check
+  // used by both entry points, rather than validating separately, so
+  // there's one source of truth for what's an accepted file.
+  const ALLOWED_EXTENSIONS = ['.xlsx', '.xlsm', '.xlsb', '.xls'];
+  function validateAndSetFile(file) {
+    const name = file.name.toLowerCase();
+    const isAllowed = ALLOWED_EXTENSIONS.some(ext => name.endsWith(ext));
+    if (!isAllowed) {
+      showUploadError("This file type isn't supported. Please use .xlsx, .xlsm, .xlsb, or .xls.");
+      return;
+    }
+    hideUploadError();
+    setFile(file);
+  }
+  function showUploadError(message) {
+    document.getElementById('uploadErrorText').textContent = message;
+    document.getElementById('uploadError').style.display = 'block';
+  }
+  function hideUploadError() {
+    document.getElementById('uploadError').style.display = 'none';
+  }
 
   function setFile(file) {
     selectedFile = file;
@@ -510,12 +649,15 @@
     document.getElementById('fileSize').textContent = formatSize(file.size);
     document.getElementById('filePill').style.display = 'flex';
     document.getElementById('runBtn').disabled = false;
+    document.getElementById('uniqueFormulaBtn').disabled = false;
   }
 
   function clearFile() {
     selectedFile = null; fileInput.value = '';
     document.getElementById('filePill').style.display = 'none';
     document.getElementById('runBtn').disabled = true;
+    document.getElementById('uniqueFormulaBtn').disabled = true;
+    hideUploadError();
   }
 
   function formatSize(b) {

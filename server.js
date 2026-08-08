@@ -235,6 +235,50 @@ app.get('/api/checklists', (req, res) => {
 });
 
 // ── Main validation endpoint ───────────────────────────────────────────────────
+// FIX: pricing-per-F-score-band is a business decision, not something
+// inferrable from the UI mockup alone — isolated here as a single named
+// constant so real figures can be swapped in later without touching the
+// route logic below. Values are illustrative placeholders.
+const FSCORE_BAND_PRICE = { Low: 2, Moderate: 5, High: 12, Critical: 20 };
+
+// Unique-formula + F-score estimate — deliberately stops after Tier 0's
+// formula scan (deterministic, local, no Anthropic API call) rather than
+// running the full pipeline, so this is fast and free of API cost, per
+// the "unique formula" feature's own design requirement (confirmed
+// directly against validator-tier0.js: uniqueFormulaCount and fscoreDist
+// are both computed purely from formula-text pattern normalization,
+// before familiarisation or Tier 2 ever run).
+app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ status: 'error', message: 'No file uploaded' });
+  }
+  const filePath     = req.file.path;
+  const originalName = req.file.originalname;
+
+  try {
+    const parsed = await parseExcel(filePath);
+    const tier0  = await runTier0(parsed);
+    const fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    const uniqueFormulaTotal = (tier0.stats && tier0.stats.uniqueFormulaCount) || 0;
+    const priceTotal = Object.entries(fscoreDist)
+      .reduce((sum, [band, count]) => sum + count * (FSCORE_BAND_PRICE[band] || 0), 0);
+
+    res.json({
+      status: 'success',
+      originalName,
+      uniqueFormulaTotal,
+      fscoreDist,
+      priceTotal,
+      pricePerBand: FSCORE_BAND_PRICE
+    });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Unique-formula estimate failed:', err.message);
+    res.status(500).json({ status: 'error', message: err.message || 'Could not scan the file.' });
+  } finally {
+    fs.unlink(filePath, () => {});
+  }
+});
+
 app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ status: 'error', message: 'No file uploaded' });
@@ -263,8 +307,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────
     console.log('[1.5/6] Scanning formula text...');
-    const tier0 = await runTier0(parsed);
-  // Opt-in only — this is an additional-cost, additional-time review
+    const tier0 = await runTier0(parsed);  // Opt-in only — this is an additional-cost, additional-time review
   // beyond the standard run. Off by default; set ENABLE_FORMULA_DEEPDIVE=true
   // (or pass formulaDeepDive:true in the request body, for server.js) to enable.
   const wantsDeepDive = process.env.ENABLE_FORMULA_DEEPDIVE === 'true' || (req.body && req.body.formulaDeepDive === true);
@@ -322,7 +365,6 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Error-scan-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const ownerDecisionChecklist = (() => { try { return findOwnerDecisionChecklist(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Owner-decision-checklist scan failed:', e.message); return null; } })();
-console.log("DEBUG ownerDecisionChecklist:", JSON.stringify(ownerDecisionChecklist));
     // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
     // Deep Dive) but genuinely async since it spawns a Python subprocess,
     // so it needs its own await rather than fitting the synchronous IIFE
