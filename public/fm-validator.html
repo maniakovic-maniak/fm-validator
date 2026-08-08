@@ -25,6 +25,9 @@
     --danger-text: #791f1f;
     --warning-bg: #faeeda;
     --warning-text: #633806;
+    --accent-bg: #e6f1fb;
+    --accent-text: #185fa5;
+    --accent-border: #378add;
     --pink-bg: #fce7f3;
     --yellow-bg: #fefce8;
     --radius: 10px;
@@ -140,6 +143,22 @@
     font-family: inherit; cursor: pointer;
   }
   .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+  /* Shared height override — matches .btn-primary's padding/font-size
+     exactly, applied alongside .btn-ghost so Browse files (which also
+     uses .btn-ghost) is unaffected. */
+  .btn-tall { padding: 9px 20px; font-size: 14px; margin-top: 0; }
+  /* Unique formula CTA — grey while inactive, blue once a file is
+     selected. No hover-affecting styles while disabled, since a
+     disabled control shouldn't look or feel interactive. */
+  .btn-uf {
+    background: var(--surface-2); color: var(--text-3);
+    border-color: var(--border); cursor: not-allowed;
+  }
+  .btn-uf:not(:disabled) {
+    background: var(--accent-bg); color: var(--accent-text);
+    border-color: var(--accent-border); cursor: pointer;
+  }
+  .btn-uf:not(:disabled):hover { background: var(--accent-bg); filter: brightness(0.97); }
   .btn-secondary {
     display: inline-flex; align-items: center; gap: 6px;
     background: transparent; color: var(--text);
@@ -326,7 +345,7 @@
           <button class="btn-primary" id="runBtn" disabled onclick="runValidation()">
             <i class="ti ti-player-play" style="font-size:15px"></i>Run validation
           </button>
-          <button class="btn-ghost" id="uniqueFormulaBtn" disabled onclick="showScreen('unique-formula'); loadUniqueFormulas();" style="margin-left:auto">
+          <button class="btn-ghost btn-uf btn-tall" id="uniqueFormulaBtn" disabled onclick="showScreen('unique-formula'); populateUfFileInfo();" style="margin-left:auto">
             Unique formula
           </button>
         </div>
@@ -377,8 +396,8 @@
         </div>
 
         <div class="actions-row">
-          <button class="btn-ghost" onclick="showScreen('upload')">Back</button>
-          <button class="btn-primary" id="uf-estimate-btn" onclick="estimateUniqueFormulaPrice()" style="margin-left:auto">Estimate $</button>
+          <button class="btn-ghost btn-tall" onclick="showScreen('upload')">Back</button>
+          <button class="btn-primary" id="uf-estimate-btn" onclick="onEstimateClick()" style="margin-left:auto">Estimate $</button>
         </div>
       </div>
     </div>
@@ -559,7 +578,7 @@
   populateDollarSelect('uf-min');
   populateDollarSelect('uf-max');
 
-  async function loadUniqueFormulas() {
+  function populateUfFileInfo() {
     if (!selectedFile) return;
     document.getElementById('uf-file-name').textContent = selectedFile.name;
     document.getElementById('uf-file-size').textContent = formatSize(selectedFile.size);
@@ -567,6 +586,22 @@
     document.getElementById('uf-price').textContent = '$0';
     document.getElementById('uf-fscore-list').textContent = '—';
     ufFscoreDist = null;
+  }
+
+  function renderFscoreList(dist) {
+    const el = document.getElementById('uf-fscore-list');
+    el.innerHTML = ['Low', 'Moderate', 'High', 'Critical'].map(band =>
+      `<div style="display:flex;justify-content:space-between;padding:2px 0">${band}<span style="font-family:'DM Mono',monospace">${(dist[band]||0).toLocaleString()}</span></div>`
+    ).join('');
+  }
+
+  // FIX: per requirement #4, no fetch or price computation happens
+  // until Estimate $ is clicked — this single function now does both
+  // the fetch (previously fired early, on the CTA tap) and the price
+  // calculation together, only on this one trigger.
+  async function onEstimateClick() {
+    if (!selectedFile) return;
+    document.getElementById('uf-fscore-list').textContent = 'Estimating…';
 
     const formData = new FormData();
     formData.append('file', selectedFile);
@@ -580,19 +615,13 @@
       document.getElementById('uf-total').textContent = result.uniqueFormulaTotal.toLocaleString();
       ufFscoreDist = result.fscoreDist;
       renderFscoreList(ufFscoreDist);
+      applyPriceEstimate();
     } catch (err) {
       document.getElementById('uf-fscore-list').textContent = err.message || 'Could not connect to the validator.';
     }
   }
 
-  function renderFscoreList(dist) {
-    const el = document.getElementById('uf-fscore-list');
-    el.innerHTML = ['Low', 'Moderate', 'High', 'Critical'].map(band =>
-      `<div style="display:flex;justify-content:space-between;padding:2px 0">${band}<span style="font-family:'DM Mono',monospace">${(dist[band]||0).toLocaleString()}</span></div>`
-    ).join('');
-  }
-
-  function estimateUniqueFormulaPrice() {
+  function applyPriceEstimate() {
     if (!ufFscoreDist) return;
     const min = parseInt(document.getElementById('uf-min').value, 10);
     const max = parseInt(document.getElementById('uf-max').value, 10);
