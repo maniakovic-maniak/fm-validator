@@ -8,6 +8,7 @@ const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk, checkIrrMultipleSignChangeRisk } = require('./src/utils/formula-logic-checks');
 const { checkFlagProductErrorMasking } = require('./src/utils/flag-error-masking-check');
+const { checkTextBooleanFlag } = require('./src/utils/text-boolean-flag-check');
 const { checkAutoSumHeaderInclusion } = require('./src/utils/autosum-header-check');
 const { checkFormulaPatternConsistency } = require('./src/utils/formula-pattern-consistency-check');
 const { checkDaisyChains } = require('./src/utils/daisy-chain-check');
@@ -618,6 +619,27 @@ async function run() {
       root_cause: 'PRODUCT()-based flag has an unprotected inline division', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 75,
       ...buildRootCauseFields('T0-FLAGERRMASK-001', flagErrorMaskingCheck, { commonRemediationAction: 'Wrap the division in IFERROR(), or restructure as an explicit IF-based test.' })
+    });
+  }
+
+  const textBooleanFlagCheck = (() => { try { return checkTextBooleanFlag(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Text-boolean flag check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (textBooleanFlagCheck.applicable && textBooleanFlagCheck.findings.length > 0) {
+    const sample = textBooleanFlagCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-TEXTBOOLFLAG-001',
+      label: `${textBooleanFlagCheck.findings.length} IF() formula(s) return "TRUE"/"FALSE" as text rather than a genuine boolean`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${textBooleanFlagCheck.findings.length} IF() formula(s) return the literal quoted text "TRUE"/"FALSE" rather than a genuine boolean or 1/0, including: ${sample}${textBooleanFlagCheck.findings.length > 8 ? ' and others' : ''}. This looks identical on screen to a real boolean but will produce #VALUE! the moment it's used in any downstream arithmetic.`,
+      reason: `${textBooleanFlagCheck.findings.length} IF() formula(s) return text "TRUE"/"FALSE" instead of a genuine boolean`,
+      corrective_action: 'Replace with a direct comparison (e.g. =F7>F6) or =IF(condition,1,0), which evaluate correctly in any downstream arithmetic use.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Text pseudo-boolean flag',
+      model_risk: 'A cell returning quoted text "TRUE"/"FALSE" looks identical to a genuine boolean on screen, but will produce #VALUE! rather than the intended 0/1 behaviour if ever referenced arithmetically, now or in a future edit.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'IF() formula returns quoted text "TRUE"/"FALSE" instead of boolean/1/0', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 80,
+      ...buildRootCauseFields('T0-TEXTBOOLFLAG-001', textBooleanFlagCheck, { commonRemediationAction: 'Replace with a direct comparison or IF(condition,1,0).' })
     });
   }
 
