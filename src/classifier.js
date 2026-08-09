@@ -267,8 +267,21 @@ function maybeQueueDomainDraft(modelType, modelSummary, sheetNames, domainSkillR
   const { draftDomainSkill } = require('./domain-synthesiser');
   draftDomainSkill(normalized, modelSummary, sheetNames, {
     weightingDomainLabel: guessWeightingLabel(normalized),
-  }).then(() => {
+  }).then((draftResult) => {
     console.log(`   ℹ️  New domain "${normalized}" drafted for future review: config/domains/skill-${normalized}.draft.md (run tools/review-domains.js)`);
+
+    // FIX: fire the source-verification pass immediately after drafting
+    // completes, same fire-and-forget discipline — never awaited by this
+    // function, any failure caught and logged, never allowed to affect
+    // the current run. Writes its own sidecar file that
+    // tools/review-domains.js picks up in a later, separate invocation.
+    const { verifyAndSaveSidecar } = require('./domain-skill-verifier');
+    const resolvedDraftPath = (draftResult && draftResult.draftPath) || path.join(configDir, 'domains', `skill-${normalized}.draft.md`);
+    verifyAndSaveSidecar(resolvedDraftPath, normalized).then(({ result }) => {
+      console.log(`   ℹ️  Source verification complete for "${normalized}": ${result.applicable ? result.summary : result.error}`);
+    }).catch(e => {
+      console.error(`   ⚠️  Source verification failed for "${normalized}" (non-blocking, draft still available for manual review):`, e.message);
+    });
   }).catch(e => {
     console.error(`   ⚠️  Domain skill drafting failed for "${normalized}" (non-blocking, this run is unaffected):`, e.message);
   });

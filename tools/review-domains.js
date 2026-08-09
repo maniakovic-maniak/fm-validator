@@ -33,6 +33,7 @@ function listDrafts() {
 function loadDraft(modelType) {
   const draftPath = path.join(draftsDir, `skill-${modelType}.draft.md`);
   const metaPath = path.join(draftsDir, `skill-${modelType}.draft.meta.json`);
+  const verificationPath = path.join(draftsDir, `skill-${modelType}.draft.verification.json`);
   if (!fs.existsSync(draftPath)) {
     throw new Error(`No draft found for "${modelType}" at ${draftPath}`);
   }
@@ -41,7 +42,11 @@ function loadDraft(modelType) {
   if (fs.existsSync(metaPath)) {
     meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
   }
-  return { draftPath, metaPath, draftContent, meta };
+  let verification = null;
+  if (fs.existsSync(verificationPath)) {
+    verification = JSON.parse(fs.readFileSync(verificationPath, 'utf8'));
+  }
+  return { draftPath, metaPath, verificationPath, draftContent, meta, verification };
 }
 
 function runEval(modelType) {
@@ -59,6 +64,26 @@ function printEvalReport(modelType, result) {
   if (result.failedCount > 0) {
     console.log('Failed checks:');
     result.checks.filter(c => !c.passed && !c.skipped).forEach(c => console.log(`   ✗ ${c.check}`));
+  }
+}
+
+function printVerificationReport(verification) {
+  if (!verification) {
+    console.log('   ℹ️  No source-verification report yet (still running, or drafted before this feature existed).');
+    return;
+  }
+  if (!verification.applicable) {
+    console.log(`   ⚠️  Source verification did not complete: ${verification.error}`);
+    return;
+  }
+  console.log(`   Source verification: ${verification.summary}`);
+  const contradicted = verification.claims.filter(c => c.verdict === 'contradicted');
+  if (contradicted.length > 0) {
+    console.log('   ⚠️  CONTRADICTED claims — review before approving:');
+    contradicted.forEach(c => {
+      console.log(`      • "${c.claim}"`);
+      console.log(`        ${c.note}${c.source_description ? ` (Tier ${c.source_tier}: ${c.source_description})` : ''}`);
+    });
   }
 }
 
@@ -94,8 +119,10 @@ async function interactiveReview() {
   const ask = (q) => new Promise(resolve => rl.question(q, resolve));
 
   for (const modelType of drafts) {
+    const { verification } = loadDraft(modelType);
     const result = runEval(modelType);
     printEvalReport(modelType, result);
+    printVerificationReport(verification);
     if (!result.readyForReview) {
       console.log('   This draft has failed checks above — recommend reject or manual fix before approving.');
     }
@@ -113,8 +140,10 @@ const args = process.argv.slice(2);
 if (args.includes('--approve')) {
   const name = args[args.indexOf('--approve') + 1];
   if (!name) { console.error('Usage: --approve <modelType>'); process.exit(2); }
+  const { verification } = loadDraft(name);
   const result = runEval(name);
   printEvalReport(name, result);
+  printVerificationReport(verification);
   approve(name);
 } else if (args.includes('--reject')) {
   const name = args[args.indexOf('--reject') + 1];
@@ -130,7 +159,9 @@ if (args.includes('--approve')) {
   } else {
     console.log(`${drafts.length} draft(s) pending review:`);
     for (const modelType of drafts) {
+      const { verification } = loadDraft(modelType);
       printEvalReport(modelType, runEval(modelType));
+      printVerificationReport(verification);
     }
     console.log('\nRun with --interactive to approve/reject, or --approve <type> / --reject <type> directly.');
   }
