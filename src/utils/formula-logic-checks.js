@@ -257,4 +257,95 @@ function checkIrrNegativeCashFlowRisk(workbook) {
   };
 }
 
-module.exports = { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk };
+module.exports = { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk, checkIrrMultipleSignChangeRisk };
+
+// checkIrrMultipleSignChangeRisk — genuinely complementary to
+// checkIrrNegativeCashFlowRisk above, not overlapping with it: that check
+// catches a cash flow series with ZERO negative values (IRR mathematically
+// undefined, Excel returns #NUM!). This one catches the opposite-flavoured
+// problem — a series with TWO OR MORE sign changes, which means more than
+// one mathematically valid IRR can exist for the same cash flow series. A
+// plain =IRR(range) call (no guess argument) converges to just one root
+// and returns it with no indication the result is ambiguous — a reader
+// has no way to know from the cell alone that a different starting guess
+// could have produced a materially different "IRR." This is a purely
+// deterministic, structural fact about the cash flow series itself
+// (count of sign changes), not a judgment call, so it belongs here as a
+// Tier 0 check rather than something Tier 2 has to reason about.
+//
+// Deliberately conservative about what counts as a "sign change": zeros
+// are skipped when walking the sequence (a zero-cash-flow period doesn't
+// itself constitute a change), and only genuine positive<->negative
+// transitions between the two nearest non-zero values count.
+function checkIrrMultipleSignChangeRisk(workbook) {
+  const findings = [];
+
+  workbook.eachSheet(ws => {
+    ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
+      row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+        const formula = cell.formula;
+        if (!formula || !IRR_CALL_RE.test(formula)) return;
+
+        const match = IRR_CALL_RE.exec(formula);
+        const openParenIndex = formula.indexOf('(', match.index);
+        const extent = extractCallExtent(formula, openParenIndex);
+        if (!extent) return;
+
+        const args = splitTopLevelArgs(extent.argsText);
+        if (args.length === 0) return;
+        const rangeArg = args[0].trim();
+
+        const rangeMatch = SIMPLE_RANGE_RE.exec(rangeArg);
+        if (!rangeMatch) return; // cross-sheet, multi-area, or non-literal range — skip, don't guess
+
+        const [, col1, row1Str, col2, row2Str] = rangeMatch;
+        const c1 = colToNum(col1);
+        const r1 = parseInt(row1Str, 10);
+        const c2 = col2 ? colToNum(col2) : c1;
+        const r2 = row2Str ? parseInt(row2Str, 10) : r1;
+        const colLo = Math.min(c1, c2), colHi = Math.max(c1, c2);
+        const rowLo = Math.min(r1, r2), rowHi = Math.max(r1, r2);
+
+        // Same discipline as checkIrrNegativeCashFlowRisk — skip
+        // pathologically large ranges rather than pay the cost on
+        // something very unlikely to be a genuine IRR cash-flow series.
+        if ((colHi - colLo + 1) * (rowHi - rowLo + 1) > 2000) return;
+
+        // Walk the range in reading order (row-major within a single
+        // row, or down a single column — a genuine IRR range is always
+        // one or the other) and count sign changes between successive
+        // non-zero values.
+        const values = [];
+        for (let r = rowLo; r <= rowHi; r++) {
+          for (let c = colLo; c <= colHi; c++) {
+            const v = getNumericValue(ws.getCell(r, c));
+            if (v !== null && v !== 0) values.push(v);
+          }
+        }
+        if (values.length < 3) return; // need at least 3 non-zero values to have 2 sign changes
+
+        let signChanges = 0;
+        for (let i = 1; i < values.length; i++) {
+          if ((values[i] > 0) !== (values[i - 1] > 0)) signChanges++;
+        }
+        if (signChanges < 2) return;
+
+        findings.push({
+          sheet: ws.name,
+          cell: cell.address,
+          formula: formula.length > 150 ? formula.slice(0, 150) + '…' : formula,
+          range: `${col1}${r1}:${col2 || col1}${r2 || r1}`,
+          signChanges,
+          note: `${ws.name}!${cell.address} calls IRR() over ${col1}${r1}:${col2 || col1}${r2 || r1}, and the cash flow series currently changes sign ${signChanges} times. A series with two or more sign changes can have more than one mathematically valid IRR — a plain IRR() call with no guess argument converges to just one of them silently, with no indication in the cell itself that the result is ambiguous. Worth confirming this result against an NPV-vs-discount-rate profile before relying on it, and considering whether a guess argument or an alternative metric (e.g. MIRR) is more appropriate here.`,
+        });
+      });
+    });
+  });
+
+  return {
+    applicable: true,
+    flaggedCount: findings.length,
+    findings,
+    note: 'Flags IRR() calls over a simple range whose cash flow series changes sign 2+ times — mathematically, such a series can have more than one valid IRR, and a plain IRR() call gives no indication the result is ambiguous. Only evaluates simple, single-area, same-sheet ranges; cross-sheet, multi-area, and non-literal (INDIRECT/OFFSET-built) ranges are skipped, not guessed at.',
+  };
+}

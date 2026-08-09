@@ -19,7 +19,8 @@ const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
-const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk } = require('./src/utils/formula-logic-checks');
+const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk, checkIrrMultipleSignChangeRisk } = require('./src/utils/formula-logic-checks');
+const { checkFlagProductErrorMasking } = require('./src/utils/flag-error-masking-check');
 const { checkAutoSumHeaderInclusion } = require('./src/utils/autosum-header-check');
 const { checkFormulaPatternConsistency } = require('./src/utils/formula-pattern-consistency-check');
 const { checkDaisyChains } = require('./src/utils/daisy-chain-check');
@@ -688,6 +689,48 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       root_cause: 'IRR() range contains no negative (initial-investment) value', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 80,
       ...buildRootCauseFields('T0-IRRSIGN-001', irrNegativeCashFlowCheck, { commonRemediationAction: 'Confirm whether the initial investment/outflow is genuinely missing from the IRR() range, or zero.' })
+    });
+  }
+
+  const irrMultipleSignChangeCheck = (() => { try { return checkIrrMultipleSignChangeRisk(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  IRR multiple-sign-change check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (irrMultipleSignChangeCheck.applicable && irrMultipleSignChangeCheck.findings.length > 0) {
+    const sample = irrMultipleSignChangeCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-IRRMULTISIGN-001',
+      label: `${irrMultipleSignChangeCheck.findings.length} IRR() formula(s) over a cash flow series with 2+ sign changes`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${irrMultipleSignChangeCheck.findings.length} IRR() formula(s) reference a cash flow series that changes sign 2 or more times, including: ${sample}${irrMultipleSignChangeCheck.findings.length > 8 ? ' and others' : ''}. Such a series can have more than one mathematically valid IRR, and a plain IRR() call gives no indication the result is ambiguous.`,
+      reason: `${irrMultipleSignChangeCheck.findings.length} IRR() range(s) have a cash flow series with 2+ sign changes`,
+      corrective_action: 'Confirm this IRR result against an NPV-vs-discount-rate profile before relying on it, and consider whether a guess argument or an alternative metric (e.g. MIRR) is more appropriate for a non-conventional cash flow series.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'IRR multiple sign changes',
+      model_risk: 'A cash flow series with 2+ sign changes can have multiple mathematically valid IRRs — a plain IRR() call silently converges to just one root, with no indication in the cell that the result is ambiguous.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'IRR() range has a non-conventional cash flow series (2+ sign changes)', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 75,
+      ...buildRootCauseFields('T0-IRRMULTISIGN-001', irrMultipleSignChangeCheck, { commonRemediationAction: 'Confirm this IRR against an NPV-vs-discount-rate profile; consider a guess argument or MIRR instead.' })
+    });
+  }
+
+  const flagErrorMaskingCheck = (() => { try { return checkFlagProductErrorMasking(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Flag error-masking check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (flagErrorMaskingCheck.applicable && flagErrorMaskingCheck.findings.length > 0) {
+    const sample = flagErrorMaskingCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-FLAGERRMASK-001',
+      label: `${flagErrorMaskingCheck.findings.length} PRODUCT()-based flag formula(s) with an unprotected inline division`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${flagErrorMaskingCheck.findings.length} PRODUCT()-based flag-combination formula(s) contain an inline division with no IFERROR() protection, including: ${sample}${flagErrorMaskingCheck.findings.length > 8 ? ' and others' : ''}. PRODUCT() cannot trap an error the way IF() can — a #DIV/0! inside one term propagates through the whole product rather than being masked.`,
+      reason: `${flagErrorMaskingCheck.findings.length} PRODUCT()-based flag formula(s) have an unprotected inline division`,
+      corrective_action: 'Wrap the division in IFERROR(), or restructure the flag as an explicit IF-based test, so the flag degrades gracefully rather than surfacing a raw Excel error.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Flag formula cannot trap underlying error',
+      model_risk: 'A PRODUCT()-based flag combination silently loses its ability to produce a clean 0/1 signal exactly when an underlying error condition occurs — the flag itself becomes an error, rather than correctly flagging the problem.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'PRODUCT()-based flag has an unprotected inline division', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 75,
+      ...buildRootCauseFields('T0-FLAGERRMASK-001', flagErrorMaskingCheck, { commonRemediationAction: 'Wrap the division in IFERROR(), or restructure as an explicit IF-based test.' })
     });
   }
 
