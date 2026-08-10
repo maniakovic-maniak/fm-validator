@@ -42,6 +42,8 @@ function estimateRawFormulaListTokens(workbook) {
 
   workbook.eachSheet((ws) => {
     const sheetName = ws.name;
+    let sheetHasFormulas = false;
+
     ws.eachRow({ includeEmpty: false }, (row) => {
       row.eachCell({ includeEmpty: false }, (cell) => {
         const raw = cell.formula;
@@ -50,13 +52,25 @@ function estimateRawFormulaListTokens(workbook) {
         if (!formula) return;
 
         formulaCellCount++;
-        // "SheetName!CellAddress: =" + formula text + newline — the
-        // exact shape a full raw-formula-list payload line would take.
-        // sheetName.length + 1 ('!') + cell.address.length + 3 (': =')
-        // + formula.length + 1 ('\n')
-        estimatedCharacters += sheetName.length + 1 + cell.address.length + 3 + formula.length + 1;
+        sheetHasFormulas = true;
+        // FIX: the actual full-parse payload (validator-tier2-
+        // fullparse.js) groups formulas by sheet — the sheet name is
+        // encoded once as an object key, not repeated per formula
+        // line. Each line within a sheet's list is genuinely just
+        // "CellAddress: =formula\n" — cell.address.length + 3 (': =')
+        // + formula.length + 1 ('\n'). The sheet name's own overhead
+        // is added once per sheet, below, not here.
+        estimatedCharacters += cell.address.length + 3 + formula.length + 1;
       });
     });
+
+    // Sheet-name overhead, once per sheet with any formula content —
+    // matches JSON.stringify encoding the sheet name once as the
+    // object key (quotes + colon + the name itself), not the flat
+    // per-line prefix the original version of this function assumed.
+    if (sheetHasFormulas) {
+      estimatedCharacters += sheetName.length + 4; // '"' + name + '":' roughly
+    }
   });
 
   return {

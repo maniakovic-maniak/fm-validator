@@ -466,7 +466,7 @@ function resolveDeepAccountingSheets(sheetNames) {
   return { resolvedMap, unresolvedCategories };
 }
 
-async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null } = {}) {
+async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
   // itself failed to complete for this run. A flat, mining-style
@@ -559,6 +559,26 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   }
 
   const systemPrompt = buildSystemPrompt(domain, modelContext);
+
+  // FIX (Phase 2.2): full-parse route — builds a single unified raw-
+  // formula payload covering every sheet with formula content, used
+  // for all 3 batches instead of the curated dataSubset/deepDataSubset
+  // split. The curated split exists specifically to work around
+  // limited visibility; full-parse mode doesn't have that limitation,
+  // so every batch gets the same complete formula picture. When
+  // useFullParse is false (the default, and the only path for any
+  // model too large for this route per Phase 1's threshold), nothing
+  // below this point differs from before this phase existed.
+  let batch1Data = dataSubset, batch2Data = deepDataSubset, batch3Data = dataSubset;
+  if (useFullParse) {
+    const { buildFullParseFormulaPayload, FULL_PARSE_PROMPT_ADDENDUM } = require('./validator-tier2-fullparse');
+    const fullParsePayload = buildFullParseFormulaPayload(parsed._raw);
+    const fullParseTokens = Math.round(JSON.stringify(fullParsePayload).length / 3);
+    console.log(`   Full-parse payload: ~${fullParseTokens.toLocaleString()} tokens across ${Object.keys(fullParsePayload).length} sheets (all 3 batches)`);
+    batch1Data = batch2Data = batch3Data = fullParsePayload;
+    systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\n' + FULL_PARSE_PROMPT_ADDENDUM;
+  }
+
   const { batch1, batch2, batch3 } = splitIntoBatches(checklist.tier2);
   const allResults = [];
   let topLevelMeta = {};
@@ -619,17 +639,17 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     // dominant portion of total run time (1800-2200s range observed).
     await Promise.all([
       // ── Batch 1: Structure, Inputs, Formula mechanics (S1-S4) ──────────
-      runOneBatch(batch1, dataSubset, 'Batch 1 — Structure (S1-S4)', 'T2-BATCH1'),
+      runOneBatch(batch1, batch1Data, 'Batch 1 — Structure (S1-S4)', 'T2-BATCH1'),
 
       // ── Batch 2: Accounting, Debt, Revenue, Tax (S5-S7,S10) — DEEP DATA ─
       // This is the B5 deep financial review batch. It receives full,
       // untrimmed AFS/IFS/Cons/Debt/Equity data so Claude has enough evidence
       // to test balance sheet roll-forwards, debt schedules, retained earnings,
       // and tax reconciliation with confidence rather than returning uncertain.
-      runOneBatch(batch2, deepDataSubset, 'Batch 2 — Accounting & Debt (S5-S7,S10)', 'T2-BATCH2'),
+      runOneBatch(batch2, batch2Data, 'Batch 2 — Accounting & Debt (S5-S7,S10)', 'T2-BATCH2'),
 
       // ── Batch 3: Scenarios, Audit, Actuals, Commercial, Governance ──────
-      runOneBatch(batch3, dataSubset, 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', 'T2-BATCH3'),
+      runOneBatch(batch3, batch3Data, 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', 'T2-BATCH3'),
     ]);
 
     // Normalise all results — ensure required fields exist

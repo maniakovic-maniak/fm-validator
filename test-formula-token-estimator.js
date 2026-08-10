@@ -20,8 +20,8 @@ const check = (desc, pass) => {
     const result = estimateRawFormulaListTokens(wb);
     check('a single formula cell is counted, a plain value cell is not',
       result.formulaCellCount === 1);
-    check('estimated characters matches the exact expected shape (SheetName!Cell: =formula\\n)',
-      result.estimatedCharacters === 'Sheet1'.length + 1 + 'A1'.length + 3 + 'B1+B2'.length + 1);
+    check('estimated characters matches the exact expected shape (grouped by sheet: sheet-name overhead once, then Cell: =formula\\n per line)',
+      result.estimatedCharacters === ('A1'.length + 3 + 'B1+B2'.length + 1) + ('Sheet1'.length + 4));
   }
 
   {

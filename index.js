@@ -81,6 +81,7 @@ const { loadDomainSkill, maybeQueueDomainDraft }   = require('./src/classifier')
 const { preValidate }                              = require('./src/pre-validator');
 const { runTier1 }                                 = require('./src/validator-tier1');
 const { runTier0 }                                 = require('./src/validator-tier0');
+const { shouldUseFullParseRoute }                  = require('./src/utils/formula-token-estimator');
 const { runTier2, resolveDeepAccountingSheets }    = require('./src/validator-tier2');
 const { buildReportFile }                          = require('./src/report-tab');
 const { uploadBothFiles }                          = require('./src/writer');
@@ -115,6 +116,17 @@ async function run() {
   // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────────
   console.log('[1.5/6] Scanning formula text...');
   const tier0 = await runTier0(parsed);
+
+  // FIX (Phase 2.1): funnel routing decision — the earliest point the
+  // raw-formula-list estimate is available, since Tier 0 has already
+  // parsed every formula cell. Decides here, once, rather than
+  // re-deciding later when the curated dataSubset/deepDataSubset
+  // payloads are being built, so the decision is made from the
+  // cheapest possible signal (Tier 0's already-complete scan) before
+  // any further, more expensive work happens.
+  const funnelDecision = shouldUseFullParseRoute(parsed._raw);
+  console.log(`   Funnel routing: ${funnelDecision.useFullParse ? 'FULL-PARSE' : 'CURATED'} route (~${funnelDecision.estimate.estimatedTokens.toLocaleString()} estimated raw-formula tokens vs ${funnelDecision.threshold.toLocaleString()} threshold)`);
+
   // Opt-in only — this is an additional-cost, additional-time review
   // beyond the standard run. Off by default; set ENABLE_FORMULA_DEEPDIVE=true
   // (or pass formulaDeepDive:true in the request body, for server.js) to enable.
@@ -296,7 +308,8 @@ async function run() {
     tier0Stats:  tier0.stats,
     tier0Risks:  tier0.riskIndicators,
     namedRangeAudit,
-    vbaReview
+    vbaReview,
+    useFullParse: funnelDecision.useFullParse
   });
   const t2Pass         = t2Results.filter(r => r.status === 'pass').length;
   const t2FailuresRaw  = t2Results.filter(r => r.status !== 'pass');

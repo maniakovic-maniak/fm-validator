@@ -93,6 +93,7 @@ const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
 const { runTier1 }                               = require('./src/validator-tier1');
 const { runTier0 }                               = require('./src/validator-tier0');
+const { shouldUseFullParseRoute }                = require('./src/utils/formula-token-estimator');
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
@@ -309,7 +310,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────
     console.log('[1.5/6] Scanning formula text...');
-    const tier0 = await runTier0(parsed);  // Opt-in only — this is an additional-cost, additional-time review
+    const tier0 = await runTier0(parsed);
+
+    // FIX (Phase 2.1): funnel routing decision, matching index.js exactly.
+    const funnelDecision = shouldUseFullParseRoute(parsed._raw);
+    console.log(`   Funnel routing: ${funnelDecision.useFullParse ? 'FULL-PARSE' : 'CURATED'} route (~${funnelDecision.estimate.estimatedTokens.toLocaleString()} estimated raw-formula tokens vs ${funnelDecision.threshold.toLocaleString()} threshold)`);
+
+    // Opt-in only — this is an additional-cost, additional-time review
   // beyond the standard run. Off by default; set ENABLE_FORMULA_DEEPDIVE=true
   // (or pass formulaDeepDive:true in the request body, for server.js) to enable.
   const wantsDeepDive = process.env.ENABLE_FORMULA_DEEPDIVE === 'true' || (req.body && req.body.formulaDeepDive === true);
@@ -440,7 +447,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const t1Results  = runTier1(parsed);
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
-    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview });
+    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse });
     const t2FailuresRaw = t2Results.filter(r => r.status !== 'pass');
     // FIX (I-11): found via an independent review confirming at least
     // 3 Tier 2 findings explicitly self-identify as duplicates of
