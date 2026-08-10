@@ -610,18 +610,27 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
   }
 
   try {
-    // ── Batch 1: Structure, Inputs, Formula mechanics (S1-S4) ────────────────
-    await runOneBatch(batch1, dataSubset, 'Batch 1 — Structure (S1-S4)', 'T2-BATCH1');
+    // FIX (Phase 0.1): confirmed no genuine cross-batch dependency — each
+    // batch reads only from data computed once, before any batch runs
+    // (dataSubset, deepDataSubset), and nothing in Batch 2 or 3 depends on
+    // Batch 1's output. Converted from 3 sequential awaits to Promise.all
+    // so wall-clock time drops to roughly the slowest single batch rather
+    // than the sum of all three — this has consistently been the
+    // dominant portion of total run time (1800-2200s range observed).
+    await Promise.all([
+      // ── Batch 1: Structure, Inputs, Formula mechanics (S1-S4) ──────────
+      runOneBatch(batch1, dataSubset, 'Batch 1 — Structure (S1-S4)', 'T2-BATCH1'),
 
-    // ── Batch 2: Accounting, Debt, Revenue, Tax (S5-S7,S10) — DEEP DATA ──────
-    // This is the B5 deep financial review batch. It receives full,
-    // untrimmed AFS/IFS/Cons/Debt/Equity data so Claude has enough evidence
-    // to test balance sheet roll-forwards, debt schedules, retained earnings,
-    // and tax reconciliation with confidence rather than returning uncertain.
-    await runOneBatch(batch2, deepDataSubset, 'Batch 2 — Accounting & Debt (S5-S7,S10)', 'T2-BATCH2');
+      // ── Batch 2: Accounting, Debt, Revenue, Tax (S5-S7,S10) — DEEP DATA ─
+      // This is the B5 deep financial review batch. It receives full,
+      // untrimmed AFS/IFS/Cons/Debt/Equity data so Claude has enough evidence
+      // to test balance sheet roll-forwards, debt schedules, retained earnings,
+      // and tax reconciliation with confidence rather than returning uncertain.
+      runOneBatch(batch2, deepDataSubset, 'Batch 2 — Accounting & Debt (S5-S7,S10)', 'T2-BATCH2'),
 
-    // ── Batch 3: Scenarios, Audit, Actuals, Commercial, Governance ───────────
-    await runOneBatch(batch3, dataSubset, 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', 'T2-BATCH3');
+      // ── Batch 3: Scenarios, Audit, Actuals, Commercial, Governance ──────
+      runOneBatch(batch3, dataSubset, 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', 'T2-BATCH3'),
+    ]);
 
     // Normalise all results — ensure required fields exist
     const normalised = allResults.map(r => ({
