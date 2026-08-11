@@ -85,6 +85,16 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     // for dashboard display; the full fingerprint detail stays in the
     // local history file, not round-tripped through the report itself.
     crossRunStats: crossRunStats || { closed: [], new: [], regressed: [], stillOpen: [], isFirstRun: true },
+    // FIX: found via a multi-session investigation — this field was
+    // correctly computed in server.js and correctly passed into this
+    // function's meta parameter, but was never added to this explicit
+    // payload object, so it never reached build_report.py at all.
+    // Confirmed the JS side always had the right data (via a temporary
+    // debug line); confirmed build_report.py's rendering logic was
+    // always correct given the right input (via direct testing at both
+    // minimal and realistic scale); the actual gap was this one missing
+    // line, silently dropping the field between the two.
+    ownerDecisionChecklist: meta.ownerDecisionChecklist || null,
     auditLog:        auditLog || []
   };
 
