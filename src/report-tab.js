@@ -116,6 +116,16 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
             if (stderr) err.message += `\nstderr: ${stderr}`;
             return reject(err);
           }
+          // FIX: found via direct investigation — stderr was silently
+          // discarded on the success path, meaning any debug output
+          // written there (the correct place to write it, since stdout
+          // must stay pure JSON for the parse below) was genuinely
+          // executing every time but never visible in the console.
+          // Surfaced here too, clearly labelled, so it's distinguishable
+          // from a genuine error.
+          if (stderr && stderr.trim()) {
+            console.log(`   [build_report.py stderr]: ${stderr.trim()}`);
+          }
           resolve(stdout);
         }
       );
