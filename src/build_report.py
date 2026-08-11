@@ -1488,6 +1488,7 @@ def build_report(data_path, output_path):
     # has this pattern — ownerDecisionChecklist is None otherwise, so
     # this never adds an empty section to a model without one.
     _odc = d.get('ownerDecisionChecklist')
+    import sys as _dbgsys; print(f'DEBUG _odc: {_odc}', file=_dbgsys.stderr, flush=True)
     if _odc and _odc.get('items'):
         _odc_start = _rem_last_row + 3
         r5b = _odc_start

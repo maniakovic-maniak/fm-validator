@@ -374,6 +374,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Error-scan-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const ownerDecisionChecklist = (() => { try { return findOwnerDecisionChecklist(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Owner-decision-checklist scan failed:', e.message); return null; } })();
+  console.log("DEBUG ownerDecisionChecklist:", JSON.stringify(ownerDecisionChecklist));
     // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
     // Deep Dive) but genuinely async since it spawns a Python subprocess,
     // so it needs its own await rather than fitting the synchronous IIFE

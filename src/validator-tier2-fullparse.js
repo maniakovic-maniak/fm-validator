@@ -73,6 +73,10 @@ formula cell in the workbook — not curated, pre-extracted values. Each sheet's
 data below is a full list of "CellAddress: =formula" lines, exactly as the
 formula reads in the workbook.
 
+State review_mode as "llm_full_parse" for every finding in this run — not
+llm_only or llm_with_partial_formulas, since both of those describe curated-
+data modes this run is not using.
+
 This means you can now directly verify formula LOGIC, not just plausibility of
 displayed values — trace whether a labelled output genuinely computes what its
 label claims (e.g. confirm an "NPV" cell's formula actually discounts a cash

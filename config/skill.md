@@ -914,6 +914,7 @@ Your behaviour changes based on what data is available.
 **Always state your mode in the review_mode field:**
 - `llm_only` — Mode A (current default, for rows without `_formulaSamples`)
 - `llm_with_partial_formulas` — Mode A+ (this review, when your finding relies on a row that has `_formulaSamples`)
+- `llm_full_parse` — full-parse mode (this run received complete, unabridged formula text for every formula cell in the workbook, not curated values or partial samples — see the FULL-PARSE MODE note above if present in this prompt)
 - `llm_with_formulas` — Mode B
 - `llm_with_documents` — Mode C
 - `llm_with_formulas_and_documents` — Mode B + C

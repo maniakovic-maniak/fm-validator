@@ -19,7 +19,9 @@ const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
 const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
 const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
-const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk } = require('./src/utils/formula-logic-checks');
+const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk, checkIrrMultipleSignChangeRisk } = require('./src/utils/formula-logic-checks');
+const { checkFlagProductErrorMasking } = require('./src/utils/flag-error-masking-check');
+const { checkTextBooleanFlag } = require('./src/utils/text-boolean-flag-check');
 const { checkAutoSumHeaderInclusion } = require('./src/utils/autosum-header-check');
 const { checkFormulaPatternConsistency } = require('./src/utils/formula-pattern-consistency-check');
 const { checkDaisyChains } = require('./src/utils/daisy-chain-check');
@@ -91,6 +93,7 @@ const { loadDomainSkill, maybeQueueDomainDraft } = require('./src/classifier');
 const { preValidate }                            = require('./src/pre-validator');
 const { runTier1 }                               = require('./src/validator-tier1');
 const { runTier0 }                               = require('./src/validator-tier0');
+const { shouldUseFullParseRoute }                = require('./src/utils/formula-token-estimator');
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
@@ -235,6 +238,50 @@ app.get('/api/checklists', (req, res) => {
 });
 
 // ── Main validation endpoint ───────────────────────────────────────────────────
+// FIX: pricing-per-F-score-band is a business decision, not something
+// inferrable from the UI mockup alone — isolated here as a single named
+// constant so real figures can be swapped in later without touching the
+// route logic below. Values are illustrative placeholders.
+const FSCORE_BAND_PRICE = { Low: 2, Moderate: 5, High: 12, Critical: 20 };
+
+// Unique-formula + F-score estimate — deliberately stops after Tier 0's
+// formula scan (deterministic, local, no Anthropic API call) rather than
+// running the full pipeline, so this is fast and free of API cost, per
+// the "unique formula" feature's own design requirement (confirmed
+// directly against validator-tier0.js: uniqueFormulaCount and fscoreDist
+// are both computed purely from formula-text pattern normalization,
+// before familiarisation or Tier 2 ever run).
+app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ status: 'error', message: 'No file uploaded' });
+  }
+  const filePath     = req.file.path;
+  const originalName = req.file.originalname;
+
+  try {
+    const parsed = await parseExcel(filePath);
+    const tier0  = await runTier0(parsed);
+    const fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    const uniqueFormulaTotal = (tier0.stats && tier0.stats.uniqueFormulaCount) || 0;
+    const priceTotal = Object.entries(fscoreDist)
+      .reduce((sum, [band, count]) => sum + count * (FSCORE_BAND_PRICE[band] || 0), 0);
+
+    res.json({
+      status: 'success',
+      originalName,
+      uniqueFormulaTotal,
+      fscoreDist,
+      priceTotal,
+      pricePerBand: FSCORE_BAND_PRICE
+    });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Unique-formula estimate failed:', err.message);
+    res.status(500).json({ status: 'error', message: err.message || 'Could not scan the file.' });
+  } finally {
+    fs.unlink(filePath, () => {});
+  }
+});
+
 app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ status: 'error', message: 'No file uploaded' });
@@ -264,7 +311,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────
     console.log('[1.5/6] Scanning formula text...');
     const tier0 = await runTier0(parsed);
-  // Opt-in only — this is an additional-cost, additional-time review
+
+    // FIX (Phase 2.1): funnel routing decision, matching index.js exactly.
+    const funnelDecision = shouldUseFullParseRoute(parsed._raw);
+    console.log(`   Funnel routing: ${funnelDecision.useFullParse ? 'FULL-PARSE' : 'CURATED'} route (~${funnelDecision.estimate.estimatedTokens.toLocaleString()} estimated raw-formula tokens vs ${funnelDecision.threshold.toLocaleString()} threshold)`);
+
+    // Opt-in only — this is an additional-cost, additional-time review
   // beyond the standard run. Off by default; set ENABLE_FORMULA_DEEPDIVE=true
   // (or pass formulaDeepDive:true in the request body, for server.js) to enable.
   const wantsDeepDive = process.env.ENABLE_FORMULA_DEEPDIVE === 'true' || (req.body && req.body.formulaDeepDive === true);
@@ -322,6 +374,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Error-scan-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const ownerDecisionChecklist = (() => { try { return findOwnerDecisionChecklist(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Owner-decision-checklist scan failed:', e.message); return null; } })();
+  console.log("DEBUG ownerDecisionChecklist:", JSON.stringify(ownerDecisionChecklist));
+  console.log("DEBUG ownerDecisionChecklist:", JSON.stringify(ownerDecisionChecklist));
     // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
     // Deep Dive) but genuinely async since it spawns a Python subprocess,
     // so it needs its own await rather than fitting the synchronous IIFE
@@ -395,7 +449,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const t1Results  = runTier1(parsed);
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
-    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview });
+    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse });
     const t2FailuresRaw = t2Results.filter(r => r.status !== 'pass');
     // FIX (I-11): found via an independent review confirming at least
     // 3 Tier 2 findings explicitly self-identify as duplicates of
@@ -645,6 +699,69 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       root_cause: 'IRR() range contains no negative (initial-investment) value', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 80,
       ...buildRootCauseFields('T0-IRRSIGN-001', irrNegativeCashFlowCheck, { commonRemediationAction: 'Confirm whether the initial investment/outflow is genuinely missing from the IRR() range, or zero.' })
+    });
+  }
+
+  const irrMultipleSignChangeCheck = (() => { try { return checkIrrMultipleSignChangeRisk(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  IRR multiple-sign-change check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (irrMultipleSignChangeCheck.applicable && irrMultipleSignChangeCheck.findings.length > 0) {
+    const sample = irrMultipleSignChangeCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-IRRMULTISIGN-001',
+      label: `${irrMultipleSignChangeCheck.findings.length} IRR() formula(s) over a cash flow series with 2+ sign changes`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${irrMultipleSignChangeCheck.findings.length} IRR() formula(s) reference a cash flow series that changes sign 2 or more times, including: ${sample}${irrMultipleSignChangeCheck.findings.length > 8 ? ' and others' : ''}. Such a series can have more than one mathematically valid IRR, and a plain IRR() call gives no indication the result is ambiguous.`,
+      reason: `${irrMultipleSignChangeCheck.findings.length} IRR() range(s) have a cash flow series with 2+ sign changes`,
+      corrective_action: 'Confirm this IRR result against an NPV-vs-discount-rate profile before relying on it, and consider whether a guess argument or an alternative metric (e.g. MIRR) is more appropriate for a non-conventional cash flow series.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'IRR multiple sign changes',
+      model_risk: 'A cash flow series with 2+ sign changes can have multiple mathematically valid IRRs — a plain IRR() call silently converges to just one root, with no indication in the cell that the result is ambiguous.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'IRR() range has a non-conventional cash flow series (2+ sign changes)', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 75,
+      ...buildRootCauseFields('T0-IRRMULTISIGN-001', irrMultipleSignChangeCheck, { commonRemediationAction: 'Confirm this IRR against an NPV-vs-discount-rate profile; consider a guess argument or MIRR instead.' })
+    });
+  }
+
+  const flagErrorMaskingCheck = (() => { try { return checkFlagProductErrorMasking(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Flag error-masking check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (flagErrorMaskingCheck.applicable && flagErrorMaskingCheck.findings.length > 0) {
+    const sample = flagErrorMaskingCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-FLAGERRMASK-001',
+      label: `${flagErrorMaskingCheck.findings.length} PRODUCT()-based flag formula(s) with an unprotected inline division`,
+      severity: 'medium', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${flagErrorMaskingCheck.findings.length} PRODUCT()-based flag-combination formula(s) contain an inline division with no IFERROR() protection, including: ${sample}${flagErrorMaskingCheck.findings.length > 8 ? ' and others' : ''}. PRODUCT() cannot trap an error the way IF() can — a #DIV/0! inside one term propagates through the whole product rather than being masked.`,
+      reason: `${flagErrorMaskingCheck.findings.length} PRODUCT()-based flag formula(s) have an unprotected inline division`,
+      corrective_action: 'Wrap the division in IFERROR(), or restructure the flag as an explicit IF-based test, so the flag degrades gracefully rather than surfacing a raw Excel error.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Flag formula cannot trap underlying error',
+      model_risk: 'A PRODUCT()-based flag combination silently loses its ability to produce a clean 0/1 signal exactly when an underlying error condition occurs — the flag itself becomes an error, rather than correctly flagging the problem.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'PRODUCT()-based flag has an unprotected inline division', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 75,
+      ...buildRootCauseFields('T0-FLAGERRMASK-001', flagErrorMaskingCheck, { commonRemediationAction: 'Wrap the division in IFERROR(), or restructure as an explicit IF-based test.' })
+    });
+  }
+
+  const textBooleanFlagCheck = (() => { try { return checkTextBooleanFlag(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Text-boolean flag check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (textBooleanFlagCheck.applicable && textBooleanFlagCheck.findings.length > 0) {
+    const sample = textBooleanFlagCheck.findings.slice(0, 8).map(f => `${f.sheet}!${f.cell}`).join(', ');
+    allFlagged.push({
+      id: 'T0-TEXTBOOLFLAG-001',
+      label: `${textBooleanFlagCheck.findings.length} IF() formula(s) return "TRUE"/"FALSE" as text rather than a genuine boolean`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Structure',
+      condition: `${textBooleanFlagCheck.findings.length} IF() formula(s) return the literal quoted text "TRUE"/"FALSE" rather than a genuine boolean or 1/0, including: ${sample}${textBooleanFlagCheck.findings.length > 8 ? ' and others' : ''}. This looks identical on screen to a real boolean but will produce #VALUE! the moment it's used in any downstream arithmetic.`,
+      reason: `${textBooleanFlagCheck.findings.length} IF() formula(s) return text "TRUE"/"FALSE" instead of a genuine boolean`,
+      corrective_action: 'Replace with a direct comparison (e.g. =F7>F6) or =IF(condition,1,0), which evaluate correctly in any downstream arithmetic use.',
+      workstream: 'Structure', category: 'Structure', issue_type: 'Text pseudo-boolean flag',
+      model_risk: 'A cell returning quoted text "TRUE"/"FALSE" looks identical to a genuine boolean on screen, but will produce #VALUE! rather than the intended 0/1 behaviour if ever referenced arithmetically, now or in a future edit.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'IF() formula returns quoted text "TRUE"/"FALSE" instead of boolean/1/0', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 80,
+      ...buildRootCauseFields('T0-TEXTBOOLFLAG-001', textBooleanFlagCheck, { commonRemediationAction: 'Replace with a direct comparison or IF(condition,1,0).' })
     });
   }
 

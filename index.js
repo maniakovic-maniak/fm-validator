@@ -126,6 +126,7 @@ async function run() {
   // any further, more expensive work happens.
   const funnelDecision = shouldUseFullParseRoute(parsed._raw);
   console.log(`   Funnel routing: ${funnelDecision.useFullParse ? 'FULL-PARSE' : 'CURATED'} route (~${funnelDecision.estimate.estimatedTokens.toLocaleString()} estimated raw-formula tokens vs ${funnelDecision.threshold.toLocaleString()} threshold)`);
+  console.log(`   DEBUG funnel: formulaCellCount=${funnelDecision.estimate.formulaCellCount} estimatedCharacters=${funnelDecision.estimate.estimatedCharacters}`);
 
   // Opt-in only — this is an additional-cost, additional-time review
   // beyond the standard run. Off by default; set ENABLE_FORMULA_DEEPDIVE=true
