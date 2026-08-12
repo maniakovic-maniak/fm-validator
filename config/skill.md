@@ -936,6 +936,7 @@ routed to the full-parse funnel — see review_mode: llm_full_parse below)**
 | Assumption support | 60 | 60 | 60 |
 | Formula consistency | 40 | 90 | 95 |
 | Hardcode detection | 35 | 90 | 95 |
+| Unique input location (does a second occurrence reference the first live, or independently re-enter the same value?) | 40 | 55 (label/value match alone cannot distinguish a live reference from a coincidentally-identical hardcode) | 85 (formula text directly shows whether the second occurrence is a cell reference or a literal value — a directly verifiable, binary check, not requiring the whole dependency graph) |
 | Circular reference detection | 20 | 20 (a single row's formula sample cannot establish or rule out a circular chain — that needs the whole dependency graph) | 90 (full formula text across every cell genuinely does support workbook-wide dependency-graph reasoning) |
 
 The Mode B column applies only when review_mode is genuinely
@@ -1547,9 +1548,10 @@ changes how three of the five should now be handled:
   in Mode A at confidence 40-55 (inferring from label/value matches
   alone). When review_mode is llm_full_parse, you can move beyond
   inference to full confirmation — directly check whether a second
-  occurrence is a live cross-sheet reference or an independent
-  hardcode — and should apply the Mode B confidence-cap column rather
-  than staying at the Mode A 40-55 range.
+  occurrence is a live cell reference (a formula pointing at the first
+  occurrence) or an independently-typed literal value — and should
+  apply the dedicated "Unique input location" row of the confidence-cap
+  table (max 85 in Mode B), not the vaguer general Mode B range.
 - range_names_meaningful is NOT gated on review_mode at all — it
   depends on whether a named-range list was separately provided as
   evidence, which has nothing to do with formula-text access. Treat it
