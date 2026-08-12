@@ -505,11 +505,13 @@ def build_report(data_path, output_path):
     # ── Tier 2 review-depth summary ─────────────────────────────────────────
     # Requested after confirming (via a real production run) that Tier 2 can
     # genuinely ground some findings in direct formula-text inspection
-    # (review_mode = llm_with_partial_formulas) rather than values/labels
-    # alone (llm_only) — a one-glance, ongoing check that this stays working,
-    # without needing to search finding text for formula-syntax clues by hand
-    # each time. Only counts T2-* findings — review_mode is specifically a
-    # Tier 2/LLM concept; deterministic Tier 0/Tier 1 checks don't have one.
+    # (review_mode = llm_with_partial_formulas, or llm_full_parse for a
+    # model small enough for the full-parse funnel) rather than values/
+    # labels alone (llm_only) — a one-glance, ongoing check that this stays
+    # working, without needing to search finding text for formula-syntax
+    # clues by hand each time. Only counts T2-* findings — review_mode is
+    # specifically a Tier 2/LLM concept; deterministic Tier 0/Tier 1 checks
+    # don't have one.
     _t2_findings_for_mode = [f for f in findings if str(f.get('id','')).startswith('T2-')]
     if _t2_findings_for_mode:
         _mode_counts = {}
@@ -517,7 +519,15 @@ def build_report(data_path, output_path):
             _m = _f.get('review_mode') or 'llm_only'
             _mode_counts[_m] = _mode_counts.get(_m, 0) + 1
         _total_t2 = len(_t2_findings_for_mode)
-        _formula_grounded = _mode_counts.get('llm_with_partial_formulas', 0) + _mode_counts.get('llm_with_formulas', 0)
+        # FIX: llm_full_parse is the MOST formula-grounded mode of all
+        # (complete formula text for every cell, not partial samples) and
+        # was missing from this count entirely — a genuine gap, not a
+        # style choice, found while reconciling review_mode values across
+        # the project after skill.md's Mode B section was updated.
+        # llm_with_formulas is kept for backward compatibility with any
+        # already-generated report predating that fix, where Claude
+        # improvised this label before llm_full_parse was formally defined.
+        _formula_grounded = _mode_counts.get('llm_with_partial_formulas', 0) + _mode_counts.get('llm_full_parse', 0) + _mode_counts.get('llm_with_formulas', 0)
         if _formula_grounded > 0:
             _pct = round(100 * _formula_grounded / _total_t2)
             _depth_text = f'{_formula_grounded} of {_total_t2} Tier 2 finding(s) ({_pct}%) grounded in direct formula-text inspection; the remainder from values and labels alone.'
@@ -1488,7 +1498,6 @@ def build_report(data_path, output_path):
     # has this pattern — ownerDecisionChecklist is None otherwise, so
     # this never adds an empty section to a model without one.
     _odc = d.get('ownerDecisionChecklist')
-    import sys as _dbgsys; print(f'DEBUG _odc: {_odc}', file=_dbgsys.stderr, flush=True)
     if _odc and _odc.get('items'):
         _odc_start = _rem_last_row + 3
         r5b = _odc_start

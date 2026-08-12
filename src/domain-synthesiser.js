@@ -36,6 +36,74 @@ const path = require('path');
 
 const client = new Anthropic();
 
+/**
+ * Scans checklist.json for the highest T2-S10-XXX rule number currently
+ * in use and returns a safe starting point for a new domain's graded
+ * tests — avoiding the exact collision risk that would exist if a future
+ * draft's LLM-generated numbering happened to overlap with an existing
+ * domain's range (mining: 097-179, property: 201-284, confirmed
+ * collision-free with each other only because both were checked
+ * manually before this function existed).
+ *
+ * @param {string} configDir
+ * @returns {number} the first safe rule number to start a new block at
+ */
+function getNextAvailableRuleNumber(configDir) {
+  const checklistPath = path.join(configDir, 'checklist.json');
+  const checklist = JSON.parse(fs.readFileSync(checklistPath, 'utf8'));
+  const usedNumbers = checklist.tier2
+    .map(r => r.id)
+    .filter(id => id.startsWith('T2-S10-'))
+    .map(id => parseInt(id.split('-').pop(), 10))
+    .filter(n => Number.isFinite(n));
+  const maxUsed = usedNumbers.length > 0 ? Math.max(...usedNumbers) : 0;
+  return maxUsed + 10; // small buffer, not a tight boundary
+}
+
+/**
+ * Extracts every "### T2-S10-NNN — test: name\n<description>" block from
+ * a draft's content and builds the exact checklist.json entry shape
+ * used for the mining and property integrations this session — same
+ * schema, same first-sentence-as-label derivation, same
+ * fix_instruction-from-description pattern. Returns an empty array if
+ * the draft has no graded-test sections at all (a genuinely valid case
+ * for a smaller/simpler domain, not an error).
+ *
+ * @param {string} draftContent
+ * @param {string} sourceFileName - e.g. 'skill-corporate.md', used as
+ *   this session's own established source_id convention
+ * @returns {Array<object>} checklist.json-shaped rule entries
+ */
+function extractGradedTestsAsChecklistEntries(draftContent, sourceFileName) {
+  const pattern = /^### (T2-S10-\d+) — test: (\w+)\n([\s\S]*?)(?=\n### |\Z|$(?![\s\S]))/gm;
+  const matches = [...draftContent.matchAll(pattern)];
+
+  function firstSentence(text) {
+    const collapsed = text.replace(/\s+/g, ' ').trim();
+    const m = collapsed.match(/^(.*?[.!?])\s/);
+    return (m ? m[1] : collapsed.slice(0, 200)).trim();
+  }
+
+  return matches.map(([, ruleId, testName, description]) => {
+    const num = parseInt(ruleId.split('-').pop(), 10);
+    const descClean = description.replace(/\s+/g, ' ').trim();
+    let label = firstSentence(descClean);
+    if (label.length > 220) label = label.slice(0, 217).trimEnd() + '...';
+    return {
+      id: ruleId,
+      section: `10.${num}`,
+      label,
+      source_id: sourceFileName,
+      source_section: `Domain-specific graded tests — ${testName}`,
+      test: testName,
+      severity: 'medium',
+      manual_only: false,
+      fixable: false,
+      fix_instruction: `Investigate per ${sourceFileName}'s ${testName} test: ${descClean.slice(0, 400)}${descClean.length > 400 ? '...' : ''}`,
+    };
+  });
+}
+
 const SYNTHESISER_PROMPT = `You are drafting a new domain-specific context file for a financial
 model audit tool. This file will be loaded alongside a universal review
 methodology (skill.md) whenever a model of this specific type is
@@ -56,14 +124,34 @@ You will be given:
 
 Write the new domain skill file following the exact section structure of
 the structural example: Model type, Project/model characteristics, a
-Must-have / Optional / Skip section (see below), Sheet map (a table
-mapping common sheet names to their likely contents for this industry),
+Must-have / Optional / Skip section (see below), a Sheet-identification
+section (NOT a fixed table of "common sheet names" — ground this in the
+real sheet names you were given for the actual triggering model, and
+explicitly instruct the reviewer to identify structure from the model's
+own evidence rather than assume a fixed template; two models in the same
+broad industry can have materially different sheet structures, and a
+rigid name-matching table has been confirmed, on real reference models
+this project uses, to miss or mismatch genuine structural variation),
 Typical ranges (explicitly disclosed as context only, not pass/fail
 thresholds — this project never treats a benchmark as ground truth),
 Common failure patterns specific to this domain (5-8 patterns, each a
 real, specific, checkable mechanism — not generic advice), Dependency
 chain (a plain-text arrow diagram tracing how this industry's inputs flow
 through to outputs).
+
+In addition, include a final "## Domain-specific graded tests" section,
+formatted as a series of blocks in EXACTLY this shape (matching the
+convention already used in skill-mining.md and skill-property.md):
+
+### T2-S10-{N} — test: snake_case_test_name
+One or two sentences of specific, checkable guidance — what pattern to
+look for, and why it matters economically. Not generic advice.
+
+Start numbering at {starting_rule_number} (given to you in the payload)
+and increment by 1 for each test, with no gaps or reuse. Write 8-15 of
+these, covering the domain's most material, checkable failure patterns —
+quality over quantity; do not pad to reach a target count. Each test_name
+must be a unique snake_case identifier not used elsewhere in this file.
 
 The Must-have / Optional / Skip section exists because not every check in
 a domain applies to every model of that type — some sub-variants within
@@ -82,11 +170,40 @@ Reason through this genuinely for the target domain, not mechanically:
   top) — never state a flat "skip", always give the reviewer a concrete
   test for when to override it
 
+Distinguish durable domain-economic principles (relationships that hold
+regardless of date or jurisdiction — e.g. how a physical or legal
+characteristic changes value or risk) from specific, time-bound facts
+(current statutory rates, named current standards, specific numeric
+benchmarks, named regulatory editions). Where you include a specific,
+verifiable fact of the second kind, flag it as something a reviewer
+should confirm is still current — don't state it as if it were as
+durable as the underlying principle. This also makes the automated
+verification pass that runs after this draft more effective: it can
+check specific, flagged facts directly, rather than having to guess
+which parts of the file are asserting something checkable.
+
 Ground every specific claim in what a real model of this type would
 actually contain, informed by the real sheet names and summary you were
 given — do not write generic industry filler. If you are not confident
 about a specific numeric range or benchmark, omit it rather than
 inventing a plausible-sounding number.
+
+Do not restate what skill.md and soul.md already cover generically —
+generic spreadsheet review, audit evidence standards, severity
+calibration, reporting conventions, formula engineering, and general
+financial-statement mechanics (balance sheet reconciliation, cash flow
+reconciliation, debt rollforward, tax reconciliation, and similar) are
+handled by the core review methodology, not by this file. Every major
+section should explicitly name this boundary where it's relevant — for
+example, when writing about domain-specific accounting treatment, say
+plainly that generic financial-statement mechanics remain in the core
+skill, and only cover what's genuinely different because of this
+domain's physical, legal, or economic characteristics. Restating a
+generic concept in domain-flavoured language is not the same as
+covering something the core methodology doesn't already handle — if
+you're unsure whether a point belongs here or is already covered
+generically, err toward leaving it out and stating the boundary
+explicitly instead.
 
 Output ONLY the markdown content of the new skill file — no preamble, no
 commentary, no code fences.`;
@@ -150,6 +267,8 @@ async function draftDomainSkill(modelType, modelSummary, sheetNames, options = {
     weightingGuidance = extractWeightingGuidance(genericSkill, options.weightingDomainLabel);
   }
 
+  const startingRuleNumber = getNextAvailableRuleNumber(configDir);
+
   const payload = {
     target_model_type: modelType,
     real_model_summary: modelSummary,
@@ -157,11 +276,19 @@ async function draftDomainSkill(modelType, modelSummary, sheetNames, options = {
     structural_example_domain: structuralExampleDomain,
     structural_example_content: structuralExample,
     expected_focus_areas: weightingGuidance,
+    starting_rule_number: startingRuleNumber,
   };
 
   const response = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 16000,
+    // FIX: raised from 16000 — the structural example alone (mining,
+    // now 1845 lines) approaches or exceeds this as INPUT, and this same
+    // fix adds a genuinely new, substantial output requirement (8-15
+    // graded test blocks) on top of the existing sections. The old
+    // ceiling risked truncating a draft trying to match that depth
+    // before this change; not a guess, a real constraint found while
+    // building the graded-tests requirement itself.
+    max_tokens: 32000,
     system: SYNTHESISER_PROMPT,
     messages: [{ role: 'user', content: JSON.stringify(payload) }],
   });
@@ -175,6 +302,20 @@ async function draftDomainSkill(modelType, modelSummary, sheetNames, options = {
   if (!fs.existsSync(draftsDir)) fs.mkdirSync(draftsDir, { recursive: true });
   const draftPath = path.join(draftsDir, `skill-${modelType}.draft.md`);
   fs.writeFileSync(draftPath, draftContent);
+
+  // FIX: extract any graded-test sections and stage the corresponding
+  // checklist.json entries as a separate sidecar file — NOT merged into
+  // the live checklist.json here. This closes the gap found this
+  // session where drafts had no mechanism at all for registering new
+  // rules, requiring a human to notice and build this manually after
+  // the fact (as happened for both the mining and property domain
+  // reviews). Staged the same way the draft skill file itself is
+  // staged, requiring the same explicit human approval step via
+  // tools/review-domains.js before merging into the live file.
+  const checklistAdditions = extractGradedTestsAsChecklistEntries(draftContent, `skill-${modelType}.md`);
+  const checklistAdditionsPath = path.join(draftsDir, `skill-${modelType}.draft.checklist-additions.json`);
+  fs.writeFileSync(checklistAdditionsPath, JSON.stringify(checklistAdditions, null, 2));
+  console.log(`   ${checklistAdditions.length} graded test(s) extracted \u2014 staged at ${checklistAdditionsPath} (not yet in checklist.json, requires approval).`);
 
   // Metadata sidecar — review-domains.js runs in a separate CLI
   // invocation, potentially long after this drafting call completed, and
@@ -195,7 +336,7 @@ async function draftDomainSkill(modelType, modelSummary, sheetNames, options = {
 
   console.log(`   Draft domain skill written: ${draftPath} (${draftContent.length} chars) — NOT live, requires review before use.`);
 
-  return { draftPath, metaPath, draftContent, weightingGuidanceUsed: weightingGuidance };
+  return { draftPath, metaPath, checklistAdditionsPath, draftContent, weightingGuidanceUsed: weightingGuidance, checklistAdditions };
 }
 
-module.exports = { draftDomainSkill, extractWeightingGuidance };
+module.exports = { draftDomainSkill, extractWeightingGuidance, getNextAvailableRuleNumber, extractGradedTestsAsChecklistEntries };

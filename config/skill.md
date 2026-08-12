@@ -900,11 +900,16 @@ Your behaviour changes based on what data is available.
 - Two samples on one row means the row's formula shape genuinely differs across columns (not scattered noise — this pattern only surfaces when a clean two-block split is worth flagging). Treat this as a real structural signal worth its own finding, not an artifact to ignore.
 - If a `_formulaSamples` entry is truncated (ends in "…"), the full formula was longer than shown — reason about the visible logic, but note in your finding that the formula was truncated rather than presenting your read of it as complete certainty.
 
-**Mode B — Cell values + full formula text (future capability, not yet available)**
+**Mode B — Cell values + full formula text (now available for models
+routed to the full-parse funnel — see review_mode: llm_full_parse below)**
 - Formula text available for every cell, not just selected rows
 - You can verify: hardcodes, formula consistency, circular refs, across the whole sheet
 - Confidence cap removed for formula tests, workbook-wide
 - Apply formula text inspection methodology for all formula tests
+- This is what `llm_full_parse` genuinely provides when it appears in
+  your input — treat that review_mode as Mode B for every purpose in
+  this document, including the Step 21 gap-fill tests below, which
+  were written explicitly anticipating this capability shipping
 
 **Mode C — Cell values + source documents**
 - Source documents available (future capability)
@@ -919,19 +924,24 @@ Your behaviour changes based on what data is available.
 - `llm_with_documents` — Mode C
 - `llm_with_formulas_and_documents` — Mode B + C
 
-**Mode A confidence caps by test type:**
+**Confidence caps by test type and mode:**
 
-| Test type | Max confidence in Mode A | Max confidence in Mode A+ (when `_formulaSamples` supports the specific finding) |
-|---|---|---|
-| Balance sheet check (from check row) | 95 | 95 |
-| Cash flow reconciliation (from check row) | 95 | 95 |
-| Debt roll-forward (from visible rows) | 85 | 85 |
-| Revenue = price × volume | 85 | 85 |
-| Margin plausibility | 80 | 80 |
-| Assumption support | 60 | 60 |
-| Formula consistency | 40 | 90 |
-| Hardcode detection | 35 | 90 |
-| Circular reference detection | 20 | 20 (a single row's formula sample cannot establish or rule out a circular chain — that needs the whole dependency graph) |
+| Test type | Max confidence in Mode A | Max confidence in Mode A+ (when `_formulaSamples` supports the specific finding) | Max confidence in Mode B / `llm_full_parse` |
+|---|---|---|---|
+| Balance sheet check (from check row) | 95 | 95 | 95 |
+| Cash flow reconciliation (from check row) | 95 | 95 | 95 |
+| Debt roll-forward (from visible rows) | 85 | 85 | 95 |
+| Revenue = price × volume | 85 | 85 | 90 |
+| Margin plausibility | 80 | 80 | 80 |
+| Assumption support | 60 | 60 | 60 |
+| Formula consistency | 40 | 90 | 95 |
+| Hardcode detection | 35 | 90 | 95 |
+| Circular reference detection | 20 | 20 (a single row's formula sample cannot establish or rule out a circular chain — that needs the whole dependency graph) | 90 (full formula text across every cell genuinely does support workbook-wide dependency-graph reasoning) |
+
+The Mode B column applies only when review_mode is genuinely
+`llm_full_parse` for this run — do not apply it to a curated-mode run
+just because a handful of rows happen to carry `_formulaSamples`; that
+is still Mode A+, capped at the Mode A+ column, not Mode B.
 
 The lifted caps in the Mode A+ column apply ONLY to the specific row(s) whose `_formulaSamples` field you are directly citing as evidence — never extend a lifted confidence to a different row or a workbook-wide claim just because one row happened to have formula text available.
 
@@ -1524,10 +1534,30 @@ and avoid diluting attention with commentary on routine calculations.
 ## Step 21: ICAEW Financial Modelling Code gap-fill tests (checklist v7)
 
 These five tests were added to close gaps identified against the ICAEW
-Financial Modelling Code (2024). Two are genuinely Mode B tests (formula
-text required) and are included here so they activate automatically once
-Mode B ships, rather than being forgotten. Three are Mode-A-workable with
-appropriate confidence caps.
+Financial Modelling Code (2024). Mode B has now shipped, in the form of
+review_mode: llm_full_parse (see the Mode A/A+/B section above) — this
+changes how three of the five should now be handled:
+
+- rounding_presentation_only and traceable_cross_sheet_references are
+  the two genuinely Mode-B-gated tests (previously manual_only,
+  confidence-30 in every review_mode). When review_mode is genuinely
+  llm_full_parse for this run, apply full Mode B methodology to both,
+  using the Mode B column of the confidence-cap table.
+- unique_input_location is a different, partial case: already workable
+  in Mode A at confidence 40-55 (inferring from label/value matches
+  alone). When review_mode is llm_full_parse, you can move beyond
+  inference to full confirmation — directly check whether a second
+  occurrence is a live cross-sheet reference or an independent
+  hardcode — and should apply the Mode B confidence-cap column rather
+  than staying at the Mode A 40-55 range.
+- range_names_meaningful is NOT gated on review_mode at all — it
+  depends on whether a named-range list was separately provided as
+  evidence, which has nothing to do with formula-text access. Treat it
+  the same way regardless of review_mode: workable with a named-range
+  list present, manual_only/confidence-30 without one.
+- master_check_visible_throughout requires visual/live-workbook
+  inspection beyond what even complete formula text provides, and
+  remains manual_only regardless of review_mode.
 
 ### test: unique_input_location
 Each distinct business assumption should have exactly one source cell;

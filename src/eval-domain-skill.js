@@ -97,6 +97,71 @@ function checkNoResidueFromStructuralExample(draftContent, structuralExampleDoma
   }));
 }
 
+function checkGradedTestsMatchChecklistAdditions(draftContent, checklistAdditions) {
+  if (checklistAdditions === undefined) {
+    return [{ check: 'Graded-tests / checklist-additions consistency (no sidecar provided)', passed: true, skipped: true }];
+  }
+  const pattern = /^### (T2-S10-\d+) — test: (\w+)/gm;
+  const draftIds = new Set([...draftContent.matchAll(pattern)].map(m => m[1]));
+  const sidecarIds = new Set(checklistAdditions.map(r => r.id));
+
+  const missingFromSidecar = [...draftIds].filter(id => !sidecarIds.has(id));
+  const extraInSidecar = [...sidecarIds].filter(id => !draftIds.has(id));
+
+  return [
+    {
+      check: 'Every graded test in the draft has a corresponding checklist-additions entry',
+      passed: missingFromSidecar.length === 0,
+      detail: missingFromSidecar.length > 0 ? `Missing: ${missingFromSidecar.join(', ')}` : undefined,
+    },
+    {
+      check: 'No checklist-additions entry without a corresponding graded test in the draft',
+      passed: extraInSidecar.length === 0,
+      detail: extraInSidecar.length > 0 ? `Orphaned: ${extraInSidecar.join(', ')}` : undefined,
+    },
+  ];
+}
+
+/**
+ * Checks that the draft genuinely references the real sheet names it was
+ * given at generation time, rather than defaulting to generic industry
+ * sheet names disconnected from the actual triggering model. Confirmed
+ * this session, on real reference models (Hidden Gem, Bend), that a
+ * draft's assumed structure can diverge substantially from what a real
+ * model of the same domain actually looks like — this check catches the
+ * weakest case of that: a draft that never references the one real
+ * example it was explicitly given.
+ *
+ * Deliberately NOT a 100% coverage requirement — a domain skill file is
+ * meant to generalize beyond one example model, and some sheet names
+ * (administrative tabs, cover sheets) aren't worth naming specifically.
+ * Flags only when grounding looks genuinely weak, not merely partial.
+ *
+ * @param {string} draftContent
+ * @param {string[]|undefined} sourceSheetNames - the real sheet names
+ *   from the triggering model, from the .draft.meta.json sidecar
+ */
+function checkSheetNameGrounding(draftContent, sourceSheetNames) {
+  if (!sourceSheetNames || sourceSheetNames.length === 0) {
+    return [{ check: 'Sheet-name grounding (no source sheet names available)', passed: true, skipped: true }];
+  }
+  const lowerContent = draftContent.toLowerCase();
+  const referenced = sourceSheetNames.filter(name =>
+    name && name.trim().length > 0 && lowerContent.includes(name.toLowerCase().trim())
+  );
+  const proportion = referenced.length / sourceSheetNames.length;
+  // Threshold set low deliberately (20%) — this is a floor catching
+  // near-total disconnection from the real triggering model, not a
+  // target proportion. A well-written draft will often exceed it by a
+  // wide margin without needing to.
+  const passed = proportion >= 0.2;
+  return [{
+    check: `Draft references a meaningful proportion of the real triggering model's sheet names`,
+    passed,
+    detail: `${referenced.length}/${sourceSheetNames.length} referenced (${Math.round(proportion * 100)}%)${passed ? '' : ' — below the 20% floor, draft may be generic rather than grounded in the real model'}`,
+  }];
+}
+
 /**
  * Run the full eval check against a draft domain skill.
  *
@@ -104,12 +169,15 @@ function checkNoResidueFromStructuralExample(draftContent, structuralExampleDoma
  * @param {string} targetDomain - e.g. 'property'
  * @param {string|null} weightingGuidance - from extractWeightingGuidance(), or null
  * @param {string} structuralExampleDomain - which existing skill was used as the structural example
+ * @param {Array<object>} [checklistAdditions] - from the .draft.checklist-additions.json sidecar, if present
  */
-function evalDomainSkillDraft(draftContent, targetDomain, weightingGuidance, structuralExampleDomain) {
+function evalDomainSkillDraft(draftContent, targetDomain, weightingGuidance, structuralExampleDomain, checklistAdditions, sourceSheetNames) {
   const allChecks = [
     ...checkStructuralCompleteness(draftContent),
     ...checkFocusAreaCoverage(draftContent, weightingGuidance),
     ...checkNoResidueFromStructuralExample(draftContent, structuralExampleDomain, targetDomain),
+    ...checkGradedTestsMatchChecklistAdditions(draftContent, checklistAdditions),
+    ...checkSheetNameGrounding(draftContent, sourceSheetNames),
   ];
 
   const failed = allChecks.filter(c => !c.passed && !c.skipped);
@@ -128,4 +196,4 @@ function evalDomainSkillDraft(draftContent, targetDomain, weightingGuidance, str
   };
 }
 
-module.exports = { evalDomainSkillDraft, checkStructuralCompleteness, checkFocusAreaCoverage, checkNoResidueFromStructuralExample };
+module.exports = { evalDomainSkillDraft, checkStructuralCompleteness, checkFocusAreaCoverage, checkNoResidueFromStructuralExample, checkGradedTestsMatchChecklistAdditions, checkSheetNameGrounding };

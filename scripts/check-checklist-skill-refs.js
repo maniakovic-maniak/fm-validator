@@ -72,7 +72,13 @@ if (skillFiles.length === 0) {
 const skillTests = new Map(); // test name -> [files containing it]
 for (const file of skillFiles) {
   const content = fs.readFileSync(path.join(configDir, file), 'utf8');
-  const matches = content.matchAll(/^### test: (\w+)/gm);
+  // FIX: accepts both the established "### test: name" format and the
+  // newer "### RULE-ID — test: name" format (skill-mining.md's 83
+  // domain-specific graded tests use the latter, with the rule ID
+  // visible directly in the header — a genuine improvement in
+  // traceability, not a regression, so the tooling is updated to
+  // recognize it rather than degrading the content to match).
+  const matches = content.matchAll(/^### (?:\S+\s+—\s+)?test: (\w+)/gm);
   for (const m of matches) {
     const testName = m[1];
     if (!skillTests.has(testName)) skillTests.set(testName, []);

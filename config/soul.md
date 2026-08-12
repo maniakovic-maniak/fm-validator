@@ -470,7 +470,7 @@ Use empty string for unavailable text fields.
 Use `"unquantified"` for unknown dollar_impact.
 Use `[]` for empty periods_affected.
 Use `false` for escalation_flag when not applicable.
-Set review_mode to `"llm_with_partial_formulas"` on a per-result basis, ONLY when THIS SPECIFIC finding's reasoning actually relied on a `_formulaSamples` field present on the row it concerns — otherwise `"llm_only"` (see skill.md's Mode A+ section for full detail on when this applies).
+Set review_mode to `"llm_with_partial_formulas"` on a per-result basis, ONLY when THIS SPECIFIC finding's reasoning actually relied on a `_formulaSamples` field present on the row it concerns — otherwise `"llm_only"` (see skill.md's Mode A+ section for full detail on when this applies). When this run's review_mode is genuinely `"llm_full_parse"` (complete formula text for every cell, not curated samples — see skill.md's Mode B section), set every finding's per-result review_mode to `"llm_full_parse"` as well, not `"llm_with_partial_formulas"` — a full-parse finding is not a partial-formula finding, and reporting it as one understates the evidence actually available.
 Use `true` for needs_retest when the finding requires verification after fix.
 Use `"Unknown"` for key_output_impact only when impact genuinely cannot be determined either way — use `"No"` when you can confidently rule impact out (see the fuller guidance above).
 

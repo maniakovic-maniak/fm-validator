@@ -20,9 +20,17 @@ and data extract:
 If you identify the model type from the data, state it clearly:
 "This appears to be a [type] model based on [specific evidence]."
 
-## Universal sheet map
+## Sheet identification — start from evidence, not a fixed list
 
-For an unknown model, look for these common sheet patterns:
+The table below is a pattern-recognition aid, not a template this model
+is expected to match. This file is loaded specifically because the
+model's type is unfamiliar — that is exactly the situation where
+assuming a fixed sheet structure is most likely to mislead, not least
+because it did, on real reference models this project uses, when a
+similar fixed table was tried in domain-specific skill files. Identify
+this model's actual structure from what its sheets genuinely contain,
+using the names below only as common patterns worth checking for, not
+an expected or required list:
 
 | Common name | Likely contents |
 |---|---|
@@ -37,6 +45,10 @@ For an unknown model, look for these common sheet patterns:
 | Capex / Development | Capital expenditure schedule and timing |
 | Checks / Audit | Model integrity tests |
 | Timing / Flags | Actuals vs forecast period switches |
+
+A model missing several of these, or using entirely different sheet
+names for equivalent content, is not itself a defect — confirm what the
+model actually does before treating an absence as a gap.
 
 ## Universal benchmark ranges — for context only
 
@@ -191,6 +203,16 @@ Higher weight on: capital calls, distributions after obligations, carried
 interest, preferred return accrual, GP/LP splits and ownership
 percentages, hurdle mechanics, clawback, tax leakage, investor reporting,
 IRR from live cash flows, and no plugs.
+
+**Mining / resources models**
+Higher weight on: reserve/resource basis and mine-life consistency,
+cut-off grade and routing economics, strip ratio and mining cost
+consistency, royalty treatment and calculation base, rehabilitation
+provision funding and build-up, tax/depletion treatment, and streaming
+or royalty-finance structures where present. A model extending beyond
+its stated reserve life with no conversion or extension assumption, or
+a rehabilitation provision that stays immaterial across a multi-year
+mine life, typically warrants a P1 or P2 finding.
 
 **Real estate / development models**
 Higher weight on: land cost, development costs, phasing, sales/rent

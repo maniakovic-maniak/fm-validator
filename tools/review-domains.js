@@ -34,6 +34,7 @@ function loadDraft(modelType) {
   const draftPath = path.join(draftsDir, `skill-${modelType}.draft.md`);
   const metaPath = path.join(draftsDir, `skill-${modelType}.draft.meta.json`);
   const verificationPath = path.join(draftsDir, `skill-${modelType}.draft.verification.json`);
+  const checklistAdditionsPath = path.join(draftsDir, `skill-${modelType}.draft.checklist-additions.json`);
   if (!fs.existsSync(draftPath)) {
     throw new Error(`No draft found for "${modelType}" at ${draftPath}`);
   }
@@ -46,16 +47,20 @@ function loadDraft(modelType) {
   if (fs.existsSync(verificationPath)) {
     verification = JSON.parse(fs.readFileSync(verificationPath, 'utf8'));
   }
-  return { draftPath, metaPath, verificationPath, draftContent, meta, verification };
+  let checklistAdditions = undefined;
+  if (fs.existsSync(checklistAdditionsPath)) {
+    checklistAdditions = JSON.parse(fs.readFileSync(checklistAdditionsPath, 'utf8'));
+  }
+  return { draftPath, metaPath, verificationPath, checklistAdditionsPath, draftContent, meta, verification, checklistAdditions };
 }
 
 function runEval(modelType) {
-  const { draftContent, meta } = loadDraft(modelType);
+  const { draftContent, meta, checklistAdditions } = loadDraft(modelType);
   if (!meta) {
     console.log(`   ⚠️  No metadata sidecar found for "${modelType}" — running eval without weighting-guidance/residue checks.`);
-    return evalDomainSkillDraft(draftContent, modelType, null, null);
+    return evalDomainSkillDraft(draftContent, modelType, null, null, checklistAdditions, undefined);
   }
-  return evalDomainSkillDraft(draftContent, modelType, meta.weightingGuidance, meta.structuralExampleDomain);
+  return evalDomainSkillDraft(draftContent, modelType, meta.weightingGuidance, meta.structuralExampleDomain, checklistAdditions, meta.sourceSheetNames);
 }
 
 function printEvalReport(modelType, result) {
@@ -88,15 +93,37 @@ function printVerificationReport(verification) {
 }
 
 function approve(modelType) {
-  const { draftPath, metaPath, draftContent } = loadDraft(modelType);
+  const { draftPath, metaPath, checklistAdditionsPath, draftContent, checklistAdditions } = loadDraft(modelType);
   const livePath = path.join(configDir, `skill-${modelType}.md`);
   if (fs.existsSync(livePath)) {
     console.log(`   ⚠️  config/skill-${modelType}.md already exists — refusing to overwrite. Remove it manually first if this is intentional.`);
     return false;
   }
+
+  // FIX: merge the staged checklist-additions sidecar into the live
+  // checklist.json as part of the same approval action — closes the
+  // gap this session found manually, twice, for mining and property:
+  // a draft with graded tests but no registered rules is not actually
+  // deployable, and previously nothing in this flow did anything about
+  // that until a human noticed and built the fix by hand.
+  if (checklistAdditions && checklistAdditions.length > 0) {
+    const checklistPath = path.join(configDir, 'checklist.json');
+    const checklist = JSON.parse(fs.readFileSync(checklistPath, 'utf8'));
+    const existingIds = new Set(checklist.tier2.map(r => r.id));
+    const collisions = checklistAdditions.filter(r => existingIds.has(r.id));
+    if (collisions.length > 0) {
+      console.log(`   ⚠️  ${collisions.length} checklist ID(s) already exist in checklist.json (${collisions.map(r => r.id).join(', ')}) — refusing to merge. Resolve manually before approving.`);
+      return false;
+    }
+    checklist.tier2.push(...checklistAdditions);
+    fs.writeFileSync(checklistPath, JSON.stringify(checklist, null, 2));
+    console.log(`   ✅ Merged ${checklistAdditions.length} new rule(s) into checklist.json (now ${checklist.tier2.length} Tier 2 rules).`);
+  }
+
   fs.writeFileSync(livePath, draftContent);
   fs.unlinkSync(draftPath);
   if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
+  if (fs.existsSync(checklistAdditionsPath)) fs.unlinkSync(checklistAdditionsPath);
   console.log(`   ✅ Promoted to ${livePath}. classifier.js's loadDomainSkill() will pick this up on the next run classifying this model type — no restart needed, it's read from disk per run.`);
   return true;
 }
