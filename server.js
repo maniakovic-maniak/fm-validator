@@ -374,7 +374,6 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Error-scan-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const ownerDecisionChecklist = (() => { try { return findOwnerDecisionChecklist(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Owner-decision-checklist scan failed:', e.message); return null; } })();
-  console.log("DEBUG ownerDecisionChecklist:", JSON.stringify(ownerDecisionChecklist));
     // Wave 2 — VBA/macro review. Deterministic (not opt-in, unlike Formula
     // Deep Dive) but genuinely async since it spawns a Python subprocess,
     // so it needs its own await rather than fitting the synchronous IIFE
@@ -448,7 +447,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const t1Results  = runTier1(parsed);
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
-    const t2Results  = await runTier2(parsed, { domain: domain.content, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse });
+    const t2Results  = await runTier2(parsed, { domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse });
     const t2FailuresRaw = t2Results.filter(r => r.status !== 'pass');
     // FIX (I-11): found via an independent review confirming at least
     // 3 Tier 2 findings explicitly self-identify as duplicates of

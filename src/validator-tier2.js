@@ -466,7 +466,7 @@ function resolveDeepAccountingSheets(sheetNames) {
   return { resolvedMap, unresolvedCategories };
 }
 
-async function runTier2(parsed, { domain = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false } = {}) {
+async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
   // itself failed to complete for this run. A flat, mining-style
@@ -579,7 +579,27 @@ async function runTier2(parsed, { domain = '', modelContext = '', keySheets = nu
     systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\n' + FULL_PARSE_PROMPT_ADDENDUM;
   }
 
-  const { batch1, batch2, batch3 } = splitIntoBatches(checklist.tier2);
+  // FIX: found via a real production run (Carlsberg, a generic corporate
+  // model) showing Batch 2 had ballooned to 228 rules and 81% of Tier 2
+  // findings had an unusable location. Traced to a real bug: every
+  // domain-specific graded test (mining's 90 rules including the
+  // original 7, property's 84) was tagged with section "10.NNN",
+  // matching splitIntoBatches' purely mechanical "-S10-" substring
+  // check with no domain filtering at all — so all 174 of them loaded
+  // into every single run's Batch 2, regardless of the model's actual
+  // domain. This filter excludes a rule whose source_id is a
+  // domain-specific skill file (skill-{something}.md, not
+  // skill-generic.md) unless it matches the domain actually loaded for
+  // this run. Rules with a generic provenance code (FMAC-XXXX,
+  // NEW-ACC-XXX, GAP-XXX, ICAEW-FMC-XXX, etc.) were never domain-specific
+  // and are always included.
+  const DOMAIN_SPECIFIC_SOURCE_RE = /^skill-(?!generic\.md$)[\w-]+\.md$/;
+  const applicableRules = checklist.tier2.filter(r => {
+    const sourceId = r.source_id || '';
+    if (!DOMAIN_SPECIFIC_SOURCE_RE.test(sourceId)) return true; // generic provenance, always applies
+    return sourceId === domainFile; // domain-specific — only if it's THIS run's actual domain
+  });
+  const { batch1, batch2, batch3 } = splitIntoBatches(applicableRules);
   const allResults = [];
   let topLevelMeta = {};
 
