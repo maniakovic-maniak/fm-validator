@@ -364,6 +364,42 @@ function splitIntoBatches(rules) {
   return { batch1, batch2, batch3 };
 }
 
+// FIX: found via a real production failure — Railways' Batch 2 (557
+// rules, all of them domain-specific infrastructure tests) hit Sonnet
+// 5's 128,000-token output ceiling and got truncated, not silently
+// corrupted (the pipeline correctly caught and reported it), but Batch
+// 2's entire accounting/debt/domain-specific review simply didn't
+// complete for that run. Confirmed via real data this isn't an
+// infrastructure-only problem: mining's Batch 2 (144 rules) used
+// 127,623 output tokens — 99.7% of the ceiling — and property's (138
+// rules) used 108,267 — 84.6%. Both are one rule addition away from
+// the same failure Railways just hit; infrastructure's 557 rules just
+// crossed the line first and most dramatically.
+//
+// MAX_RULES_PER_SUBBATCH derived from real, confirmed data: mining and
+// property together average ~835 output tokens per rule. At a genuine
+// safety margin (75% of the 128K ceiling, not running flush against
+// it — the same margin discipline already used for context-window
+// sizing elsewhere in this project), that's ~114 rules; rounded down
+// to 100 for a cleaner, more conservative number given real
+// per-finding output length varies by how much a given rule set
+// actually finds wrong, not just how many rules exist.
+const MAX_RULES_PER_SUBBATCH = 100;
+
+function chunkRulesForOutputSafety(rules, label) {
+  if (rules.length <= MAX_RULES_PER_SUBBATCH) return [{ label, rules }];
+  const chunks = [];
+  const totalChunks = Math.ceil(rules.length / MAX_RULES_PER_SUBBATCH);
+  for (let i = 0; i < rules.length; i += MAX_RULES_PER_SUBBATCH) {
+    const chunkNum = Math.floor(i / MAX_RULES_PER_SUBBATCH) + 1;
+    chunks.push({
+      label: `${label} (${chunkNum}/${totalChunks})`,
+      rules: rules.slice(i, i + MAX_RULES_PER_SUBBATCH),
+    });
+  }
+  return chunks;
+}
+
 // Category/alias definitions for the deep-accounting data subset, plus a
 // standalone resolver function — kept at module level (not inside
 // runTier2) so index.js/server.js can call this same resolution
@@ -600,6 +636,16 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     return sourceId === domainFile; // domain-specific — only if it's THIS run's actual domain
   });
   const { batch1, batch2, batch3 } = splitIntoBatches(applicableRules);
+  // FIX: batch2's size varies by domain (38-557 rules seen in real runs) —
+  // chunk it into output-safe sub-batches rather than risk the truncation
+  // failure confirmed on a real Railways run. Confirmed via direct testing:
+  // this also splits mining (144 rules \u2192 2 chunks) and property (138 \u2192 2
+  // chunks) into multiple sub-batches, not just infrastructure \u2014 correct
+  // and intentional, since both were already running at 99.7% and 84.6%
+  // of the output ceiling and were one rule addition away from the same
+  // failure. Only genuinely small batches (Structure, Governance, and any
+  // future domain under 100 S10-tagged rules) stay as a single batch.
+  const batch2Chunks = chunkRulesForOutputSafety(batch2, 'Batch 2 — Accounting & Debt (S5-S7,S10)');
   const allResults = [];
   let topLevelMeta = {};
 
@@ -657,6 +703,15 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // so wall-clock time drops to roughly the slowest single batch rather
     // than the sum of all three — this has consistently been the
     // dominant portion of total run time (1800-2200s range observed).
+    //
+    // FIX (output-safety): batch2 is now spread across however many
+    // sub-batches chunkRulesForOutputSafety() decided were needed — 1 for
+    // every domain tested except infrastructure (557 rules), which
+    // genuinely needs several. Each sub-batch runs in parallel with
+    // everything else via the same Promise.all, so this doesn't add
+    // wall-clock time when a domain needs the split; it adds token cost
+    // (more system-prompt repeats) but that's the correct tradeoff against
+    // the alternative, which is Batch 2 failing outright.
     await Promise.all([
       // ── Batch 1: Structure, Inputs, Formula mechanics (S1-S4) ──────────
       runOneBatch(batch1, batch1Data, 'Batch 1 — Structure (S1-S4)', 'T2-BATCH1'),
@@ -666,7 +721,8 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       // untrimmed AFS/IFS/Cons/Debt/Equity data so Claude has enough evidence
       // to test balance sheet roll-forwards, debt schedules, retained earnings,
       // and tax reconciliation with confidence rather than returning uncertain.
-      runOneBatch(batch2, batch2Data, 'Batch 2 — Accounting & Debt (S5-S7,S10)', 'T2-BATCH2'),
+      // Spread across however many output-safe sub-batches were needed.
+      ...batch2Chunks.map(chunk => runOneBatch(chunk.rules, batch2Data, chunk.label, 'T2-BATCH2')),
 
       // ── Batch 3: Scenarios, Audit, Actuals, Commercial, Governance ──────
       runOneBatch(batch3, batch3Data, 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', 'T2-BATCH3'),
