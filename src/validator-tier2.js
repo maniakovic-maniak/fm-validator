@@ -459,7 +459,7 @@ const DEEP_ACCOUNTING_CATEGORIES = {
   // only apply when nothing more specific exists at all.
   'Balance Sheet':      ['Financial Statements', 'Balance Sheet', 'Statement of Financial Position', 'SOFP', 'AFS', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table'],
   'Income Statement':   ['Financial Statements', 'Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating'],
-  'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Development CF', 'Development Cash Flow'],
+  'Cash Flow':          ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Development CF', 'Development Cash Flow', 'Cons'],
   'Debt':               ['Debt Schedule', 'Debt Dashboard', 'Debt'],
   'Equity':             ['Financial Statements', 'Equity Schedule', 'Equity Dashboard', 'Equity', 'Cap Table', 'Investors'],
   // FIX: found via investigating a real, confirmed gap on
@@ -525,7 +525,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // "Financial Statements" match purely by array order. Reordered so
     // the most direct term is tried first — see DEEP_ACCOUNTING_CATEGORIES
     // above for the full explanation.
-    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Development CF', 'Development Cash Flow'],
+    'Cash Flow':        ['Cash Flow Statement', 'Cash Flow', 'Cashflow', 'CFS', 'Development CF', 'Development Cash Flow', 'Cons'],
     'Income Statement': ['Financial Statements', 'Profit and Loss', 'Profit & Loss', 'P&L', 'Income Statement', 'IFS', 'PnL', 'Operating'],
     'Balance Sheet':    ['Financial Statements', 'Balance Sheet', 'Statement of Financial Position', 'AFS', 'SOFP', 'BS', 'Sources & Uses', 'Sources and Uses', 'Cap Table'],
     'Inputs':           ['Inputs', 'Assumptions', 'Key Inputs'],
