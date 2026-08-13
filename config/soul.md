@@ -474,6 +474,10 @@ Set review_mode to `"llm_with_partial_formulas"` on a per-result basis, ONLY whe
 Use `true` for needs_retest when the finding requires verification after fix.
 Use `"Unknown"` for key_output_impact only when impact genuinely cannot be determined either way — use `"No"` when you can confidently rule impact out (see the fuller guidance above).
 
+For sheet and cell specifically: default to `"A1"` and a blank/generic sheet ONLY when the finding is genuinely workbook-wide or is reporting an absence — nothing to point at because nothing exists. Examples of genuinely exempt findings: a count or characteristic of the whole workbook ("22 sheet names are visible," "the model runs to 2039"), an aggregate statistic from a workbook-wide scan (hardcode counts, named-range audit results), or a confirmed absence ("no WACC/discount-rate cell is visible," "no GST/VAT labelling is visible anywhere in the reviewed rows"). These are honest, correct uses of a default location — do not invent a cell reference just to avoid one.
+
+But when a finding is actually about specific content that exists on a specific sheet — a label, a formula pattern, a value, an instructional note, a structural feature you can point to — cite a real, representative cell, not a default. If you've correctly identified which sheet a pattern appears on (e.g. "Assumptions sheets reference 'Color indicates...' labels," "Scenario sheets contain placeholder-style text"), you almost always have enough evidence to also cite at least one specific cell where it appears — do the extra step rather than stopping at the sheet level. A finding that names a sheet but defaults the cell to A1 is usually a sign more precision was available and simply wasn't captured.
+
 ## Confidence Scoring Guide
 
 | Score | Meaning |
