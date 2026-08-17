@@ -294,7 +294,21 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const clientIp      = getClientIp(req);
   const runLog        = startRunLog(originalName);
   let slot              = null;
-  slot                  = await acquireSlot(originalName);
+  try {
+    slot = await acquireSlot(originalName);
+  } catch (slotErr) {
+    // acquireSlot() only reaches here on a genuine filesystem error
+    // (e.g. EACCES/ENOSPC) — the normal "slot currently taken" case is
+    // handled internally via retry and never throws. Caught here,
+    // specifically, because this call sits before the main pipeline's
+    // try block below and would otherwise be an unhandled rejection
+    // with the multer-uploaded file never cleaned up.
+    console.error('   ❌ Could not acquire a validation slot:', slotErr.message);
+    logAuditEvent({ event: 'slot_acquisition_failed', originalName, ip: clientIp, error: slotErr.message, runLog: runLog.filename });
+    runLog.stop();
+    fs.unlink(filePath, () => {});
+    return res.status(500).json({ status: 'error', message: 'Could not start validation — server resource issue. Please try again shortly.' });
+  }
 
   logAuditEvent({
     event: 'upload_received', originalName, storedAs: path.basename(filePath),
