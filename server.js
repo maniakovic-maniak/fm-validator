@@ -1196,7 +1196,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         id: groupId,
         label: `The same ${f.fnName}() aggregate is independently computed on ${f.sheets.length} different sheets`,
         severity: 'medium', status: 'fail',
-        sheet: f.sheets[0], cell: f.occurrences[0].split('!')[1],
+        sheet: f.sheets[0], cell: occCell,
         category: 'Structure',
         condition: f.note,
         reason: `Duplicated ${f.fnName}() calculation across sheets: ${f.occurrences.join(', ')}`,
