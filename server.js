@@ -11,6 +11,7 @@ const { sanitizeFilename }           = require('./src/utils/sanitize-filename');
 const { logAuditEvent, getClientIp } = require('./src/utils/audit-log');
 const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
+const { acquireSlot }                = require('./src/utils/concurrency-limiter');
 
 // Core pipeline modules
 const { parseExcel, scanFormulaErrors }                             = require('./src/parser');
@@ -292,6 +293,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const startTime    = Date.now();
   const clientIp      = getClientIp(req);
   const runLog        = startRunLog(originalName);
+  let slot              = null;
+  slot                  = await acquireSlot(originalName);
 
   logAuditEvent({
     event: 'upload_received', originalName, storedAs: path.basename(filePath),
@@ -390,6 +393,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       console.log('   ❌ Workbook is password-encrypted — stopping validation');
       logAuditEvent({ event: 'vba_encrypted_blocked', originalName, ip: clientIp, runLog: runLog.filename });
       runLog.stop();
+      if (slot) slot.release();
       return res.json({
         status: 'vba-encrypted',
         message: 'This workbook is password-encrypted, so its VBA/macro content cannot be verified without the password. Please provide an unencrypted copy, or the password, to proceed with validation.',
@@ -2736,6 +2740,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       logAuditEvent({ event: 'drive_upload_failed', originalName, reportName, ip: clientIp, error: driveErr.message, runLog: runLog.filename });
     }
     runLog.stop();
+    if (slot) slot.release();
 
     const duration     = ((Date.now() - startTime) / 1000).toFixed(1);
     const c = require('./config/checklist.json');
@@ -2811,6 +2816,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     console.error('Stack:', error.stack);
     logAuditEvent({ event: 'validation_error', originalName, ip: clientIp, error: error.message, runLog: runLog.filename });
     runLog.stop();
+    if (slot) slot.release();
     fs.unlink(filePath, () => {});
     res.status(500).json({ status: 'error', message: error.message || 'Validation failed' });
   }
