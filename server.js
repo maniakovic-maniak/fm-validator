@@ -12,6 +12,7 @@ const { logAuditEvent, getClientIp } = require('./src/utils/audit-log');
 const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
+const { verifyUploadIntegrity }      = require('./src/utils/upload-integrity-check');
 
 // Core pipeline modules
 const { parseExcel, scanFormulaErrors }                             = require('./src/parser');
@@ -98,7 +99,9 @@ const { shouldUseFullParseRoute }                = require('./src/utils/formula-
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
-const { sendNotification }                       = require('./src/notifier');
+const { sendNotification, sendOrderConfirmation, sendAdminOrderNotification } = require('./src/notifier');
+const { createOrder }                             = require('./src/utils/order-store');
+const { chargeViaEway }                           = require('./src/utils/eway-payment');
 
 const app       = express();
 const PORT      = process.env.PORT || 3000;
@@ -148,6 +151,28 @@ const limiter = rateLimit({
   legacyHeaders: false
 });
 app.use('/api/validate', limiter);
+// Extended to cover the endpoints the public submission form calls
+// directly — previously only /api/validate had this applied, which was
+// fine while Basic Auth gated the whole path, but these two become
+// reachable with no login at all once the public form goes live.
+app.use('/api/verify-upload', limiter);
+app.use('/api/unique-formulas', limiter);
+app.use('/api/submit-order', limiter);
+
+// Tighter, additional limit specifically on FAILED payment attempts —
+// this endpoint moves real money, and card-testing/fraud has a
+// different risk shape than someone just hammering an upload check.
+// skipSuccessfulRequests means genuine successful orders never count
+// toward this stricter limit, only declines/errors do.
+const paymentAttemptLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many failed payment attempts — please try again later or contact support.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use('/api/submit-order', paymentAttemptLimiter);
 
 // ── API key auth middleware ────────────────────────────────────────────────
 function requireApiKey(req, res, next) {
@@ -245,6 +270,17 @@ app.get('/api/checklists', (req, res) => {
 // route logic below. Values are illustrative placeholders.
 const FSCORE_BAND_PRICE = { Low: 2, Moderate: 5, High: 12, Critical: 20 };
 
+// Shared by both /api/unique-formulas and /api/submit-order's server-side
+// price re-verification — extracted specifically so both call sites can
+// never drift out of sync with each other.
+function calculatePricing(fscoreDist) {
+  const priceTotal = Object.entries(fscoreDist)
+    .reduce((sum, [band, count]) => sum + count * (FSCORE_BAND_PRICE[band] || 0), 0);
+  const gstTotal = Math.round(priceTotal * 0.1);
+  const grandTotal = priceTotal + gstTotal;
+  return { priceTotal, gstTotal, grandTotal };
+}
+
 // Unique-formula + F-score estimate — deliberately stops after Tier 0's
 // formula scan (deterministic, local, no Anthropic API call) rather than
 // running the full pipeline, so this is fast and free of API cost, per
@@ -252,20 +288,79 @@ const FSCORE_BAND_PRICE = { Low: 2, Moderate: 5, High: 12, Critical: 20 };
 // directly against validator-tier0.js: uniqueFormulaCount and fscoreDist
 // are both computed purely from formula-text pattern normalization,
 // before familiarisation or Tier 2 ever run).
-app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (req, res) => {
+app.post('/api/verify-upload', requireApiKey, upload.single('file'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ status: 'error', message: 'No file uploaded' });
+    return res.status(400).json({ passed: false, code: 'NO_FILE', message: 'No file was uploaded.' });
   }
+
   const filePath     = req.file.path;
   const originalName = req.file.originalname;
+  const clientIp      = getClientIp(req);
+
+  function sanitizeChecksForResponse(checks) {
+    return checks.map(({ check, status, detail }) => ({ check, status, detail }));
+  }
+
+  try {
+    const result = await verifyUploadIntegrity(filePath, originalName);
+
+    if (result.checks.some(c => c.logDetail)) {
+      console.log('   Upload verification detail:', result.checks.filter(c => c.logDetail).map(c => `${c.check}: ${c.logDetail}`).join(' | '));
+    }
+
+    logAuditEvent({
+      event: result.passed ? 'upload_verified' : 'upload_verification_failed',
+      originalName, ip: clientIp, code: result.code || null,
+    });
+
+    if (!result.passed) {
+      fs.unlink(filePath, () => {});
+      return res.status(200).json({
+        passed: false, code: result.code, message: result.message ?? result.reason, checks: sanitizeChecksForResponse(result.checks),
+      });
+    }
+
+    res.status(200).json({
+      passed: true, code: null, checks: sanitizeChecksForResponse(result.checks),
+      storedAs: path.basename(filePath),
+    });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Upload verification crashed:', err.message);
+    fs.unlink(filePath, () => {});
+    res.status(500).json({ passed: false, code: 'INTERNAL_ERROR', message: 'Something went wrong checking your file. Please try again.' });
+  }
+});
+
+app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (req, res) => {
+  let filePath, originalName, shouldCleanup;
+
+  if (req.file) {
+    filePath = req.file.path;
+    originalName = req.file.originalname;
+    shouldCleanup = true;
+  } else if (req.body.storedAs) {
+    // Reuse a file already verified by /api/verify-upload instead of
+    // re-uploading the same bytes a second time. path.basename() strips
+    // any directory-traversal attempt (e.g. "../../etc/passwd") before
+    // this ever touches the filesystem — never trust a client-supplied
+    // filename directly in a path join.
+    const safeFilename = path.basename(req.body.storedAs);
+    filePath = path.join(__dirname, 'uploads', safeFilename);
+    originalName = safeFilename;
+    shouldCleanup = false; // not ours to delete — /api/verify-upload owns this file's lifecycle
+    if (!fs.existsSync(filePath)) {
+      return res.status(400).json({ status: 'error', message: 'Referenced file not found — it may have expired or already been processed. Please re-upload.' });
+    }
+  } else {
+    return res.status(400).json({ status: 'error', message: 'No file uploaded' });
+  }
 
   try {
     const parsed = await parseExcel(filePath);
     const tier0  = await runTier0(parsed);
     const fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
     const uniqueFormulaTotal = (tier0.stats && tier0.stats.uniqueFormulaCount) || 0;
-    const priceTotal = Object.entries(fscoreDist)
-      .reduce((sum, [band, count]) => sum + count * (FSCORE_BAND_PRICE[band] || 0), 0);
+    const { priceTotal, gstTotal, grandTotal } = calculatePricing(fscoreDist);
 
     res.json({
       status: 'success',
@@ -273,14 +368,108 @@ app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (re
       uniqueFormulaTotal,
       fscoreDist,
       priceTotal,
+      gstTotal,
+      grandTotal,
       pricePerBand: FSCORE_BAND_PRICE
     });
   } catch (err) {
     console.error('   \u26a0\ufe0f  Unique-formula estimate failed:', err.message);
     res.status(500).json({ status: 'error', message: err.message || 'Could not scan the file.' });
   } finally {
-    fs.unlink(filePath, () => {});
+    if (shouldCleanup) fs.unlink(filePath, () => {});
   }
+});
+
+// Well-formed-syntax-only check, matching the confirmed decision — no
+// existing-customer lookup, no deliverability verification.
+const EMAIL_SYNTAX_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+app.post('/api/submit-order', requireApiKey, async (req, res) => {
+  const { storedAs, fullName, company, email, eWayEncryptedPayload, quotedGrandTotal } = req.body || {};
+  const clientIp = getClientIp(req);
+
+  // ── Validate the basics before touching the filesystem or Anthropic-adjacent work ──
+  if (!storedAs || typeof storedAs !== 'string') {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'No file reference provided.' });
+  }
+  if (!fullName || !company || !email) {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Full name, company, and email are all required.' });
+  }
+  if (!EMAIL_SYNTAX_RE.test(String(email).trim())) {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Please provide a valid email address.' });
+  }
+  if (!eWayEncryptedPayload) {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'No payment information provided.' });
+  }
+  if (!Number.isFinite(quotedGrandTotal)) {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Missing or invalid quoted price.' });
+  }
+
+  // ── Resolve the file safely — same path-traversal guard as /api/unique-formulas ──
+  const safeFilename = path.basename(storedAs);
+  const filePath = path.join(__dirname, 'uploads', safeFilename);
+  if (!fs.existsSync(filePath)) {
+    // Matches the confirmed decision directly: no order ID is ever
+    // created for a file that isn't a genuine, currently-staged,
+    // already-verified upload.
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Referenced file not found — it may have expired. Please re-upload and try again.' });
+  }
+
+  // ── Security requirement, not optional: re-verify the price server-side
+  //    against the actual file, never trust a client-supplied amount ──
+  let grandTotal;
+  try {
+    const parsed = await parseExcel(filePath);
+    const tier0 = await runTier0(parsed);
+    const fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    ({ grandTotal } = calculatePricing(fscoreDist));
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Price re-verification failed:', err.message);
+    return res.status(500).json({ success: false, code: 'VALIDATION_ERROR', message: 'Could not verify pricing for this file. Please try again.' });
+  }
+
+  if (grandTotal !== quotedGrandTotal) {
+    console.error(`   \u26a0\ufe0f  Price mismatch on order attempt: quoted ${quotedGrandTotal}, actual ${grandTotal} (${safeFilename}, ip ${clientIp})`);
+    return res.status(400).json({ success: false, code: 'PRICE_MISMATCH', message: 'The quoted price no longer matches this file. Please refresh and try again.' });
+  }
+
+  // ── Charge via eWay — PLACEHOLDER, see src/utils/eway-payment.js ──
+  let chargeResult;
+  try {
+    chargeResult = await chargeViaEway(eWayEncryptedPayload, grandTotal);
+  } catch (err) {
+    // Distinguishing a genuine decline from "not wired up yet" matters —
+    // once real eWay integration lands, only genuine declines should
+    // reach this path.
+    console.error('   \u26a0\ufe0f  Payment processing error:', err.message);
+    return res.status(502).json({ success: false, code: 'PAYMENT_DECLINED', message: 'Payment could not be processed. Please try again shortly.' });
+  }
+  if (!chargeResult || !chargeResult.success) {
+    return res.status(402).json({ success: false, code: 'PAYMENT_DECLINED', message: (chargeResult && chargeResult.declineReason) || 'Your payment was declined.' });
+  }
+
+  // ── Payment succeeded — create the order and trigger both emails ──
+  let order;
+  try {
+    order = createOrder({
+      fullName, company, email,
+      originalName: safeFilename,
+      storedAs: safeFilename,
+      grandTotal,
+      transactionId: chargeResult.transactionId,
+      ip: clientIp,
+    });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Order creation failed after successful payment:', err.message);
+    return res.status(500).json({ success: false, code: 'VALIDATION_ERROR', message: 'Payment succeeded but the order could not be recorded. Please contact support with your transaction reference.' });
+  }
+
+  logAuditEvent({ event: 'order_created', orderId: order.orderId, originalName: safeFilename, ip: clientIp, grandTotal });
+
+  sendOrderConfirmation(order).catch(() => {});
+  sendAdminOrderNotification(order).catch(() => {});
+
+  res.json({ success: true, orderId: order.orderId });
 });
 
 app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res) => {

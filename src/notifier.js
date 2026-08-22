@@ -116,4 +116,90 @@ async function sendNotification(outcome) {
   console.log(`Notification sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
 }
 
-module.exports = { sendNotification };
+/**
+ * Order confirmation email (template 1, drafted in the implementation
+ * plan) — sent to the customer immediately after a successful order.
+ * Reuses the exact same resilience pattern as sendNotification() above:
+ * graceful skip if unconfigured, and checking both a thrown exception
+ * and the response's own .error field, since Resend can fail either way.
+ */
+async function sendOrderConfirmation(order) {
+  if (!process.env.RESEND_API_KEY) {
+    console.log('   (Skipping order confirmation email — RESEND_API_KEY not set.)');
+    return;
+  }
+  const { orderId, fullName, originalName, grandTotal } = order;
+  const subject = `Your order ${escHtml(orderId)} has been received`;
+  const totalDisplay = `AU$${(grandTotal / 100).toFixed(2)}`;
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:520px">
+      <p>Hi ${escHtml(fullName)},</p>
+      <p>Thanks for submitting <strong>${escHtml(originalName)}</strong> for review. Your order ID is <strong>${escHtml(orderId)}</strong> — keep this for reference.</p>
+      <p>Total charged: ${totalDisplay}</p>
+      <p>Your model is now in our queue for audit. We'll email you again as soon as your report is ready, along with the full breakdown of findings.</p>
+      <p>If you have any questions in the meantime, just reply to this email.</p>
+      <p>— The FM Validator team</p>
+    </div>
+  `;
+
+  let sendResult;
+  try {
+    sendResult = await getResendClient().emails.send({
+      from: 'FM Validator <onboarding@resend.dev>',
+      to: order.email,
+      subject,
+      html
+    });
+  } catch (e) {
+    console.error(`   ⚠️  Order confirmation email failed to send: ${e.message}`);
+    return;
+  }
+  if (sendResult && sendResult.error) {
+    console.error(`   ⚠️  Order confirmation email was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
+    return;
+  }
+  console.log(`Order confirmation sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
+}
+
+/**
+ * Admin new-order notification — same pattern as the existing new-run
+ * notifications, sent to NOTIFY_EMAIL rather than the customer.
+ */
+async function sendAdminOrderNotification(order) {
+  if (!process.env.RESEND_API_KEY) {
+    console.log('   (Skipping admin order notification — RESEND_API_KEY not set.)');
+    return;
+  }
+  const { orderId, fullName, company, originalName, grandTotal } = order;
+  const subject = `New order: ${escHtml(orderId)} — ${escHtml(originalName)}`;
+  const totalDisplay = `AU$${(grandTotal / 100).toFixed(2)}`;
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:520px">
+      <h2 style="color:#1A2B4A">New submission form order</h2>
+      <p><strong>Order ID:</strong> ${escHtml(orderId)}</p>
+      <p><strong>Customer:</strong> ${escHtml(fullName)} (${escHtml(company)})</p>
+      <p><strong>File:</strong> ${escHtml(originalName)}</p>
+      <p><strong>Total:</strong> ${totalDisplay}</p>
+    </div>
+  `;
+
+  let sendResult;
+  try {
+    sendResult = await getResendClient().emails.send({
+      from: 'FM Validator <onboarding@resend.dev>',
+      to: process.env.NOTIFY_EMAIL,
+      subject,
+      html
+    });
+  } catch (e) {
+    console.error(`   ⚠️  Admin order notification failed to send: ${e.message}`);
+    return;
+  }
+  if (sendResult && sendResult.error) {
+    console.error(`   ⚠️  Admin order notification was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
+    return;
+  }
+  console.log(`Admin order notification sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
+}
+
+module.exports = { sendNotification, sendOrderConfirmation, sendAdminOrderNotification };
