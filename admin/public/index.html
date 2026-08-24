@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Submission Form Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f4f0; --surface: #ffffff; --surface-2: #f0efe9;
+    --border: rgba(0,0,0,0.1); --border-strong: rgba(0,0,0,0.18);
+    --text: #1a1917; --text-2: #5a5955; --text-3: #9a9894;
+    --accent-bg: #e6f1fb; --accent-text: #185fa5;
+  }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); padding: 32px; }
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .header h1 { font-size: 18px; font-weight: 700; }
+  .header .meta { font-size: 12.5px; color: var(--text-2); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  thead tr:first-child th:first-child { border-top-left-radius: 10px; }
+  thead tr:first-child th:last-child { border-top-right-radius: 10px; }
+  tbody tr:last-child td:first-child { border-bottom-left-radius: 10px; }
+  tbody tr:last-child td:last-child { border-bottom-right-radius: 10px; }
+  th, td { text-align: left; padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { font-weight: 700; color: var(--text-2); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; user-select: none; }
+  th:hover { color: var(--text); }
+  td { font-family: 'DM Mono', monospace; font-size: 12.5px; }
+  td.name-cell { font-family: 'DM Sans', sans-serif; }
+  tr:last-child td { border-bottom: none; }
+  .uf-cell { cursor: pointer; color: var(--accent-text); position: relative; }
+  .uf-popup {
+    display: none; position: absolute; top: 100%; left: 0; z-index: 10;
+    background: var(--surface); border: 0.5px solid var(--border-strong); border-radius: 8px;
+    padding: 10px 14px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); white-space: nowrap; margin-top: 4px;
+  }
+  .uf-cell.open .uf-popup { display: block; }
+  .uf-popup div { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; font-size: 12px; }
+  .badge { font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); color: var(--text-3); }
+  .empty-state { text-align: center; padding: 48px; color: var(--text-3); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Submission Form Admin</h1>
+  <span class="meta" id="orderCount">Loading…</span>
+</div>
+
+<table id="ordersTable" style="display:none">
+  <thead>
+    <tr>
+      <th data-sort="orderId">ID</th>
+      <th data-sort="createdAt">Date/Time</th>
+      <th data-sort="originalName">Model name</th>
+      <th data-sort="fileSizeBytes">Size Mb</th>
+      <th>Unique Formula</th>
+      <th data-sort="grandTotal">Price $</th>
+      <th>Pipeline Run</th>
+      <th>Action Items</th>
+    </tr>
+  </thead>
+  <tbody id="ordersBody"></tbody>
+</table>
+
+<div class="empty-state" id="emptyState" style="display:none">No orders yet.</div>
+
+<script>
+  let orders = [];
+  let sortKey = 'createdAt';
+  let sortDir = -1;
+
+  function formatDate(iso) {
+    const d = new Date(iso);
+    return d.toISOString().slice(0, 19).replace('T', ' ');
+  }
+  function formatSize(bytes) {
+    if (!bytes) return '\u2014';
+    return (bytes / 1024 / 1024).toFixed(2);
+  }
+  function formatPrice(cents) {
+    return '$' + (cents / 100).toFixed(2);
+  }
+
+  function render() {
+    const sorted = [...orders].sort((a, b) => {
+      const av = a[sortKey], bv = b[sortKey];
+      if (av < bv) return -1 * sortDir;
+      if (av > bv) return 1 * sortDir;
+      return 0;
+    });
+
+    document.getElementById('ordersBody').innerHTML = sorted.map(o => `
+      <tr>
+        <td>${o.orderId}</td>
+        <td>${formatDate(o.createdAt)}</td>
+        <td class="name-cell">${o.originalName || '\u2014'}</td>
+        <td>${formatSize(o.fileSizeBytes)}</td>
+        <td class="uf-cell" onclick="this.classList.toggle('open')">
+          ${o.uniqueFormulaTotal ?? '\u2014'}
+          <div class="uf-popup">
+            ${o.fscoreDist ? Object.entries(o.fscoreDist).map(([band, count]) => `<div><span>${band}</span><span>${count}</span></div>`).join('') : 'No breakdown available'}
+          </div>
+        </td>
+        <td>${formatPrice(o.grandTotal)}</td>
+        <td><span class="badge">Not started</span></td>
+        <td><span class="badge">\u2014</span></td>
+      </tr>
+    `).join('');
+  }
+
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = -1; }
+      render();
+    });
+  });
+
+  fetch('/api/orders')
+    .then(r => r.json())
+    .then(data => {
+      orders = data.orders || [];
+      document.getElementById('orderCount').textContent = `${orders.length} order${orders.length !== 1 ? 's' : ''}`;
+      if (orders.length === 0) {
+        document.getElementById('emptyState').style.display = 'block';
+      } else {
+        document.getElementById('ordersTable').style.display = 'table';
+        render();
+      }
+    })
+    .catch(err => {
+      document.getElementById('orderCount').textContent = 'Could not load orders';
+      console.error(err);
+    });
+</script>
+</body>
+</html>
