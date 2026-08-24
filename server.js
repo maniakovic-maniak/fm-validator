@@ -12,6 +12,7 @@ const { logAuditEvent, getClientIp } = require('./src/utils/audit-log');
 const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
+const { setProgress, clearProgress, getProgress } = require('./src/utils/run-progress');
 const { verifyUploadIntegrity }      = require('./src/utils/upload-integrity-check');
 
 // Core pipeline modules
@@ -472,13 +473,37 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
   res.json({ success: true, orderId: order.orderId });
 });
 
+app.get('/api/run-progress/:runId', (req, res) => {
+  const progress = getProgress(req.params.runId);
+  if (!progress) {
+    return res.status(404).json({ error: 'No progress found for this run.' });
+  }
+  res.json(progress);
+});
+
 app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res) => {
-  if (!req.file) {
+  let filePath, originalName, shouldCleanup;
+
+  if (req.file) {
+    filePath = req.file.path;
+    originalName = req.file.originalname;
+    shouldCleanup = true;
+  } else if (req.body.storedAs) {
+    // Admin-dashboard-triggered run against an already-staged order
+    // file — never delete it afterward, since it's tied to a permanent
+    // order record and needs to survive until the separate, already-
+    // scoped 2-week retention job, not get removed after one run.
+    const safeFilename = path.basename(req.body.storedAs);
+    filePath = path.join(__dirname, 'uploads', safeFilename);
+    originalName = safeFilename;
+    shouldCleanup = false;
+    if (!fs.existsSync(filePath)) {
+      return res.status(400).json({ status: 'error', message: 'Referenced file not found — it may have expired or already been processed.' });
+    }
+  } else {
     return res.status(400).json({ status: 'error', message: 'No file uploaded' });
   }
-
-  const filePath     = req.file.path;
-  const originalName = req.file.originalname;
+  const runId         = req.body.orderId || originalName;
   const startTime    = Date.now();
   const clientIp      = getClientIp(req);
   const runLog        = startRunLog(originalName);
@@ -495,13 +520,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     console.error('   ❌ Could not acquire a validation slot:', slotErr.message);
     logAuditEvent({ event: 'slot_acquisition_failed', originalName, ip: clientIp, error: slotErr.message, runLog: runLog.filename });
     runLog.stop();
-    fs.unlink(filePath, () => {});
+    if (shouldCleanup) fs.unlink(filePath, () => {});
     return res.status(500).json({ status: 'error', message: 'Could not start validation — server resource issue. Please try again shortly.' });
   }
 
   logAuditEvent({
     event: 'upload_received', originalName, storedAs: path.basename(filePath),
-    ip: clientIp, sizeBytes: req.file.size, runLog: runLog.filename
+    ip: clientIp, sizeBytes: fs.statSync(filePath).size, runLog: runLog.filename
   });
 
   console.log(`\n─────────────────────────────────────`);
@@ -511,11 +536,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   try {
     // ── Step 1: Parse ──────────────────────────────────────────────────
     console.log('[1/6] Parsing file...');
+    setProgress(runId, 1, 'Parsing file');
     const parsed = await parseExcel(filePath);
     console.log(`   Found ${parsed.sheetNames.length} sheets`);
 
     // ── Step 1.5: Tier 0 — Formula text scan ──────────────────────────
     console.log('[1.5/6] Scanning formula text...');
+    setProgress(runId, 1.5, 'Scanning formula text');
     const tier0 = await runTier0(parsed);
 
     // FIX (Phase 2.1): funnel routing decision, matching index.js exactly.
@@ -597,6 +624,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       logAuditEvent({ event: 'vba_encrypted_blocked', originalName, ip: clientIp, runLog: runLog.filename });
       runLog.stop();
       if (slot) slot.release();
+      clearProgress(runId);
       return res.json({
         status: 'vba-encrypted',
         message: 'This workbook is password-encrypted, so its VBA/macro content cannot be verified without the password. Please provide an unencrypted copy, or the password, to proceed with validation.',
@@ -614,11 +642,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     }
     // ── Step 2: Familiarise ────────────────────────────────────────────
     console.log('[2/6] Familiarising with the model...');
+    setProgress(runId, 2, 'Familiarising with the model');
     const modelSummary = await familiariseModel(parsed);
     const modelContext = formatSummaryAsContext(modelSummary);
 
     // ── Step 3: Classify + load domain skill ──────────────────────────
     console.log('[3/6] Classifying model type...');
+    setProgress(runId, 3, 'Classifying model type');
     const modelType = modelSummary.model_type || 'generic';
     console.log(`   Model type: ${modelType} — ${modelSummary.industry || 'unknown'}`);
 
@@ -631,10 +661,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // ── Step 4: Pre-validation gate ────────────────────────────────────
     console.log('[4/6] Pre-validation gate...');
+    setProgress(runId, 4, 'Pre-validation gate');
     const preResult = preValidate(parsed, { tier0Stats: tier0.stats, modelSummary });
     if (!preResult.passed) {
       const failures = preResult.results.filter(r => r.status === 'fail');
       console.log(`   ❌ Pre-validation failed — ${failures.length} issues`);
+      clearProgress(runId);
       return res.json({
         status: 'pre-validation-failed',
         message: 'File failed pre-validation checks',
@@ -649,6 +681,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // ── Step 5: Validation ─────────────────────────────────────────────
     console.log('[5/6] Running validation...');
+    setProgress(runId, 5, 'Running validation (this is the longest step)');
     let allFlagged = [];
 
     const t1Results  = runTier1(parsed);
@@ -2852,6 +2885,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // ── Step 6: Build report + upload + notify ─────────────────────────
     console.log('[6/6] Building report, uploading, notifying...');
+    setProgress(runId, 6, 'Building report, uploading, notifying');
     const baseName   = path.parse(originalName).name;
     const reportName = `${baseName}_VALIDATED.xlsx`;
     const reportPath = path.join(__dirname, 'processed', reportName);
@@ -2977,7 +3011,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     console.log(`\n✅ Complete in ${duration}s — flagged: ${allFlagged.length}`);
 
-    fs.unlink(filePath, () => {});
+    clearProgress(runId);
+    if (shouldCleanup) fs.unlink(filePath, () => {});
 
     res.json({
       status:       allFlagged.length === 0 ? 'passed' : 'flagged',
@@ -3020,7 +3055,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     logAuditEvent({ event: 'validation_error', originalName, ip: clientIp, error: error.message, runLog: runLog.filename });
     runLog.stop();
     if (slot) slot.release();
-    fs.unlink(filePath, () => {});
+    clearProgress(runId);
+    if (shouldCleanup) fs.unlink(filePath, () => {});
     res.status(500).json({ status: 'error', message: error.message || 'Validation failed' });
   }
 });

@@ -37,6 +37,15 @@
   .uf-cell.open .uf-popup { display: block; }
   .uf-popup div { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; font-size: 12px; }
   .badge { font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); color: var(--text-3); }
+  .badge-running { background: #fff2cc; color: #8a6d1f; }
+  .badge-complete { background: #e1f5ee; color: #1d9e75; }
+  .badge-failed { background: #fcebeb; color: #b03a3a; }
+  .run-btn {
+    background: #0d9488; color: white; border: none; border-radius: 6px;
+    padding: 5px 14px; font-size: 11.5px; font-weight: 700; font-family: inherit;
+    cursor: pointer; letter-spacing: 0.02em;
+  }
+  .run-btn:hover { background: #0b7a70; }
   .empty-state { text-align: center; padding: 48px; color: var(--text-3); font-size: 13px; }
 </style>
 </head>
@@ -103,10 +112,67 @@
           </div>
         </td>
         <td>${formatPrice(o.grandTotal)}</td>
-        <td><span class="badge">Not started</span></td>
+        <td>${runStateCell(o.orderId)}</td>
         <td><span class="badge">\u2014</span></td>
       </tr>
     `).join('');
+  }
+
+  const runStates = {}; // orderId -> 'idle' | 'running' | 'complete' | 'failed'
+  const runProgress = {}; // orderId -> { stage, label, percent } | null
+  const pollTimers = {}; // orderId -> interval handle
+
+  function runStateCell(orderId) {
+    const state = runStates[orderId] || 'idle';
+    if (state === 'running') {
+      const p = runProgress[orderId];
+      const label = p ? `${p.percent}% \u2014 ${p.label}` : 'Running\u2026';
+      return `<span class="badge badge-running">${label}</span>`;
+    }
+    if (state === 'complete') return '<span class="badge badge-complete">Complete</span>';
+    if (state === 'failed') return '<span class="badge badge-failed">Failed</span>';
+    return `<button class="run-btn" onclick="runOrder('${orderId}')">RUN</button>`;
+  }
+
+  function startPolling(orderId) {
+    pollTimers[orderId] = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/run-progress/${orderId}`);
+        if (res.ok) {
+          runProgress[orderId] = await res.json();
+          render();
+        }
+        // A 404 here just means no progress written yet (very start of
+        // a run) or already cleared (run just finished) — not an error
+        // worth surfacing, the polling loop keeps going regardless.
+      } catch (err) {
+        // Transient network hiccup during a long-running poll — skip
+        // this cycle silently, the next poll will just try again.
+      }
+    }, 3000);
+  }
+
+  function stopPolling(orderId) {
+    if (pollTimers[orderId]) {
+      clearInterval(pollTimers[orderId]);
+      delete pollTimers[orderId];
+    }
+    delete runProgress[orderId];
+  }
+
+  async function runOrder(orderId) {
+    runStates[orderId] = 'running';
+    render();
+    startPolling(orderId);
+    try {
+      const res = await fetch(`/api/run/${orderId}`, { method: 'POST' });
+      const data = await res.json();
+      runStates[orderId] = (data.status === 'passed' || data.status === 'flagged') ? 'complete' : 'failed';
+    } catch (err) {
+      runStates[orderId] = 'failed';
+    }
+    stopPolling(orderId);
+    render();
   }
 
   document.querySelectorAll('th[data-sort]').forEach(th => {
