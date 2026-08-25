@@ -96,6 +96,23 @@ function scrubOrderPii(orderId) {
   return true;
 }
 
+/**
+ * Generic partial update, needed specifically to record a completed
+ * run's artifacts (report filename, run log filename) back onto the
+ * order once /api/validate finishes — the admin dashboard's action
+ * icons (view log, download report) need this to know which files
+ * belong to which order, since a single order can have more than one
+ * run log if it was ever retried.
+ */
+function updateOrder(orderId, updates) {
+  const order = getOrder(orderId);
+  if (!order) return null;
+  const updated = { ...order, ...updates };
+  const filePath = path.join(ORDERS_DIR, `${orderId}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(updated, null, 2));
+  return updated;
+}
+
 function listOrders() {
   if (!ordersDirReady) return [];
   return fs.readdirSync(ORDERS_DIR)
@@ -105,4 +122,4 @@ function listOrders() {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
-module.exports = { createOrder, getOrder, scrubOrderPii, listOrders, ORDERS_DIR };
+module.exports = { createOrder, getOrder, updateOrder, scrubOrderPii, listOrders, ORDERS_DIR };

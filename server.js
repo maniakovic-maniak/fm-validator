@@ -100,8 +100,8 @@ const { shouldUseFullParseRoute }                = require('./src/utils/formula-
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
-const { sendNotification, sendOrderConfirmation, sendAdminOrderNotification } = require('./src/notifier');
-const { createOrder }                             = require('./src/utils/order-store');
+const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification } = require('./src/notifier');
+const { createOrder, getOrder }                   = require('./src/utils/order-store');
 const { chargeViaEway }                           = require('./src/utils/eway-payment');
 
 const app       = express();
@@ -478,6 +478,53 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
   res.json({ success: true, orderId: order.orderId });
 });
 
+app.get('/api/view-log/:orderId', requireApiKey, (req, res) => {
+  const order = getOrder(req.params.orderId);
+  if (!order || !order.runLogFilename) {
+    return res.status(404).json({ error: 'No log available for this order yet.' });
+  }
+  // Defensive path.basename() even though this value is our own
+  // generated filename, not direct user input — matching the same safe
+  // pattern used everywhere else in this project.
+  const safeFilename = path.basename(order.runLogFilename);
+  const logPath = path.join(__dirname, 'logs', 'runs', safeFilename);
+  if (!fs.existsSync(logPath)) {
+    return res.status(404).json({ error: 'Log file no longer exists on disk.' });
+  }
+  res.type('text/plain').send(fs.readFileSync(logPath, 'utf8'));
+});
+
+app.get('/api/download-report/:orderId', requireApiKey, (req, res) => {
+  const order = getOrder(req.params.orderId);
+  if (!order || !order.reportName) {
+    return res.status(404).json({ error: 'No report available for this order yet.' });
+  }
+  const safeFilename = path.basename(order.reportName);
+  const reportPath = path.join(__dirname, 'processed', safeFilename);
+  if (!fs.existsSync(reportPath)) {
+    return res.status(404).json({ error: 'Report file no longer exists on disk.' });
+  }
+  res.download(reportPath, safeFilename);
+});
+
+app.post('/api/send-report-email/:orderId', requireApiKey, async (req, res) => {
+  const order = getOrder(req.params.orderId);
+  if (!order) {
+    return res.status(404).json({ error: 'Order not found.' });
+  }
+  if (!order.email) {
+    return res.status(400).json({ error: 'This order has no email address on file (may have been PII-scrubbed).' });
+  }
+  const result = await sendReportReadyEmail(order);
+  if (result.error) {
+    return res.status(502).json({ error: result.error });
+  }
+  if (result.skipped) {
+    return res.status(200).json({ skipped: true, message: 'Email sending is not configured on this server.' });
+  }
+  res.json({ success: true });
+});
+
 app.get('/api/run-progress/:runId', (req, res) => {
   const progress = getProgress(req.params.runId);
   if (!progress) {
@@ -635,7 +682,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         message: 'This workbook is password-encrypted, so its VBA/macro content cannot be verified without the password. Please provide an unencrypted copy, or the password, to proceed with validation.',
         modelType: null,
         modelIndustry: null,
-        stats: { total: 0, autoFixed: 0, needsAttention: 0, score: 0 }
+        stats: { total: 0, autoFixed: 0, needsAttention: 0, score: 0 },
+        runLogFilename: runLog.filename,
       });
     }
 
@@ -678,7 +726,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         modelType,
         modelIndustry: modelSummary.industry,
         failures: failures.map(f => ({ check: f.check, reason: f.reason })),
-        stats: { total: failures.length, autoFixed: 0, needsAttention: failures.length, score: 0 }
+        stats: { total: failures.length, autoFixed: 0, needsAttention: failures.length, score: 0 },
+        runLogFilename: runLog.filename,
       });
     }
     console.log('   ✅ Pre-validation passed');
@@ -3043,6 +3092,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         duration
       },
       driveLink:  driveResult ? driveResult.webViewLink : null,
+      runLogFilename: runLog.filename,
       reportName,
       flagged: allFlagged.map(f => ({
         sheet:    f.sheet,
@@ -3062,7 +3112,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     if (slot) slot.release();
     clearProgress(runId);
     if (shouldCleanup) fs.unlink(filePath, () => {});
-    res.status(500).json({ status: 'error', message: error.message || 'Validation failed' });
+    res.status(500).json({ status: 'error', message: error.message || 'Validation failed', runLogFilename: runLog.filename });
   }
 });
 

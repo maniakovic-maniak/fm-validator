@@ -1,4 +1,6 @@
 const { Resend } = require('resend');
+const fs = require('fs');
+const path = require('path');
 
 function escHtml(str) {
   if (!str) return '';
@@ -162,6 +164,63 @@ async function sendOrderConfirmation(order) {
 }
 
 /**
+ * Report-ready email (template 2, drafted in the implementation plan) —
+ * sent manually from the admin dashboard once a run completes, with the
+ * actual generated report attached. Reuses the same resilience pattern
+ * as every other email function here.
+ */
+async function sendReportReadyEmail(order) {
+  if (!process.env.RESEND_API_KEY) {
+    console.log('   (Skipping report-ready email — RESEND_API_KEY not set.)');
+    return { skipped: true };
+  }
+  if (!order.reportName) {
+    console.error('   \u26a0\ufe0f  Cannot send report-ready email — order has no reportName.');
+    return { error: 'No report available for this order yet.' };
+  }
+  const reportPath = path.join(__dirname, '..', 'processed', path.basename(order.reportName));
+  if (!fs.existsSync(reportPath)) {
+    console.error(`   \u26a0\ufe0f  Cannot send report-ready email — report file not found on disk: ${reportPath}`);
+    return { error: 'Report file no longer exists on disk.' };
+  }
+
+  const { orderId, fullName, originalName } = order;
+  const subject = `Your report for ${escHtml(originalName)} is ready`;
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:520px">
+      <p>Hi ${escHtml(fullName)},</p>
+      <p>Your audit for <strong>${escHtml(originalName)}</strong> (order ${escHtml(orderId)}) is complete — the full report is attached.</p>
+      <p>Inside you'll find a structured, 16-tab audit — including an Issue Log, Validation Matrix, and Remediation plan — covering everything found during formula-level review.</p>
+      <p>If you have any questions about a specific finding, just reply to this email.</p>
+      <p>— The FM Validator team</p>
+    </div>
+  `;
+
+  let sendResult;
+  try {
+    sendResult = await getResendClient().emails.send({
+      from: 'FM Validator <onboarding@resend.dev>',
+      to: order.email,
+      subject,
+      html,
+      attachments: [{
+        filename: path.basename(order.reportName),
+        content: fs.readFileSync(reportPath),
+      }],
+    });
+  } catch (e) {
+    console.error(`   \u26a0\ufe0f  Report-ready email failed to send: ${e.message}`);
+    return { error: e.message };
+  }
+  if (sendResult && sendResult.error) {
+    console.error(`   \u26a0\ufe0f  Report-ready email was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
+    return { error: JSON.stringify(sendResult.error) };
+  }
+  console.log(`Report-ready email sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
+  return { success: true };
+}
+
+/**
  * Admin new-order notification — same pattern as the existing new-run
  * notifications, sent to NOTIFY_EMAIL rather than the customer.
  */
@@ -202,4 +261,4 @@ async function sendAdminOrderNotification(order) {
   console.log(`Admin order notification sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
 }
 
-module.exports = { sendNotification, sendOrderConfirmation, sendAdminOrderNotification };
+module.exports = { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification };

@@ -47,6 +47,32 @@
   }
   .run-btn:hover { background: #0b7a70; }
   .empty-state { text-align: center; padding: 48px; color: var(--text-3); font-size: 13px; }
+  .action-icons { display: flex; gap: 6px; }
+  .action-icon {
+    background: var(--surface-2); border: 0.5px solid var(--border); border-radius: 6px;
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text-2);
+  }
+  .action-icon:hover:not(:disabled) { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
+  .action-icon:disabled { opacity: 0.3; cursor: not-allowed; }
+  .log-modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    align-items: center; justify-content: center; z-index: 100;
+  }
+  .log-modal-card {
+    background: var(--surface); border-radius: 10px; width: 720px; max-width: 90vw;
+    max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  }
+  .log-modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 13px;
+  }
+  .log-modal-close { cursor: pointer; font-size: 20px; color: var(--text-3); line-height: 1; }
+  .log-modal-close:hover { color: var(--text); }
+  .log-modal-content {
+    margin: 0; padding: 16px; overflow-y: auto; font-family: 'DM Mono', monospace;
+    font-size: 11.5px; white-space: pre-wrap; word-break: break-word;
+  }
 </style>
 </head>
 <body>
@@ -73,6 +99,16 @@
 </table>
 
 <div class="empty-state" id="emptyState" style="display:none">No orders yet.</div>
+
+<div class="log-modal-overlay" id="logModal">
+  <div class="log-modal-card">
+    <div class="log-modal-header">
+      <span>Run log</span>
+      <span class="log-modal-close" onclick="document.getElementById('logModal').style.display='none'">&times;</span>
+    </div>
+    <pre id="logModalContent" class="log-modal-content"></pre>
+  </div>
+</div>
 
 <script>
   let orders = [];
@@ -113,9 +149,54 @@
         </td>
         <td>${formatPrice(o.grandTotal)}</td>
         <td>${runStateCell(o.orderId)}</td>
-        <td><span class="badge">\u2014</span></td>
+        <td>${actionItemsCell(o)}</td>
       </tr>
     `).join('');
+  }
+
+  const ICON_LOG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>';
+  const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>';
+  const ICON_EMAIL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 6l8 7 8-7"/></svg>';
+
+  function actionItemsCell(order) {
+    const hasLog = !!order.runLogFilename;
+    const hasReport = !!order.reportName;
+    return `
+      <div class="action-icons">
+        <button class="action-icon" ${hasLog ? `onclick="viewLog('${order.orderId}')"` : 'disabled'} title="View log">${ICON_LOG}</button>
+        <button class="action-icon" ${hasReport ? `onclick="downloadReport('${order.orderId}')"` : 'disabled'} title="Download report">${ICON_DOWNLOAD}</button>
+        <button class="action-icon" ${hasReport ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="Send email">${ICON_EMAIL}</button>
+      </div>
+    `;
+  }
+
+  async function viewLog(orderId) {
+    try {
+      const res = await fetch(`api/view-log/${orderId}`);
+      const text = res.ok ? await res.text() : (await res.json()).error || 'Could not load log.';
+      document.getElementById('logModalContent').textContent = text;
+      document.getElementById('logModal').style.display = 'flex';
+    } catch (err) {
+      alert('Could not load log: ' + err.message);
+    }
+  }
+
+  function downloadReport(orderId) {
+    if (!confirm('Download the report for this order?')) return;
+    window.location.href = `api/download-report/${orderId}`;
+  }
+
+  async function sendReportEmail(orderId) {
+    if (!confirm('Send the report email to this customer?')) return;
+    try {
+      const res = await fetch(`api/send-report-email/${orderId}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) alert('Email sent successfully.');
+      else if (data.skipped) alert('Email sending is not configured on this server.');
+      else alert('Could not send email: ' + (data.error || 'unknown error'));
+    } catch (err) {
+      alert('Could not send email: ' + err.message);
+    }
   }
 
   const runStates = {}; // orderId -> 'idle' | 'running' | 'complete' | 'failed'

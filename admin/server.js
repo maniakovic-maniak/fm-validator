@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { listOrders, getOrder } = require('../src/utils/order-store');
+const { listOrders, getOrder, updateOrder } = require('../src/utils/order-store');
 const { getProgress } = require('../src/utils/run-progress');
 const { fetch: undiciFetch, Agent } = require('undici');
 
@@ -78,6 +78,49 @@ app.get('/api/run-progress/:orderId', async (req, res) => {
   }
 });
 
+app.get('/api/view-log/:orderId', async (req, res) => {
+  try {
+    const response = await fetch(`${MAIN_APP_URL}/api/view-log/${req.params.orderId}`);
+    if (!response.ok) {
+      const data = await response.json();
+      return res.status(response.status).json(data);
+    }
+    const text = await response.text();
+    res.type('text/plain').send(text);
+  } catch (err) {
+    res.status(502).json({ error: 'Could not reach the validation pipeline.' });
+  }
+});
+
+app.get('/api/download-report/:orderId', async (req, res) => {
+  try {
+    const response = await fetch(`${MAIN_APP_URL}/api/download-report/${req.params.orderId}`);
+    if (!response.ok) {
+      const data = await response.json();
+      return res.status(response.status).json(data);
+    }
+    // Binary file - forward the real headers (filename, content-type)
+    // from the upstream response, then stream the body through rather
+    // than buffering the whole file in memory.
+    res.set('Content-Disposition', response.headers.get('content-disposition') || 'attachment');
+    res.set('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.send(buffer);
+  } catch (err) {
+    res.status(502).json({ error: 'Could not reach the validation pipeline.' });
+  }
+});
+
+app.post('/api/send-report-email/:orderId', async (req, res) => {
+  try {
+    const response = await fetch(`${MAIN_APP_URL}/api/send-report-email/${req.params.orderId}`, { method: 'POST' });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Could not reach the validation pipeline.' });
+  }
+});
+
 /**
  * The actual pipeline trigger — built as a plain, callable HTTP
  * endpoint specifically so it's usable identically by a human clicking
@@ -122,6 +165,19 @@ app.post('/api/run/:orderId', async (req, res) => {
     clearTimeout(timer);
 
     const data = await response.json();
+
+    // Persist whatever run artifacts this response gives us, regardless
+    // of outcome — runLogFilename is included on every exit path
+    // (success or failure), since viewing a failed run's log is exactly
+    // what's been needed all night. reportName only exists on a genuine
+    // successful completion (passed/flagged), never on a failure.
+    const updates = {};
+    if (data.runLogFilename) updates.runLogFilename = data.runLogFilename;
+    if (data.reportName) updates.reportName = data.reportName;
+    if (Object.keys(updates).length > 0) {
+      updateOrder(req.params.orderId, updates);
+    }
+
     res.status(response.status).json(data);
   } catch (err) {
     if (err.name === 'AbortError') {
