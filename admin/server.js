@@ -2,6 +2,26 @@ const express = require('express');
 const path = require('path');
 const { listOrders, getOrder } = require('../src/utils/order-store');
 const { getProgress } = require('../src/utils/run-progress');
+const { fetch: undiciFetch, Agent } = require('undici');
+
+// Node's built-in global fetch() is backed by its OWN internal undici
+// instance, which is NOT the same as this separately-installed undici
+// package — confirmed directly: passing a dispatcher built from this
+// package's Agent to the global fetch() throws UND_ERR_INVALID_ARG
+// immediately. undici's own exported fetch (used below) correctly
+// accepts it.
+//
+// The underlying problem this solves: undici has its OWN hard-coded
+// 5-minute headersTimeout, completely separate from and unaffected by
+// any AbortController/signal-based timeout. Confirmed directly tonight:
+// real runs failed with code UND_ERR_HEADERS_TIMEOUT well before either
+// the 30-minute RUN_TIMEOUT_MS or the Anthropic client's own 10-minute
+// timeout ever had a chance to fire — undici's internal 5-minute
+// ceiling was cutting the connection first, every time.
+const longRunningDispatcher = new Agent({
+  headersTimeout: 30 * 60 * 1000, // match RUN_TIMEOUT_MS
+  bodyTimeout: 30 * 60 * 1000,
+});
 
 const app = express();
 const PORT = process.env.ADMIN_PORT || 3001;
@@ -46,6 +66,10 @@ app.get('/api/orders/:orderId', (req, res) => {
 
 app.get('/api/run-progress/:orderId', async (req, res) => {
   try {
+    // Deliberately NOT using the long-running dispatcher here - this
+    // reads one small JSON file and should be fast. If it ever isn't,
+    // we want that to fail quickly and visibly, not silently wait up to
+    // 30 minutes for what's supposed to be a near-instant check.
     const response = await fetch(`${MAIN_APP_URL}/api/run-progress/${req.params.orderId}`);
     const data = await response.json();
     res.status(response.status).json(data);
@@ -88,11 +112,12 @@ app.post('/api/run/:orderId', async (req, res) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), RUN_TIMEOUT_MS);
 
-    const response = await fetch(`${MAIN_APP_URL}/api/validate`, {
+    const response = await undiciFetch(`${MAIN_APP_URL}/api/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ storedAs: order.storedAs, orderId: req.params.orderId }),
       signal: controller.signal,
+      dispatcher: longRunningDispatcher,
     });
     clearTimeout(timer);
 
