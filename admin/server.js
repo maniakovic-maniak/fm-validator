@@ -84,10 +84,14 @@ app.post('/api/run/:orderId', async (req, res) => {
     res.status(response.status).json(data);
   } catch (err) {
     if (err.name === 'AbortError') {
-      console.error(`   \u26a0\ufe0f  Run for ${req.params.orderId} timed out after ${RUN_TIMEOUT_MS / 60000} minutes`);
+      console.error(`   \u26a0\ufe0f  [${new Date().toISOString()}] Run for ${req.params.orderId} timed out after ${RUN_TIMEOUT_MS / 60000} minutes`);
       return res.status(504).json({ error: 'The validation run timed out. Check the server logs directly for its actual status.' });
     }
-    console.error(`   \u26a0\ufe0f  Run for ${req.params.orderId} failed:`, err.message);
+    // fetch failed's real reason lives in err.cause (e.g. ECONNRESET,
+    // ETIMEDOUT, socket hang up) - err.message alone is just the
+    // generic wrapper text "fetch failed" and tells us nothing.
+    const causeInfo = err.cause ? ` | cause: ${err.cause.code || err.cause.message || err.cause}` : ' | no err.cause present';
+    console.error(`   \u26a0\ufe0f  [${new Date().toISOString()}] Run for ${req.params.orderId} failed:`, err.message, causeInfo);
     res.status(502).json({ error: 'Could not reach the validation pipeline. Please try again.' });
   }
 });
