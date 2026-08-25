@@ -16,7 +16,13 @@ const {
   selectHighRiskFormulas, attachLabels, buildReviewItems, estimateInputTokens
 } = require('./utils/formula-deepdive-select');
 
-const client = new Anthropic();
+const client = new Anthropic({
+  // Explicit, not relying on SDK defaults — several frameworks have
+  // shown inconsistent enforcement of undocumented/default timeouts
+  // at the underlying HTTP-transport layer, which can silently hang a
+  // request past its documented timeout with no error ever thrown.
+  timeout: 600_000, // 10 minutes
+});
 
 const soulPath  = path.join(__dirname, '../config/soul.md');
 const taskPath  = path.join(__dirname, '../config/skill-formula-deepdive.md');

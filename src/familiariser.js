@@ -3,7 +3,13 @@ const { extractJson } = require('./utils/json-extract');
 
 const { dumpFailedResponse } = require('./utils/dump-failed-response');
 
-const client = new Anthropic();
+const client = new Anthropic({
+  // Explicit, not relying on SDK defaults — several frameworks have
+  // shown inconsistent enforcement of undocumented/default timeouts
+  // at the underlying HTTP-transport layer, which can silently hang a
+  // request past its documented timeout with no error ever thrown.
+  timeout: 600_000, // 10 minutes
+});
 
 const FAMILIARISER_PROMPT = `You are a senior financial model reviewer.
 

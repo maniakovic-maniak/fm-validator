@@ -34,7 +34,13 @@ const Anthropic = require('@anthropic-ai/sdk');
 const fs = require('fs');
 const path = require('path');
 
-const client = new Anthropic();
+const client = new Anthropic({
+  // Explicit, not relying on SDK defaults — several frameworks have
+  // shown inconsistent enforcement of undocumented/default timeouts
+  // at the underlying HTTP-transport layer, which can silently hang a
+  // request past its documented timeout with no error ever thrown.
+  timeout: 600_000, // 10 minutes
+});
 
 /**
  * Scans checklist.json for the highest T2-S10-XXX rule number currently
