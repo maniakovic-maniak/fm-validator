@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { listOrders, getOrder } = require('../src/utils/order-store');
+const { getProgress } = require('../src/utils/run-progress');
 
 const app = express();
 const PORT = process.env.ADMIN_PORT || 3001;
@@ -66,6 +67,21 @@ app.post('/api/run/:orderId', async (req, res) => {
   }
   if (!order.storedAs) {
     return res.status(400).json({ error: 'This order has no associated file reference.' });
+  }
+
+  // A progress entry only exists between a run's first stage and its
+  // own cleanup on exit (success or any failure path) — so if one is
+  // still present, this order's pipeline hasn't reached any exit point
+  // yet: it's either genuinely still running, or stuck. Either way,
+  // dispatching a second, overlapping run against the same order is not
+  // safe — confirmed directly tonight: two concurrent runs for the same
+  // order wrote to the same shared progress file, producing a visible
+  // percentage that jumped backward as each one overwrote the other.
+  const existingProgress = getProgress(req.params.orderId);
+  if (existingProgress) {
+    return res.status(409).json({
+      error: `A run is already in progress for this order (currently at stage ${existingProgress.stage}/6: ${existingProgress.label}). If this seems stuck, check the server logs directly before retrying — starting a second run against the same file will corrupt the progress display for both.`,
+    });
   }
 
   try {
