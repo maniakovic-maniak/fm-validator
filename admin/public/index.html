@@ -249,6 +249,17 @@
       const res = await fetch(`api/run/${orderId}`, { method: 'POST' });
       const data = await res.json();
       runStates[orderId] = (data.status === 'passed' || data.status === 'flagged') ? 'complete' : 'failed';
+
+      // The badge state above is enough to update the "Pipeline Run"
+      // column, but the action icons check the actual order object's
+      // runLogFilename/reportName - without updating that too, a
+      // completed run's icons stay stuck disabled until a full page
+      // reload, since orders[] is only ever fetched once on page load.
+      const order = orders.find(o => o.orderId === orderId);
+      if (order) {
+        if (data.runLogFilename) order.runLogFilename = data.runLogFilename;
+        if (data.reportName) order.reportName = data.reportName;
+      }
     } catch (err) {
       runStates[orderId] = 'failed';
     }
