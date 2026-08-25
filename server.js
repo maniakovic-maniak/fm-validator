@@ -269,7 +269,7 @@ app.get('/api/checklists', (req, res) => {
 // inferrable from the UI mockup alone — isolated here as a single named
 // constant so real figures can be swapped in later without touching the
 // route logic below. Values are illustrative placeholders.
-const FSCORE_BAND_PRICE = { Low: 2, Moderate: 5, High: 12, Critical: 20 };
+const FSCORE_BAND_PRICE = { Low: 3, Moderate: 4, High: 6, Critical: 7 };
 
 // Shared by both /api/unique-formulas and /api/submit-order's server-side
 // price re-verification — extracted specifically so both call sites can
