@@ -137,7 +137,7 @@
   function startPolling(orderId) {
     pollTimers[orderId] = setInterval(async () => {
       try {
-        const res = await fetch(`/api/run-progress/${orderId}`);
+        const res = await fetch(`api/run-progress/${orderId}`);
         if (res.ok) {
           runProgress[orderId] = await res.json();
           render();
@@ -165,7 +165,7 @@
     render();
     startPolling(orderId);
     try {
-      const res = await fetch(`/api/run/${orderId}`, { method: 'POST' });
+      const res = await fetch(`api/run/${orderId}`, { method: 'POST' });
       const data = await res.json();
       runStates[orderId] = (data.status === 'passed' || data.status === 'flagged') ? 'complete' : 'failed';
     } catch (err) {
@@ -183,7 +183,7 @@
     });
   });
 
-  fetch('/api/orders')
+  fetch('api/orders')
     .then(r => r.json())
     .then(data => {
       orders = data.orders || [];
