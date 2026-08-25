@@ -141,7 +141,7 @@ async function classifyModel(parsed) {
 // is a short category ("property") or a longer descriptive phrase
 // ("property — entertainment venue development and operations").
 const DOMAIN_ALIASES = {
-  property: ['property', 'real estate', 'development', 'hospitality', 'entertainment venue', 'venue development', 'mixed-use', 'mixed use', 'corporate'],
+  property: ['property', 'real estate', 'development', 'hospitality', 'entertainment venue', 'venue development', 'mixed-use', 'mixed use'],
   mining: ['mining', 'coal', 'resources', 'minerals'],
   // FIX: found via a direct review of a new skill-infrastructure.md
   // draft — confirmed against the real Financial_Model_for_Railways
@@ -157,12 +157,21 @@ const DOMAIN_ALIASES = {
   // shipping, or trucking model this file's freight/passenger/
   // infrastructure-entity-split content does not cover.
   infrastructure: ['infrastructure', 'railway', 'rail', 'rail transport', 'rail infrastructure'],
-  // Add further canonical domains here as they're identified. 'corporate'
-  // is deliberately mapped to 'property' rather than kept as its own
-  // canonical domain — confirmed on real evidence that the two labels
-  // described the exact same underlying file, and skill-property.md (the
-  // merged file) already covers both the property/development and
-  // corporate/operating angles.
+  // FIX: 'corporate' was previously mapped to 'property' here, based on
+  // real evidence from one specific model (The Bend) whose
+  // classification happened to include the word "corporate" alongside
+  // genuinely property/venue-specific language. That reasoning didn't
+  // generalize — "corporate" alone just means "not a named industry"
+  // and describes countless unrelated business types (confirmed
+  // directly: two separate real Carlsberg runs, an FMCG company with
+  // no property/real-estate/hospitality content at all, both got
+  // incorrectly routed to skill-property.md purely because their
+  // classification text contained "corporate"). The Bend itself still
+  // correctly maps to 'property' via its own genuine venue/hospitality
+  // language already in that list above — it never actually depended
+  // on this alias. Removing it lets genuinely generic corporate models
+  // fall through to skill-generic.md, which is specifically built for
+  // exactly this situation.
 };
 
 function normalizeDomainLabel(modelType) {
