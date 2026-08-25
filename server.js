@@ -418,11 +418,13 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
 
   // ── Security requirement, not optional: re-verify the price server-side
   //    against the actual file, never trust a client-supplied amount ──
-  let grandTotal;
+  let grandTotal, uniqueFormulaTotal, fscoreDist, fileSizeBytes;
   try {
     const parsed = await parseExcel(filePath);
     const tier0 = await runTier0(parsed);
-    const fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    uniqueFormulaTotal = (tier0.stats && tier0.stats.uniqueFormulaCount) || 0;
+    fileSizeBytes = fs.statSync(filePath).size;
     ({ grandTotal } = calculatePricing(fscoreDist));
   } catch (err) {
     console.error('   \u26a0\ufe0f  Price re-verification failed:', err.message);
@@ -457,6 +459,9 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
       originalName: safeFilename,
       storedAs: safeFilename,
       grandTotal,
+      uniqueFormulaTotal,
+      fscoreDist,
+      fileSizeBytes,
       transactionId: chargeResult.transactionId,
       ip: clientIp,
     });
