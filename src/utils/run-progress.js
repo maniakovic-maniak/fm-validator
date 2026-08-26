@@ -11,6 +11,11 @@ try {
 }
 
 const TOTAL_STAGES = 6;
+// Same threshold and reasoning as concurrency-limiter.js's stale-slot
+// reclaim - comfortably past the admin's own 30-minute RUN_TIMEOUT_MS,
+// so a genuinely still-active run (which keeps refreshing updatedAt at
+// every stage transition) is never mistaken for a stuck one.
+const STALE_PROGRESS_MS = 40 * 60 * 1000;
 
 /**
  * Genuine, stage-based progress — not a simulated/time-estimated
@@ -43,7 +48,14 @@ function getProgress(runId) {
   const filePath = path.join(PROGRESS_DIR, `${safeId}.json`);
   if (!fs.existsSync(filePath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const updatedAt = new Date(data.updatedAt).getTime();
+    if (Number.isFinite(updatedAt) && (Date.now() - updatedAt) > STALE_PROGRESS_MS) {
+      console.log(`   \u26a0\ufe0f  Clearing stale progress for ${safeId} (no update since ${data.updatedAt} - likely a crashed or stuck run, not genuinely still active)`);
+      fs.unlink(filePath, () => {});
+      return null;
+    }
+    return data;
   } catch (_) {
     return null;
   }

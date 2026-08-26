@@ -10,7 +10,7 @@ const POLL_INTERVAL_MS = 2000;
 // is treated as abandoned and reclaimed — set well above the longest
 // real run seen in production (Bend lender model, ~1136s) with genuine
 // margin, not just barely above it.
-const STALE_SLOT_MS = 60 * 60 * 1000; // 1 hour
+const STALE_SLOT_MS = 40 * 60 * 1000; // 40 minutes - comfortably past the admin's own 30-minute RUN_TIMEOUT_MS, so a genuinely still-processing run is never prematurely reclaimed, but short enough to self-clear within the same session rather than requiring a full hour.
 
 let locksDirReady = false;
 try {
