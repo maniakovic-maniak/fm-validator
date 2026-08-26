@@ -123,8 +123,8 @@
     if (!bytes) return '\u2014';
     return (bytes / 1024 / 1024).toFixed(2);
   }
-  function formatPrice(cents) {
-    return '$' + (cents / 100).toFixed(2);
+  function formatPrice(dollars) {
+    return '$' + dollars.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function render() {
