@@ -96,7 +96,7 @@ async function sendNotification(outcome) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'FM Validator <onboarding@resend.dev>',
+      from: 'PlsFx <onboarding@resend.dev>',
       to: process.env.NOTIFY_EMAIL,
       subject,
       html
@@ -132,7 +132,7 @@ async function sendOrderConfirmation(order) {
   }
   const { orderId, fullName, originalName, grandTotal } = order;
   const subject = `Your order ${escHtml(orderId)} has been received`;
-  const totalDisplay = `AU$${(grandTotal / 100).toFixed(2)}`;
+  const totalDisplay = `AU$${grandTotal.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
       <p>Hi ${escHtml(fullName)},</p>
@@ -140,14 +140,14 @@ async function sendOrderConfirmation(order) {
       <p>Total charged: ${totalDisplay}</p>
       <p>Your model is now in our queue for audit. We'll email you again as soon as your report is ready, along with the full breakdown of findings.</p>
       <p>If you have any questions in the meantime, just reply to this email.</p>
-      <p>— The FM Validator team</p>
+      <p>— The PlsFx Team</p>
     </div>
   `;
 
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'FM Validator <onboarding@resend.dev>',
+      from: 'PlsFx <onboarding@resend.dev>',
       to: order.email,
       subject,
       html
@@ -192,14 +192,14 @@ async function sendReportReadyEmail(order) {
       <p>Your audit for <strong>${escHtml(originalName)}</strong> (order ${escHtml(orderId)}) is complete — the full report is attached.</p>
       <p>Inside you'll find a structured, 16-tab audit — including an Issue Log, Validation Matrix, and Remediation plan — covering everything found during formula-level review.</p>
       <p>If you have any questions about a specific finding, just reply to this email.</p>
-      <p>— The FM Validator team</p>
+      <p>— The PlsFx Team</p>
     </div>
   `;
 
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'FM Validator <onboarding@resend.dev>',
+      from: 'PlsFx <onboarding@resend.dev>',
       to: order.email,
       subject,
       html,
@@ -231,7 +231,7 @@ async function sendAdminOrderNotification(order) {
   }
   const { orderId, fullName, company, originalName, grandTotal } = order;
   const subject = `New order: ${escHtml(orderId)} — ${escHtml(originalName)}`;
-  const totalDisplay = `AU$${(grandTotal / 100).toFixed(2)}`;
+  const totalDisplay = `AU$${grandTotal.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
       <h2 style="color:#1A2B4A">New submission form order</h2>
@@ -245,7 +245,7 @@ async function sendAdminOrderNotification(order) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'FM Validator <onboarding@resend.dev>',
+      from: 'PlsFx <onboarding@resend.dev>',
       to: process.env.NOTIFY_EMAIL,
       subject,
       html
