@@ -222,10 +222,25 @@
         if (res.ok) {
           runProgress[orderId] = await res.json();
           render();
+        } else if (res.status === 404 && runProgress[orderId] && runStates[orderId] === 'running') {
+          // Progress genuinely existed before and is now gone - the run
+          // has finished (success or failure). Only runOrder()'s own
+          // fetch call knows the real outcome; polling resumed after a
+          // refresh (or a 409) has no such call left to eventually stop
+          // itself, so without this the badge would stay stuck on
+          // "Running..." forever even after the run is long done.
+          //
+          // The runStates check guards against a race with runOrder()'s
+          // own completion handling, which may fire around the same
+          // moment from the exact same underlying completion - never
+          // overwrite a 'complete'/'failed' state that's already been
+          // correctly set.
+          stopPolling(orderId);
+          runStates[orderId] = 'idle';
+          render();
         }
-        // A 404 here just means no progress written yet (very start of
-        // a run) or already cleared (run just finished) — not an error
-        // worth surfacing, the polling loop keeps going regardless.
+        // A 404 with no prior progress just means it hasn't started
+        // writing yet - not an error worth surfacing.
       } catch (err) {
         // Transient network hiccup during a long-running poll — skip
         // this cycle silently, the next poll will just try again.
@@ -241,12 +256,47 @@
     delete runProgress[orderId];
   }
 
+  // A page refresh wipes runStates entirely (it's in-memory only), even
+  // though a real run may genuinely still be in progress server-side.
+  // Without this, a refreshed page incorrectly shows the RUN button
+  // again for an order that's actively running - clicking it then
+  // correctly gets blocked by the duplicate-run guard, but the UI never
+  // told the user a run was already happening in the first place.
+  async function checkForActiveRuns() {
+    await Promise.all(orders.map(async (order) => {
+      try {
+        const res = await fetch(`api/run-progress/${order.orderId}`);
+        if (res.ok) {
+          const data = await res.json();
+          runStates[order.orderId] = 'running';
+          runProgress[order.orderId] = data;
+          startPolling(order.orderId);
+        }
+        // A 404 here correctly means no active run for this order - the
+        // normal, expected case for most orders, not an error.
+      } catch (err) {
+        // Transient issue checking this one order - leave it as idle
+        // rather than block the rest of the page from loading correctly.
+      }
+    }));
+    render();
+  }
+
   async function runOrder(orderId) {
     runStates[orderId] = 'running';
     render();
     startPolling(orderId);
     try {
       const res = await fetch(`api/run/${orderId}`, { method: 'POST' });
+      if (res.status === 409) {
+        // A run is already genuinely in progress for this order (most
+        // likely: this page was refreshed mid-run, which wipes the
+        // in-memory runStates but not the real, server-side run).
+        // The polling loop already started above will pick up the
+        // real, existing run's actual progress - nothing to mark as
+        // failed here, since nothing actually failed.
+        return;
+      }
       const data = await res.json();
       runStates[orderId] = (data.status === 'passed' || data.status === 'flagged') ? 'complete' : 'failed';
 
@@ -260,11 +310,13 @@
         if (data.runLogFilename) order.runLogFilename = data.runLogFilename;
         if (data.reportName) order.reportName = data.reportName;
       }
+      stopPolling(orderId);
+      render();
     } catch (err) {
       runStates[orderId] = 'failed';
+      stopPolling(orderId);
+      render();
     }
-    stopPolling(orderId);
-    render();
   }
 
   document.querySelectorAll('th[data-sort]').forEach(th => {
@@ -285,6 +337,7 @@
       } else {
         document.getElementById('ordersTable').style.display = 'table';
         render();
+        checkForActiveRuns();
       }
     })
     .catch(err => {
