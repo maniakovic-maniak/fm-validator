@@ -96,7 +96,7 @@ async function sendNotification(outcome) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PlsFx <onboarding@resend.dev>',
+      from: 'PLSFX model review <onboarding@resend.dev>',
       to: process.env.NOTIFY_EMAIL,
       subject,
       html
@@ -147,7 +147,7 @@ async function sendOrderConfirmation(order) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PlsFx <onboarding@resend.dev>',
+      from: 'PLSFX model review <onboarding@resend.dev>',
       to: order.email,
       subject,
       html
@@ -199,7 +199,7 @@ async function sendReportReadyEmail(order) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PlsFx <onboarding@resend.dev>',
+      from: 'PLSFX model review <onboarding@resend.dev>',
       to: order.email,
       subject,
       html,
@@ -245,7 +245,7 @@ async function sendAdminOrderNotification(order) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PlsFx <onboarding@resend.dev>',
+      from: 'PLSFX model review <onboarding@resend.dev>',
       to: process.env.NOTIFY_EMAIL,
       subject,
       html
