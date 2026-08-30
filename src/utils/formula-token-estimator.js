@@ -22,7 +22,30 @@
 // the same array-formula unwrapping already used in validator-tier0.js
 // (cell.formula can be a string OR an object with a .formula property).
 
-const CHARS_PER_TOKEN = 3; // matches validator-tier2.js's existing heuristic exactly
+// FIX: calibrated using real, actual token counts from 8 real production
+// failures (every batch of a real run - riio_gt1_fp_financialmodel_dec12 -
+// that this funnel incorrectly routed to full-parse). The 3 chars/token
+// figure below was carried over from validator-tier2.js's existing
+// heuristic, calibrated for prose/JSON content - raw formula text is a
+// meaningfully different content type. It's dense with cell-reference
+// punctuation ($, !, nested parentheses, operators) that tokenizes far
+// less efficiently than natural language.
+//
+// Back-calculating the real ratio from Anthropic's own rejection error for
+// each of the 8 failed batches (real total tokens, minus the ~20,000-token
+// cached system prompt, against the character count this heuristic itself
+// measured) gives a tightly clustered 1.163-1.198 real chars/token across
+// every single batch - averaging 1.183, nowhere near the old value of 3.
+// That precisely explains the ~2.5x gap between this funnel's estimate
+// (487,969 tokens) and what each batch actually needed (1.3M+ tokens each)
+// on that real run.
+//
+// Using 1.15 here, slightly below the observed minimum (1.163) as a
+// deliberate safety margin - erring toward routing a borderline model to
+// the curated route (safe, proven, if slightly more conservative) rather
+// than risk a repeat of this exact failure on a model just inside the
+// old, wrong threshold.
+const CHARS_PER_TOKEN = 1.15;
 
 /**
  * Estimates the token size of a full raw-formula-list representation

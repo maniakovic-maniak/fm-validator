@@ -6,6 +6,7 @@ const { resolveAny } = require('./utils/sheet-resolver');
 const { extractJson } = require('./utils/json-extract');
 const { dumpFailedResponse } = require('./utils/dump-failed-response');
 const { normalizeFormula: normalizeFormulaShape, colToNum } = require('./utils/formula-pattern-consistency-check');
+const { CHARS_PER_TOKEN: FORMULA_CHARS_PER_TOKEN } = require('./utils/formula-token-estimator');
 
 const client = new Anthropic({
   // Explicit, not relying on SDK defaults — several frameworks have
@@ -275,7 +276,7 @@ function parseResponse(raw) {
 }
 
 // Run a single batch of rules via streaming
-async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchLabel, tier0Context = {}) {
+async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchLabel, tier0Context = {}, isFullParse = false) {
   const payload = {
     sheetNames,
     rules: batchRules,
@@ -295,7 +296,7 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     vbaSummary: tier0Context.vbaSummary || null
   };
 
-  const estimatedTokens = Math.round(JSON.stringify(payload).length / 3);
+  const estimatedTokens = Math.round(JSON.stringify(payload).length / (isFullParse ? FORMULA_CHARS_PER_TOKEN : 3));
   console.log(`   ${batchLabel}: ~${estimatedTokens} tokens input, ${batchRules.length} rules`);
 
   let rawText = '';
@@ -615,7 +616,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   if (useFullParse) {
     const { buildFullParseFormulaPayload, FULL_PARSE_PROMPT_ADDENDUM } = require('./validator-tier2-fullparse');
     const fullParsePayload = buildFullParseFormulaPayload(parsed._raw);
-    const fullParseTokens = Math.round(JSON.stringify(fullParsePayload).length / 3);
+    const fullParseTokens = Math.round(JSON.stringify(fullParsePayload).length / FORMULA_CHARS_PER_TOKEN);
     console.log(`   Full-parse payload: ~${fullParseTokens.toLocaleString()} tokens across ${Object.keys(fullParsePayload).length} sheets (all 3 batches)`);
     batch1Data = batch2Data = batch3Data = fullParsePayload;
     systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\n' + FULL_PARSE_PROMPT_ADDENDUM;
@@ -678,7 +679,8 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     try {
       const { results, meta } = await runBatch(
         rules, data, parsed.sheetNames, systemPrompt, label,
-        { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt }
+        { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt },
+        useFullParse
       );
       allResults.push(...results);
       if (meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined) &&
