@@ -126,7 +126,7 @@ function scanFormulaErrors(workbook) {
     ws.eachRow({ includeEmpty: false }, row => {
       row.eachCell({ includeEmpty: false }, cell => {
         const error = cellErrorValue(cell);
-        if (error) findings.push({ sheet: ws.name, cell: cell.address, error });
+        if (error) findings.push({ sheet: ws.name, cell: cell.address, error, formula: cell.formula || null });
       });
     });
   });

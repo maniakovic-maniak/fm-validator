@@ -107,7 +107,7 @@ function complexityExplanation(formula, score, band) {
 
   if (/\bOFFSET\s*\(|\bINDIRECT\s*\(/i.test(f)) drivers.push('dynamic reference (OFFSET/INDIRECT) — difficult to trace');
   if (/\bTODAY\s*\(|\bNOW\s*\(|\bRAND\s*\(/i.test(f)) drivers.push('volatile function — recalculates on every change');
-  if (f.includes('[')) drivers.push('external workbook reference — broken-link risk');
+  if (/\[\d+\]/.test(f)) drivers.push('external workbook reference — broken-link risk');
   if (/\bIFERROR\s*\(|\bIFNA\s*\(/i.test(f)) drivers.push('error suppression — may hide real defects');
   if (/\bXLOOKUP\s*\(|\bVLOOKUP\s*\(|\bINDEX\s*\(/i.test(f)) drivers.push('lookup function — requires range and error-handling review');
 
@@ -323,7 +323,24 @@ async function runTier0(parsed) {
             }
           }
 
-          if (formula.includes('[')) {
+          // FIX: found via an independent audit of a real production run,
+          // then verified directly against the real source file. The old
+          // check (formula.includes('[')) matched any '[' anywhere in a
+          // formula, including a literal '[' inside a quoted string
+          // argument - not just genuine external-reference syntax. All 3
+          // cells flagged on a real run were the same standard, harmless
+          // CELL("filename") filename-extraction technique:
+          // MID(CELL("filename"),SEARCH("[",CELL("filename"))+1,...) -
+          // where '[' is a literal character being searched for, not
+          // external-link syntax. Confirmed via all 4 structural XML
+          // tests (no xl/externalLinks/ folder, no externalLink content
+          // type, no externalReference element, no external relationship)
+          // that this exact file has zero genuine external links. A real
+          // external reference always follows [N]SheetName!Cell - a
+          // bracket immediately containing a numeric index - which this
+          // pattern correctly requires, while a literal '[' inside a
+          // string argument for an unrelated purpose does not.
+          if (/\[\d+\]/.test(formula)) {
             externalCount++;
             totalExternalLinks++;
             externalLinkCells.push({ sheet: sheetName, cell: cell.address, formula: formula.substring(0, 80) });

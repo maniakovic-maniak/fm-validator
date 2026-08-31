@@ -168,25 +168,22 @@ function runTier1(parsed) {
             fix_instruction: rule.fix_instruction, reason: null
           });
         } else {
-          const bySheet = {};
-          errors.forEach(({ sheet, cell, error }) => {
-            if (!bySheet[sheet]) bySheet[sheet] = { cells: [], errors: new Set() };
-            bySheet[sheet].cells.push(cell);
-            bySheet[sheet].errors.add(error);
-          });
-          for (const [sheet, data] of Object.entries(bySheet)) {
-            const cellList = data.cells.slice(0, 5).join(', ') +
-              (data.cells.length > 5 ? ` (+${data.cells.length - 5} more)` : '');
+          const { groupErrorsByRootCause } = require('./utils/error-dependency-tracer');
+          const groups = groupErrorsByRootCause(errors);
+          groups.forEach(g => {
+            const downstreamNote = g.downstream.length > 0
+              ? ` This same error also appears in ${g.downstream.length} other location(s) that directly reference this cell and carry no independent logic of their own: ${g.downstream.slice(0, 5).map(d => `${d.sheet}!${d.cell}`).join(', ')}${g.downstream.length > 5 ? ` (+${g.downstream.length - 5} more)` : ''}. Fixing the root cause resolves all of these at once.`
+              : '';
             results.push({
-              id: `${rule.id}-${sheet}`,
-              label: `Formula errors in ${sheet}: ${[...data.errors].join(', ')}`,
-              sheet, cell: data.cells[0] || 'A1',
+              id: `${rule.id}-${g.sheet}-${g.cell}`,
+              label: `Formula error in ${g.sheet}!${g.cell}: ${g.error}`,
+              sheet: g.sheet, cell: g.cell,
               type: 'formula_error', severity: rule.severity || 'fatal',
               status: 'fail', fixable: false,
               fix_instruction: rule.fix_instruction,
-              reason: `${data.cells.length} formula error(s) in ${sheet}: ${cellList}`
+              reason: `${g.error} at ${g.sheet}!${g.cell}.${downstreamNote}`
             });
-          }
+          });
         }
       }
     }
