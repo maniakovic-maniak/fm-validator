@@ -283,6 +283,11 @@ async function runVbaReview(filePath) {
       ? `VBA project reviewed — ${extraction.moduleCount} module(s) recovered before an extraction error, ${findings.length} finding(s). Error: ${extraction.error}`
       : `VBA project reviewed — ${extraction.moduleCount} module(s), ${findings.length} finding(s).`,
     findings,
+    // Needed for the VBA-to-broken-named-range cross-reference check in
+    // server.js, which runs after this and doesn't have its own access
+    // to the raw extraction - reusing what's already been extracted
+    // rather than running extraction a second time.
+    modules: extraction.modules,
   };
 }
 

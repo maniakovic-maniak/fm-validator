@@ -846,6 +846,44 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       urgency: 'Before next reliance', confidence: 95
     });
   }
+  // Cross-reference broken named ranges against real VBA source code -
+  // found and independently verified on a real production run: 3 of 8
+  // broken names were confirmed, verbatim, actively referenced by
+  // Range("Name").Select calls in real macro code, which would genuinely
+  // crash at runtime - a defect the broken-name check above and the VBA
+  // review each separately report without ever connecting the two.
+  // Word-boundary matching (\b) avoids a broken name like "II_SO"
+  // incorrectly matching inside an unrelated longer identifier.
+  if (namedRangeAudit.applicable && namedRangeAudit.broken.length > 0 &&
+      vbaReview.applicable && vbaReview.hasVbaProject && Array.isArray(vbaReview.modules)) {
+    const calledBrokenNames = [];
+    for (const brokenName of namedRangeAudit.broken.map(b => b.name)) {
+      const pattern = new RegExp(`\\b${brokenName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      const callingModules = vbaReview.modules
+        .filter(m => pattern.test(m.sourceCode || ''))
+        .map(m => m.name);
+      if (callingModules.length > 0) {
+        calledBrokenNames.push({ name: brokenName, modules: callingModules });
+      }
+    }
+    if (calledBrokenNames.length > 0) {
+      const nameList = calledBrokenNames.map(c => `${c.name} (called from ${c.modules.join(', ')})`).join('; ');
+      allFlagged.push({
+        id: 'T0-VBA-NR-001',
+        label: `${calledBrokenNames.length} broken named range(s) are actively called by VBA macro code`,
+        severity: 'critical', status: 'fail',
+        sheet: '', cell: 'A1', category: 'Linkage',
+        condition: `The following broken named range(s) are directly referenced by Range("Name") calls in real VBA code, not just present in the workbook's name list: ${nameList}. Since the name no longer resolves, this line will raise a runtime error the moment the macro executes it.`,
+        reason: `${calledBrokenNames.length} broken named range(s) actively called by VBA: ${nameList}`,
+        corrective_action: 'Repair or remove each of these named ranges specifically before the macro is next run - this is not a cosmetic defect, the macro will fail to complete.',
+        workstream: 'Structure', category: 'Linkage', issue_type: 'Broken named range called by macro',
+        model_risk: 'A macro that runs on file open, on a button click, or on a scheduled trigger will error out partway through, potentially leaving the workbook in a partially-updated, inconsistent state.',
+        key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+        root_cause: 'Named range reference invalid and actively used by VBA', escalation_flag: true,
+        urgency: 'Before next reliance', confidence: 95
+      });
+    }
+  }
   if (namedRangeAudit.applicable && namedRangeAudit.unused.length > 0) {
     const names = namedRangeAudit.unused.slice(0, 8).map(u => u.name).join(', ');
     allFlagged.push({
@@ -2969,7 +3007,20 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // Extract overall assessment from Tier 2 meta
     const t2Meta = t2Results[0] && t2Results[0]._meta ? t2Results[0]._meta : {};
-    const auditCompletion = t2Meta.audit_completion_percent || Math.round(((_totalRuleCount - checklistFindingCount) / _totalRuleCount) * 100);
+    // FIX: found via an independent audit of a real production run - the
+    // LLM's own self-reported audit_completion_percent said 96%, while
+    // this same run's real Validation Matrix data (ruleResults, built
+    // just above) showed only 17 of 835 rules with a definitive
+    // pass/fail outcome - the rest genuinely 'uncertain'. That's 2%, not
+    // 96%. The two were never cross-checked against each other before;
+    // the unverified LLM figure was always shown regardless.
+    // Computing directly from ruleResults - the same real, objective
+    // data the Validation Matrix tab itself displays - so this number
+    // can never contradict what a reader sees when they open that tab.
+    const definitiveCount = ruleResults.filter(r => r.status === 'pass' || r.status === 'fail').length;
+    const auditCompletion = ruleResults.length > 0
+      ? Math.round((definitiveCount / ruleResults.length) * 100)
+      : (t2Meta.audit_completion_percent || Math.round(((_totalRuleCount - checklistFindingCount) / _totalRuleCount) * 100));
     const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
     const overallAssessment = 'audit_complete';
     const igReadiness = auditCompletion;
