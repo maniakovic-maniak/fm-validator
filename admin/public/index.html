@@ -313,6 +313,53 @@
       stopPolling(orderId);
       render();
     } catch (err) {
+      // This connection failing doesn't necessarily mean the run
+      // failed - server.js persists the real outcome to the order
+      // record directly now, independent of this connection surviving.
+      // Before declaring failure, check whether the run is still
+      // genuinely active (resume tracking it if so), and if not,
+      // re-check the order's real data one more time in case it
+      // actually completed successfully despite this connection
+      // dropping - only show Failed if there's genuinely no report.
+      try {
+        const progressRes = await fetch(`api/run-progress/${orderId}`);
+        if (progressRes.ok) {
+          // Still genuinely running server-side - the polling loop
+          // already started above will keep tracking its real progress.
+          return;
+        }
+      } catch (progressErr) {
+        // Couldn't even check - fall through to the order re-check below.
+      }
+
+      try {
+        const ordersRes = await fetch('api/orders');
+        const ordersData = await ordersRes.json();
+        const freshOrder = (ordersData.orders || []).find(o => o.orderId === orderId);
+        if (freshOrder) {
+          // runLogFilename gets persisted even for a genuine failure
+          // (pre-validation-failed, VBA-encrypted, etc.) - update it
+          // independent of whether a report exists, so View Log becomes
+          // available without needing a manual page refresh either way.
+          const order = orders.find(o => o.orderId === orderId);
+          if (order && freshOrder.runLogFilename) {
+            order.runLogFilename = freshOrder.runLogFilename;
+          }
+          if (freshOrder.reportName) {
+            // It genuinely completed after all - just this connection
+            // failed, not the run itself. Update with the real outcome.
+            if (order) order.reportName = freshOrder.reportName;
+            runStates[orderId] = 'complete';
+            stopPolling(orderId);
+            render();
+            return;
+          }
+        }
+      } catch (recheckErr) {
+        // Re-check itself failed - fall through to Failed below, the
+        // honest outcome when we genuinely can't determine what happened.
+      }
+
       runStates[orderId] = 'failed';
       stopPolling(orderId);
       render();
