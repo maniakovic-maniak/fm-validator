@@ -799,12 +799,26 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // "make it monitorable, not just inferable from prose" pattern
     // that made R-8's usage directly verifiable via review_mode above.
     const validSheetSet = new Set((parsed.sheetNames || []).map(s => s.toLowerCase()));
+    // FIX: split into separate counts - the combined check below tells
+    // us THAT locations are unusable, but not WHICH of two genuinely
+    // different causes actually dominates: the LLM defaulting to "A1"
+    // despite a real _cellRef being available in the data (confirmed
+    // via direct testing: real parsed data has 0% missing _cellRef
+    // across 845 real rows - this is not a data-completeness gap), vs.
+    // citing a sheet name that's blank or doesn't match any real sheet
+    // in this workbook (a hallucination/naming-consistency issue, a
+    // meaningfully different problem with a different fix). Reporting
+    // only the combined total made it impossible to tell which one to
+    // actually investigate.
+    const a1CellCount = normalised.filter(r => r.cell === 'A1').length;
+    const badSheetCount = normalised.filter(r => !r.sheet || !validSheetSet.has(String(r.sheet).toLowerCase())).length;
     const badLocationCount = normalised.filter(r =>
       r.cell === 'A1' || !r.sheet || !validSheetSet.has(String(r.sheet).toLowerCase())
     ).length;
     if (badLocationCount > 0) {
       const pct = Math.round(100 * badLocationCount / normalised.length);
       console.log(`   \u26a0\ufe0f  ${badLocationCount} of ${normalised.length} Tier 2 finding(s) (${pct}%) have an unusable location — cell defaulted to "A1", or sheet is blank/not a real sheet name in this workbook.`);
+      console.log(`      Breakdown: ${a1CellCount} used the "A1" cell fallback, ${badSheetCount} had a blank or invalid sheet name (some findings may count toward both).`);
     }
 
     return normalised;
