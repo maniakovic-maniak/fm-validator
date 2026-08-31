@@ -95,15 +95,27 @@ app.get('/api/view-log/:orderId', async (req, res) => {
 app.get('/api/download-report/:orderId', async (req, res) => {
   try {
     const response = await fetch(`${MAIN_APP_URL}/api/download-report/${req.params.orderId}`);
+    const contentType = response.headers.get('content-type') || '';
     if (!response.ok) {
       const data = await response.json();
       return res.status(response.status).json(data);
+    }
+    if (contentType.includes('application/json')) {
+      // No local copy left - the main app returned the real Drive link
+      // instead of a binary file. Redirect the user's own browser there
+      // directly, rather than this server trying to fetch and stream
+      // Drive's HTML preview page as if it were the actual file.
+      const data = await response.json();
+      if (data.driveWebViewLink) {
+        return res.redirect(data.driveWebViewLink);
+      }
+      return res.status(502).json({ error: 'Unexpected response from the validation pipeline.' });
     }
     // Binary file - forward the real headers (filename, content-type)
     // from the upstream response, then stream the body through rather
     // than buffering the whole file in memory.
     res.set('Content-Disposition', response.headers.get('content-disposition') || 'attachment');
-    res.set('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+    res.set('Content-Type', contentType || 'application/octet-stream');
     const buffer = Buffer.from(await response.arrayBuffer());
     res.send(buffer);
   } catch (err) {

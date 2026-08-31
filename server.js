@@ -501,10 +501,20 @@ app.get('/api/download-report/:orderId', requireApiKey, (req, res) => {
   }
   const safeFilename = path.basename(order.reportName);
   const reportPath = path.join(__dirname, 'processed', safeFilename);
-  if (!fs.existsSync(reportPath)) {
-    return res.status(404).json({ error: 'Report file no longer exists on disk.' });
+  if (fs.existsSync(reportPath)) {
+    return res.download(reportPath, safeFilename);
   }
-  res.download(reportPath, safeFilename);
+  // Local disk is a working directory only - the pipeline deliberately
+  // removes the local copy once it's safely delivered to Drive, which
+  // is the real, retained artefact. Fall back to that link instead of
+  // a dead-end 404. Returned as JSON, not a raw HTTP redirect - the
+  // admin's own fetch() proxy would otherwise follow it automatically
+  // and try to stream Drive's HTML preview page as if it were the
+  // binary file, which is not what a download button should do.
+  if (order.driveWebViewLink) {
+    return res.status(200).json({ driveWebViewLink: order.driveWebViewLink });
+  }
+  return res.status(404).json({ error: 'Report file no longer exists on disk, and no Drive link was recorded for this order.' });
 });
 
 app.post('/api/send-report-email/:orderId', requireApiKey, async (req, res) => {
@@ -3121,7 +3131,11 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     clearProgress(runId);
     if (shouldCleanup) fs.unlink(filePath, () => {});
     if (req.body.orderId) {
-      updateOrder(req.body.orderId, { runLogFilename: runLog.filename, reportName });
+      updateOrder(req.body.orderId, {
+        runLogFilename: runLog.filename,
+        reportName,
+        driveWebViewLink: driveResult ? driveResult.webViewLink : null,
+      });
     }
 
     res.json({
