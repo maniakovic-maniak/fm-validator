@@ -489,6 +489,41 @@ function runTier1(parsed) {
     }
   }
 
+  // ── Model Impact / "why this matters" ─────────────────────────────────
+  // Tier 1 checks are deterministic, so unlike Tier 2's LLM-generated
+  // findings, there's no model reasoning to surface into this field -
+  // it was always structurally empty for every T1 finding until now.
+  // Written per rule, grounded in the actual mechanics of what each
+  // check verifies and the real, concrete consequence of it failing -
+  // not generic filler, matching the same specificity as Tier 2's own
+  // model_risk text.
+  const MODEL_RISK_BY_ID = {
+    'T1-001': 'A formula error means the cell\u2019s output is genuinely broken, not just cosmetically wrong \u2014 any downstream calculation that references it inherits the same failure, whether or not that\u2019s visible.',
+    'T1-002': 'Without the basic, recognisable structure of a financial model present, every other check\u2019s result becomes suspect \u2014 this is a foundational gate, not an isolated finding.',
+    'T1-003': 'The model builder\u2019s own, self-identified list of known issues still has open items \u2014 meaning something is known to be unresolved, yet the model was submitted for reliance regardless.',
+    'T1-004': 'Without a dedicated balance-check mechanism, there is no built-in way to confirm the balance sheet genuinely balances (assets = liabilities + equity) \u2014 a foundational integrity check for any financial model.',
+    'T1-005': 'Without a cash flow reconciliation, there is no mechanism confirming the cash flow statement ties out against the opening/closing cash balance on the balance sheet \u2014 a classic, critical three-statement integrity check.',
+    'T1-006': 'Property, plant & equipment going negative is not physically or accounting-wise possible under normal circumstances \u2014 it signals a depreciation or disposal formula error that may be distorting both the balance sheet and depreciation expense.',
+    'T1-007': 'An external link means the model\u2019s outputs depend on another file that may not be available, may have changed, or may not exist for the recipient \u2014 breaking reproducibility and creating a dependency risk invisible to a casual reviewer.',
+    'T1-008': 'A negative cash balance in any forecast period typically indicates the model is missing a revolver or debt drawdown mechanism, or that the business genuinely runs out of cash \u2014 either a real modelling gap or a material finding about viability.',
+    'T1-009': 'Without explicit period flags, formulas cannot reliably distinguish historical, known data from forecast assumptions \u2014 risking actuals being silently overwritten by forecast logic, or vice versa.',
+    'T1-010': 'A repair warning means Excel itself detected structural damage and may have silently dropped or altered content while repairing it \u2014 any analysis performed afterward risks being based on data that no longer matches what the builder originally intended.',
+    'T1-011': 'An unresolved circular reference means Excel is iterating toward some value with no guarantee it is the correct one \u2014 outputs can shift based on recalculation settings alone, with no visible error to warn the user.',
+    'T1-012': 'If a period is flagged as both actual and forecast \u2014 or neither \u2014 formulas that switch logic based on these flags can silently apply the wrong calculation method to that period.',
+    'T1-013': 'Hidden rows or columns containing live formulas can carry material logic invisible to a reviewer scrolling through the workbook normally \u2014 whether accidental or deliberate, the effect on reviewability is the same.',
+    'T1-014': 'White-on-white or otherwise hidden-by-formatting text and values can contain numbers or logic that genuinely influence the model without ever being visually reviewed by anyone.',
+    'T1-015': 'Generic or default sheet names make it harder for any reviewer \u2014 including this pipeline\u2019s own sheet-matching logic \u2014 to reliably identify what each sheet actually contains, increasing the risk of misinterpreting the model\u2019s structure.',
+    'T1-016': 'Array formulas behave differently from normal formulas and are easy to break by accidentally editing a single cell within the array range \u2014 a common source of silent, hard-to-detect corruption in later versions of the same model.',
+    'T1-017': 'If iterative calculation is silently enabled, circular references that should have thrown a visible error instead resolve quietly, potentially masking a genuine modelling mistake. \u2018Precision as displayed\u2019 permanently, irreversibly rounds stored values \u2014 a setting that can quietly introduce rounding error throughout the entire model.',
+    'T1-018': 'Without input restrictions, a user can enter an out-of-range or nonsensical value (e.g. a negative growth rate where only positive is valid) with no warning at all, risking a genuine, undetected input error propagating through the whole model.',
+  };
+  for (const r of results) {
+    if (r.status !== 'pass' && !r.model_risk) {
+      const baseId = (r.id || '').split('-').slice(0, 2).join('-');
+      if (MODEL_RISK_BY_ID[baseId]) r.model_risk = MODEL_RISK_BY_ID[baseId];
+    }
+  }
+
   return results;
 }
 
