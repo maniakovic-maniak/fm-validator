@@ -101,7 +101,7 @@ const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
 const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification } = require('./src/notifier');
-const { createOrder, getOrder }                   = require('./src/utils/order-store');
+const { createOrder, getOrder, updateOrder }      = require('./src/utils/order-store');
 const { chargeViaEway }                           = require('./src/utils/eway-payment');
 
 const app       = express();
@@ -677,6 +677,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       runLog.stop();
       if (slot) slot.release();
       clearProgress(runId);
+      if (req.body.orderId) updateOrder(req.body.orderId, { runLogFilename: runLog.filename });
       return res.json({
         status: 'vba-encrypted',
         message: 'This workbook is password-encrypted, so its VBA/macro content cannot be verified without the password. Please provide an unencrypted copy, or the password, to proceed with validation.',
@@ -720,6 +721,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       const failures = preResult.results.filter(r => r.status === 'fail');
       console.log(`   ❌ Pre-validation failed — ${failures.length} issues`);
       clearProgress(runId);
+      if (req.body.orderId) updateOrder(req.body.orderId, { runLogFilename: runLog.filename });
       return res.json({
         status: 'pre-validation-failed',
         message: 'File failed pre-validation checks',
@@ -3118,6 +3120,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     clearProgress(runId);
     if (shouldCleanup) fs.unlink(filePath, () => {});
+    if (req.body.orderId) {
+      updateOrder(req.body.orderId, { runLogFilename: runLog.filename, reportName });
+    }
 
     res.json({
       status:       allFlagged.length === 0 ? 'passed' : 'flagged',
@@ -3162,6 +3167,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     runLog.stop();
     if (slot) slot.release();
     clearProgress(runId);
+    if (req.body.orderId) updateOrder(req.body.orderId, { runLogFilename: runLog.filename });
     if (shouldCleanup) fs.unlink(filePath, () => {});
     res.status(500).json({ status: 'error', message: error.message || 'Validation failed', runLogFilename: runLog.filename });
   }
