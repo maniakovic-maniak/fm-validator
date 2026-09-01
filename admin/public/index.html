@@ -271,9 +271,17 @@
           runStates[order.orderId] = 'running';
           runProgress[order.orderId] = data;
           startPolling(order.orderId);
+        } else if (order.reportName) {
+          // No active run right now, but this order genuinely completed
+          // at some point (a real report exists) - the badge should
+          // reflect that on a fresh page load, not default to idle/RUN
+          // just because there's no in-progress run left to find. The
+          // action icons already correctly know this from the same
+          // order data; the badge text just never checked it too.
+          runStates[order.orderId] = 'complete';
         }
-        // A 404 here correctly means no active run for this order - the
-        // normal, expected case for most orders, not an error.
+        // A 404 here with no reportName correctly means this order has
+        // simply never been run - the genuine idle/RUN case.
       } catch (err) {
         // Transient issue checking this one order - leave it as idle
         // rather than block the rest of the page from loading correctly.
