@@ -100,8 +100,9 @@ const { shouldUseFullParseRoute }                = require('./src/utils/formula-
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
-const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification } = require('./src/notifier');
+const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail } = require('./src/notifier');
 const { createOrder, getOrder, updateOrder }      = require('./src/utils/order-store');
+const { createDemoRequest, listDemoRequests }     = require('./src/utils/demo-store');
 const { chargeViaEway }                           = require('./src/utils/eway-payment');
 
 const app       = express();
@@ -476,6 +477,40 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
   sendAdminOrderNotification(order).catch(() => {});
 
   res.json({ success: true, orderId: order.orderId });
+});
+
+app.post('/api/submit-demo-request', requireApiKey, async (req, res) => {
+  const { name, company, email } = req.body || {};
+  const clientIp = getClientIp(req);
+
+  if (!name || !company || !email) {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Name, company, and email are all required.' });
+  }
+  if (!EMAIL_SYNTAX_RE.test(String(email).trim())) {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Please provide a valid email address.' });
+  }
+
+  let demoRequest;
+  try {
+    demoRequest = createDemoRequest({ name, company, email, ip: clientIp });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Could not create demo request record:', err.message);
+    return res.status(500).json({ success: false, code: 'SERVER_ERROR', message: 'Could not process the request right now. Please try again shortly.' });
+  }
+
+  const emailResult = await sendDemoRequestEmail({ name, email });
+  if (emailResult && emailResult.error) {
+    // The record is already saved regardless - don't lose track of a
+    // genuine request just because the email itself failed to send.
+    console.error('   \u26a0\ufe0f  Demo request saved but email failed:', emailResult.error);
+    return res.status(502).json({ success: false, code: 'EMAIL_FAILED', message: 'Your request was received, but we could not send the sample report right now. We\u2019ll be in touch directly.' });
+  }
+
+  res.json({ success: true, demoRequestId: demoRequest.id });
+});
+
+app.get('/api/demo-requests', requireApiKey, (req, res) => {
+  res.json({ demoRequests: listDemoRequests() });
 });
 
 app.get('/api/view-log/:orderId', requireApiKey, (req, res) => {
