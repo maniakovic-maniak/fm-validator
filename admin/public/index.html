@@ -224,20 +224,20 @@
           render();
         } else if (res.status === 404 && runProgress[orderId] && runStates[orderId] === 'running') {
           // Progress genuinely existed before and is now gone - the run
-          // has finished (success or failure). Only runOrder()'s own
-          // fetch call knows the real outcome; polling resumed after a
-          // refresh (or a 409) has no such call left to eventually stop
-          // itself, so without this the badge would stay stuck on
-          // "Running..." forever even after the run is long done.
-          //
-          // The runStates check guards against a race with runOrder()'s
-          // own completion handling, which may fire around the same
-          // moment from the exact same underlying completion - never
-          // overwrite a 'complete'/'failed' state that's already been
-          // correctly set.
+          // has reached some real outcome (success or failure). Only
+          // runOrder()'s own fetch call would normally know which, but
+          // that call may itself be stuck (e.g. the laptop slept mid-run
+          // and its fetch never resolved or rejected) - re-check the
+          // real order data directly rather than assume idle, which
+          // would be wrong here: the run did genuinely finish, it just
+          // isn't "never run" the way idle implies.
           stopPolling(orderId);
-          runStates[orderId] = 'idle';
-          render();
+          recheckRealOutcome(orderId).then((resolved) => {
+            if (!resolved) {
+              runStates[orderId] = 'failed';
+              render();
+            }
+          });
         }
         // A 404 with no prior progress just means it hasn't started
         // writing yet - not an error worth surfacing.
