@@ -261,4 +261,59 @@ async function sendAdminOrderNotification(order) {
   console.log(`Admin order notification sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
 }
 
-module.exports = { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification };
+/**
+ * Demo request email — sends the sample report (a swappable, fixed-path
+ * file, not tied to any real customer order) to whoever requested a demo
+ * via the website's "Request a Demo" form.
+ */
+async function sendDemoRequestEmail(demoRequest) {
+  if (!process.env.RESEND_API_KEY) {
+    console.log('   (Skipping demo request email — RESEND_API_KEY not set.)');
+    return { skipped: true };
+  }
+  // Fixed path, deliberately - swap this one file for the real sample
+  // report once it's ready, no code change needed.
+  const samplePath = path.join(__dirname, '..', 'assets', 'demo-report.xlsx');
+  if (!fs.existsSync(samplePath)) {
+    console.error(`   \u26a0\ufe0f  Cannot send demo request email — sample report not found: ${samplePath}`);
+    return { error: 'Sample report file not found on disk.' };
+  }
+
+  const { name, email } = demoRequest;
+  const subject = `Your PlsFx sample model review`;
+  // Placeholder copy for now - refine once the real demo flow is confirmed.
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:520px">
+      <p>Hi ${escHtml(name)},</p>
+      <p>Thanks for your interest in PlsFx. Attached is a sample model review report, showing the kind of structured, formula-level audit our pipeline produces.</p>
+      <p>Inside you'll find a real example of the report structure — including an Issue Log, Validation Matrix, and Remediation plan.</p>
+      <p>If you'd like to talk through how this could work for your own models, just reply to this email.</p>
+      <p>— The PlsFx Team</p>
+    </div>
+  `;
+
+  let sendResult;
+  try {
+    sendResult = await getResendClient().emails.send({
+      from: 'PLSFX model review <onboarding@resend.dev>',
+      to: email,
+      subject,
+      html,
+      attachments: [{
+        filename: 'PlsFx-sample-report.xlsx',
+        content: fs.readFileSync(samplePath),
+      }],
+    });
+  } catch (e) {
+    console.error(`   \u26a0\ufe0f  Demo request email failed to send: ${e.message}`);
+    return { error: e.message };
+  }
+  if (sendResult && sendResult.error) {
+    console.error(`   \u26a0\ufe0f  Demo request email was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
+    return { error: JSON.stringify(sendResult.error) };
+  }
+  console.log(`Demo request email sent to ${email}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
+  return { success: true };
+}
+
+module.exports = { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail };
