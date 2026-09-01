@@ -477,7 +477,8 @@ function runTier1(parsed) {
     no_external_links:          'External dependency',
     workbook_opens_clean:       'File integrity issue',
     no_circular_references:     'Circular reference',
-    actuals_forecast_separated: 'Period flag misconfiguration'
+    actuals_forecast_separated: 'Period flag misconfiguration',
+    actuals_forecast_flags_exclusive: 'Period flag misconfiguration'
   };
   const typeById = Object.fromEntries(checklist.tier1.map(r => [r.id, r.type]));
   for (const r of results) {
