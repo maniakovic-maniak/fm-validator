@@ -1751,7 +1751,7 @@ def build_report(data_path, output_path):
     for idx,(area,kws) in enumerate(areas):
         row_i = AR_HEADER_ROW+1+idx
         row_bg = WHITE if idx%2==0 else 'FAFBFC'
-        hits=[fid for fid,txt in ftexts if any(k in txt for k in kws)]
+        hits=[fid for fid,txt in ftexts if any(re.search(r'\b'+re.escape(k)+r'\b', txt) for k in kws)]
         ref_txt=', '.join(hits[:4])+(f' +{len(hits)-4} more' if len(hits)>4 else '') if hits else '—'
         row_values={
             'Assumption Area': area, 'Evidence Status': 'Missing', 'Decision Critical': '',

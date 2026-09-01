@@ -21,7 +21,7 @@
 
 const FIN_STATEMENT_KEYWORDS = [
   'AFS', 'IFS', 'Consolidated', 'Balance Sheet', 'BS', 'Cash Flow', 'Cashflow', 'CFS',
-  'P&L', 'Profit and Loss', 'Income Statement'
+  'P&L', 'Profit and Loss', 'Income Statement', 'FinancialStatements'
 ];
 
 // Sheets that are legitimately standalone by design — their whole purpose
