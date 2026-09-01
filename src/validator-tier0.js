@@ -66,7 +66,7 @@ function scoreFormula(formula) {
   if (/\bTODAY\s*\(|\bNOW\s*\(|\bRAND\s*\(|\bRANDBETWEEN\s*\(/i.test(f)) score += 3;
 
   // External workbook reference
-  if (f.includes('[')) score += 5;
+  if (/\[\d+\]/.test(f)) score += 5;
 
   // Hardcoded numeric constants (not 0 or 1 which are structural)
   const hardcodes = f.match(/(?<![A-Z0-9_])[2-9]\d*(?:\.\d+)?(?![A-Z0-9_])/gi) || [];
@@ -129,7 +129,7 @@ function complexityExplanation(formula, score, band) {
 
 function classifyFormula(formula) {
   const f = formula || '';
-  if (f.includes('[')) return 'Link';
+  if (/\[\d+\]/.test(f)) return 'Link';
   if (/\bIF\s*\(|\bIFS\s*\(|\bCHOOSE\s*\(|\bSWITCH\s*\(|\bAND\s*\(|\bOR\s*\(|\bNOT\s*\(/i.test(f)) return 'Logic';
   if (/\bXLOOKUP\s*\(|\bVLOOKUP\s*\(|\bHLOOKUP\s*\(|\bINDEX\s*\(|\bMATCH\s*\(/i.test(f)) return 'Lookup';
   if (/\bSUM\s*\(|\bSUMIF\s*\(|\bSUMIFS\s*\(|\bCOUNT\s*\(|\bCOUNTIF\s*\(|\bAVERAGE\s*\(/i.test(f)) return 'Aggregation';
@@ -183,8 +183,8 @@ function extractPrecedentSheets(formula, allSheetNames, nameToSheets) {
     }
   }
 
-  // External refs contain [
-  if (formula.includes('[')) refs.add('[EXTERNAL]');
+  // External refs contain [N] - a numeric index, not just any bracket
+  if (/\[\d+\]/.test(formula)) refs.add('[EXTERNAL]');
 
   return [...refs];
 }
@@ -400,7 +400,7 @@ async function runTier0(parsed) {
               band,
               explanation:      expl,
               formulaClass:     classifyFormula(formula),
-              externalLinkFlag: formula.includes('['),
+              externalLinkFlag: /\[\d+\]/.test(formula),
               volatileFlag:     /\bOFFSET\s*\(|\bINDIRECT\s*\(|\bTODAY\s*\(|\bNOW\s*\(|\bRAND\s*\(/i.test(formula),
               hardcodeFlag:     hardcodes.length > 0,
               iferrorFlag:      /\bIFERROR\s*\(|\bIFNA\s*\(|\bISERROR\s*\(/i.test(formula),

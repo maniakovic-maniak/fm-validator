@@ -283,7 +283,7 @@ function runTier1(parsed) {
         parsed._raw.eachSheet(ws => {
           ws.eachRow({ includeEmpty: false }, row => {
             row.eachCell({ includeEmpty: false }, cell => {
-              if (cell.formula && typeof cell.formula === 'string' && cell.formula.includes('[')) {
+              if (cell.formula && typeof cell.formula === 'string' && /\[\d+\]/.test(cell.formula)) {
                 externalRefs.push({ sheet: ws.name, cell: cell.address, formula: cell.formula.substring(0, 60) });
               }
             });
