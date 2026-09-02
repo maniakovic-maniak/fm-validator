@@ -1,5 +1,5 @@
 // report-tab.js — FM Validator Report Builder
-// Builds a 9-tab _VALIDATED.xlsx using the Python report builder.
+// Builds a 9-tab _PROCESSED.xlsx using the Python report builder.
 // Passes all pipeline data as JSON to the Python script.
 
 const { execFile } = require('child_process');

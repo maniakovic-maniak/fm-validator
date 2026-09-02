@@ -3026,7 +3026,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     console.log('[6/6] Building report, uploading, notifying...');
     setProgress(runId, 6, 'Building report, uploading, notifying');
     const baseName   = path.parse(originalName).name;
-    const reportName = `${baseName}_VALIDATED.xlsx`;
+    const reportName = `${baseName}_PROCESSED.xlsx`;
     const reportPath = path.join(__dirname, 'processed', reportName);
 
     if (!fs.existsSync(path.join(__dirname, 'processed'))) {

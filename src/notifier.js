@@ -55,7 +55,7 @@ async function sendNotification(outcome) {
   // that never actually happen is a real accuracy problem, not just stale
   // wording — fixed to describe what the product actually does.
   const attentionBlock = needsAttention > 0
-    ? `<p style="color:#B45309"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} flagged for your review — nothing in your file has been changed.</strong><br>Open the Validation Report tab in the file for exact cell locations and suggested actions.</p>`
+    ? `<p style="color:#B45309"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} flagged for your review — nothing in your file has been changed.</strong><br>Open the Processed Report tab in the file for exact cell locations and suggested actions.</p>`
     : `<p style="color:#27500A"><strong>✅ No issues were flagged. Your file has not been modified.</strong></p>`;
 
   let downloadUrl = webViewLink;
@@ -66,7 +66,7 @@ async function sendNotification(outcome) {
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
-      <h2 style="color:#1A2B4A">Validation complete</h2>
+      <h2 style="color:#1A2B4A">Processed complete</h2>
       <p><strong>File:</strong> ${escHtml(originalName)}</p>
       <p><strong>Output:</strong> ${escHtml(outputName)}</p>
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
@@ -87,23 +87,21 @@ async function sendNotification(outcome) {
   // actual error detail, instead of either crashing the whole pipeline
   // (this call has no wrapper at its own call site either) or being
   // indistinguishable from genuine success. Also logs Resend's own
-  // response id on success — a request that was merely accepted but
-  // never delivered (a very plausible cause: 'onboarding@resend.dev'
-  // is Resend's sandbox/test sender address, which typically can only
-  // deliver to the account's own verified email, not an arbitrary
-  // NOTIFY_EMAIL recipient, unless a custom domain has been verified)
-  // is the leading suspect and should surface here directly.
+  // response id on success. Now sending from a verified custom domain
+  // (plsfx.ai) — the earlier sandbox-sender delivery restriction
+  // ('onboarding@resend.dev' could only reach the account's own
+  // verified email) no longer applies.
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PLSFX model review <onboarding@resend.dev>',
+      from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: process.env.NOTIFY_EMAIL,
       subject,
       html
     });
   } catch (e) {
     console.error(`   ⚠️  Email notification failed to send: ${e.message}`);
-    console.error(`   ⚠️  (Notification failure does not affect the report itself — it was already built and uploaded. If this keeps happening, check: NOTIFY_EMAIL is set to a real address; if using Resend's sandbox sender (onboarding@resend.dev), it can typically only deliver to the account's own verified email — a verified custom domain is needed to send to other recipients.)`);
+    console.error(`   ⚠️  (Notification failure does not affect the report itself — it was already built and uploaded. If this keeps happening, check: NOTIFY_EMAIL is set to a real address, and the plsfx.ai domain is still showing Verified in the Resend dashboard.)`);
     return;
   }
 
@@ -138,7 +136,7 @@ async function sendOrderConfirmation(order) {
       <p>Hi ${escHtml(fullName)},</p>
       <p>Thanks for submitting <strong>${escHtml(originalName)}</strong> for review. Your order ID is <strong>${escHtml(orderId)}</strong> — keep this for reference.</p>
       <p>Total charged: ${totalDisplay}</p>
-      <p>Your model is now in our queue for audit. We'll email you again as soon as your report is ready, along with the full breakdown of findings.</p>
+      <p>Your model is now in our queue for review. We'll email you again as soon as your report is ready, along with the full breakdown of findings.</p>
       <p>If you have any questions in the meantime, just reply to this email.</p>
       <p>— The PlsFx Team</p>
     </div>
@@ -147,8 +145,9 @@ async function sendOrderConfirmation(order) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PLSFX model review <onboarding@resend.dev>',
+      from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: order.email,
+      replyTo: 'maniakovic@gmail.com',
       subject,
       html
     });
@@ -189,8 +188,8 @@ async function sendReportReadyEmail(order) {
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
       <p>Hi ${escHtml(fullName)},</p>
-      <p>Your audit for <strong>${escHtml(originalName)}</strong> (order ${escHtml(orderId)}) is complete — the full report is attached.</p>
-      <p>Inside you'll find a structured, 16-tab audit — including an Issue Log, Validation Matrix, and Remediation plan — covering everything found during formula-level review.</p>
+      <p>Your review for <strong>${escHtml(originalName)}</strong> (order ${escHtml(orderId)}) is complete — the full report is attached.</p>
+      <p>Inside you'll find a structured, 16-tab review — including an Issue Log, Validation Matrix, and Remediation plan — covering everything found during formula-level review.</p>
       <p>If you have any questions about a specific finding, just reply to this email.</p>
       <p>— The PlsFx Team</p>
     </div>
@@ -199,8 +198,9 @@ async function sendReportReadyEmail(order) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PLSFX model review <onboarding@resend.dev>',
+      from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: order.email,
+      replyTo: 'maniakovic@gmail.com',
       subject,
       html,
       attachments: [{
@@ -245,7 +245,7 @@ async function sendAdminOrderNotification(order) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PLSFX model review <onboarding@resend.dev>',
+      from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: process.env.NOTIFY_EMAIL,
       subject,
       html
@@ -285,7 +285,7 @@ async function sendDemoRequestEmail(demoRequest) {
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
       <p>Hi ${escHtml(name)},</p>
-      <p>Thanks for your interest in PlsFx. Attached is a sample model review report, showing the kind of structured, formula-level audit our pipeline produces.</p>
+      <p>Thanks for your interest in PlsFx. Attached is a sample model review report, showing the kind of structured, formula-level review our pipeline produces.</p>
       <p>Inside you'll find a real example of the report structure — including an Issue Log, Validation Matrix, and Remediation plan.</p>
       <p>If you'd like to talk through how this could work for your own models, just reply to this email.</p>
       <p>— The PlsFx Team</p>
@@ -295,8 +295,9 @@ async function sendDemoRequestEmail(demoRequest) {
   let sendResult;
   try {
     sendResult = await getResendClient().emails.send({
-      from: 'PLSFX model review <onboarding@resend.dev>',
+      from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: email,
+      replyTo: 'maniakovic@gmail.com',
       subject,
       html,
       attachments: [{
