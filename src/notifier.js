@@ -147,7 +147,7 @@ async function sendOrderConfirmation(order) {
     sendResult = await getResendClient().emails.send({
       from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: order.email,
-      replyTo: 'maniakovic@gmail.com',
+      replyTo: 'mikhail@plsfx.ai',
       subject,
       html
     });
@@ -200,7 +200,7 @@ async function sendReportReadyEmail(order) {
     sendResult = await getResendClient().emails.send({
       from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: order.email,
-      replyTo: 'maniakovic@gmail.com',
+      replyTo: 'mikhail@plsfx.ai',
       subject,
       html,
       attachments: [{
@@ -297,7 +297,7 @@ async function sendDemoRequestEmail(demoRequest) {
     sendResult = await getResendClient().emails.send({
       from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: email,
-      replyTo: 'maniakovic@gmail.com',
+      replyTo: 'mikhail@plsfx.ai',
       subject,
       html,
       attachments: [{
