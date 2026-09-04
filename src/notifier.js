@@ -55,8 +55,8 @@ async function sendNotification(outcome) {
   // that never actually happen is a real accuracy problem, not just stale
   // wording — fixed to describe what the product actually does.
   const attentionBlock = needsAttention > 0
-    ? `<p style="color:#B45309"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} flagged for your review — nothing in your file has been changed.</strong><br>Open the Processed Report tab in the file for exact cell locations and suggested actions.</p>`
-    : `<p style="color:#27500A"><strong>✅ No issues were flagged. Your file has not been modified.</strong></p>`;
+    ? `<p style="color:#F5A623"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} flagged for your review — nothing in your file has been changed.</strong><br>Open the Processed Report tab in the file for exact cell locations and suggested actions.</p>`
+    : `<p style="color:#5DCAA5"><strong>✅ No issues were flagged. Your file has not been modified.</strong></p>`;
 
   let downloadUrl = webViewLink;
   const fileIdMatch = webViewLink && webViewLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
@@ -64,18 +64,103 @@ async function sendNotification(outcome) {
     downloadUrl = `https://drive.google.com/uc?export=download&id=${fileIdMatch[1]}`;
   }
 
-  const html = `
-    <div style="font-family:Arial,sans-serif;max-width:520px">
-      <h2 style="color:#1A2B4A">Processed complete</h2>
-      <p><strong>File:</strong> ${escHtml(originalName)}</p>
-      <p><strong>Output:</strong> ${escHtml(outputName)}</p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
-      <p><strong>Total issues found:</strong> ${totalIssues}</p>
-      <p><strong>Needs attention:</strong> ${needsAttention}</p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
-      ${attentionBlock}
-      <a href="${downloadUrl}" style="display:inline-block;margin-top:16px;background:#1A2B4A;color:white;padding:10px 20px;border-radius:6px;text-decoration:none">Download Validated File</a>
-    </div>
+  const html = `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="dark only">
+<meta name="supported-color-schemes" content="dark only">
+<title>Processed complete</title>
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<style>table {border-collapse: collapse;}</style>
+<![endif]-->
+<style>
+  body, table, td { margin: 0; padding: 0; }
+  img { border: 0; line-height: 100%; outline: none; text-decoration: none; }
+  table { border-collapse: collapse !important; }
+  body { height: 100% !important; width: 100% !important; }
+
+  .body-bg { background-color: #05070d; }
+  .card-bg { background-color: #0d1018; }
+  .text-primary { color: #eef1f8; }
+  .text-secondary { color: #a9b1c4; }
+  .text-muted { color: #7d8598; }
+  .border-hair { border-color: rgba(233,237,245,0.14); }
+  .footer-bg { background-color: #0a0c12; }
+  .accent { color: #5DCAA5; }
+
+  @media screen and (max-width: 600px) {
+    .email-container { width: 100% !important; }
+    .fluid-padding { padding-left: 24px !important; padding-right: 24px !important; }
+  }
+</style>
+</head>
+<body class="body-bg" style="margin:0; padding:0; background-color:#05070d; font-family: Arial, Helvetica, sans-serif;">
+
+<center class="body-bg" style="width:100%; background-color:#05070d;">
+  <!--[if mso]>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" align="center">
+  <tr><td>
+  <![endif]-->
+
+  <table role="presentation" class="email-container" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px; margin:0 auto;">
+
+    <tr>
+      <td class="fluid-padding" style="padding:36px 32px 24px 32px; text-align:left;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="background-color:#3d8b85; padding:8px 12px; font-family: Georgia, 'Times New Roman', serif; font-style:italic; font-size:16px; color:#ffffff;">fx</td>
+            <td style="background-color:#16171A; padding:8px 16px; font-family: Arial, Helvetica, sans-serif; font-weight:bold; font-size:16px; color:#ffffff; letter-spacing:0.5px;">PlsFx</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td class="fluid-padding" style="padding:0 32px 32px 32px;">
+        <table role="presentation" class="card-bg" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#0d1018; border-radius:12px;">
+          <tr>
+            <td class="fluid-padding" style="padding:36px 40px 40px 40px;">
+              <p class="accent" style="margin:0 0 18px 0; font-family: 'Courier New', Courier, monospace; font-size:12px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; color:#5DCAA5;">PROCESSED COMPLETE</p>
+              <p class="text-secondary" style="margin:0 0 8px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;"><strong class="text-primary" style="color:#eef1f8;">File:</strong> ${escHtml(originalName)}</p>
+              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;"><strong class="text-primary" style="color:#eef1f8;">Output:</strong> ${escHtml(outputName)}</p>
+              <hr class="border-hair" style="border:none;border-top:1px solid rgba(233,237,245,0.14);margin:18px 0">
+              <p class="text-secondary" style="margin:0 0 8px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;"><strong class="text-primary" style="color:#eef1f8;">Total issues found:</strong> ${totalIssues}</p>
+              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;"><strong class="text-primary" style="color:#eef1f8;">Needs attention:</strong> ${needsAttention}</p>
+              <hr class="border-hair" style="border:none;border-top:1px solid rgba(233,237,245,0.14);margin:18px 0">
+              <div style="font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6;">${attentionBlock}</div>
+              <a href="${downloadUrl}" style="display:inline-block;margin-top:20px;background-color:#5DCAA5;color:#05070d;padding:12px 24px;border-radius:6px;text-decoration:none;font-family: Arial, Helvetica, sans-serif;font-weight:bold;font-size:14px;">Download Processed File</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td class="footer-bg fluid-padding" style="background-color:#0a0c12; padding:24px 32px;">
+        <p class="text-muted" style="margin:0; font-family: 'Courier New', Courier, monospace; font-size:11px; line-height:1.6; color:#7d8598;">&copy; Copyright 2026 BIRDHOUSE TRADING PTY LTD. - All Rights Reserved / ABN: 61692125616</p>
+      </td>
+    </tr>
+
+  </table>
+
+  <!--[if mso]>
+  </td></tr>
+  </table>
+  <![endif]-->
+</center>
+
+</body>
+</html>
   `;
 
   // FIX: found via investigating a report that email notifications had
@@ -455,15 +540,101 @@ async function sendDemoRequestEmail(demoRequest) {
 
   const { name, email } = demoRequest;
   const subject = `Your PlsFx sample model review`;
-  // Placeholder copy for now - refine once the real demo flow is confirmed.
-  const html = `
-    <div style="font-family:Arial,sans-serif;max-width:520px">
-      <p>Hi ${escHtml(name)},</p>
-      <p>Thanks for your interest in PlsFx. Attached is a sample model review report, showing the kind of structured, formula-level review our pipeline produces.</p>
-      <p>Inside you'll find a real example of the report structure — including an Issue Log, Validation Matrix, and Remediation plan.</p>
-      <p>If you'd like to talk through how this could work for your own models, just reply to this email.</p>
-      <p>— The PlsFx Team</p>
-    </div>
+  const html = `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="dark only">
+<meta name="supported-color-schemes" content="dark only">
+<title>Your sample report</title>
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<style>table {border-collapse: collapse;}</style>
+<![endif]-->
+<style>
+  body, table, td { margin: 0; padding: 0; }
+  img { border: 0; line-height: 100%; outline: none; text-decoration: none; }
+  table { border-collapse: collapse !important; }
+  body { height: 100% !important; width: 100% !important; }
+
+  .body-bg { background-color: #05070d; }
+  .card-bg { background-color: #0d1018; }
+  .text-primary { color: #eef1f8; }
+  .text-secondary { color: #a9b1c4; }
+  .text-muted { color: #7d8598; }
+  .border-hair { border-color: rgba(233,237,245,0.14); }
+  .footer-bg { background-color: #0a0c12; }
+  .accent { color: #5DCAA5; }
+
+  @media screen and (max-width: 600px) {
+    .email-container { width: 100% !important; }
+    .fluid-padding { padding-left: 24px !important; padding-right: 24px !important; }
+  }
+</style>
+</head>
+<body class="body-bg" style="margin:0; padding:0; background-color:#05070d; font-family: Arial, Helvetica, sans-serif;">
+
+<center class="body-bg" style="width:100%; background-color:#05070d;">
+  <!--[if mso]>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" align="center">
+  <tr><td>
+  <![endif]-->
+
+  <table role="presentation" class="email-container" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px; margin:0 auto;">
+
+    <tr>
+      <td class="fluid-padding" style="padding:36px 32px 24px 32px; text-align:left;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="background-color:#3d8b85; padding:8px 12px; font-family: Georgia, 'Times New Roman', serif; font-style:italic; font-size:16px; color:#ffffff;">fx</td>
+            <td style="background-color:#16171A; padding:8px 16px; font-family: Arial, Helvetica, sans-serif; font-weight:bold; font-size:16px; color:#ffffff; letter-spacing:0.5px;">PlsFx</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td class="fluid-padding" style="padding:0 32px 32px 32px;">
+        <table role="presentation" class="card-bg" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#0d1018; border-radius:12px;">
+          <tr>
+            <td class="fluid-padding" style="padding:36px 40px 40px 40px;">
+              <p class="accent" style="margin:0 0 18px 0; font-family: 'Courier New', Courier, monospace; font-size:12px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; color:#5DCAA5;">SAMPLE REPORT</p>
+              <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#eef1f8;">Hi ${escHtml(name)},</p>
+              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Thanks for your interest in PlsFx. Attached is a sample model review report, showing the kind of structured, formula-level review our pipeline produces.</p>
+              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Inside you'll find a real example of the report structure - including an Issue Log, Validation Matrix, and Remediation plan.</p>
+              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">If you'd like to talk through how this could work for your own models, just reply to this email.</p>
+
+              <p class="text-secondary" style="margin:28px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">- The PlsFx team</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td class="footer-bg fluid-padding" style="background-color:#0a0c12; padding:24px 32px;">
+        <p class="text-muted" style="margin:0; font-family: 'Courier New', Courier, monospace; font-size:11px; line-height:1.6; color:#7d8598;">&copy; Copyright 2026 BIRDHOUSE TRADING PTY LTD. - All Rights Reserved / ABN: 61692125616</p>
+      </td>
+    </tr>
+
+  </table>
+
+  <!--[if mso]>
+  </td></tr>
+  </table>
+  <![endif]-->
+</center>
+
+</body>
+</html>
   `;
 
   let sendResult;
