@@ -14,6 +14,7 @@ const { startRunLog }                = require('./src/utils/run-logger');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
 const { setProgress, clearProgress, getProgress } = require('./src/utils/run-progress');
 const { verifyUploadIntegrity }      = require('./src/utils/upload-integrity-check');
+const { createPromoCode, listPromoCodes, validatePromoCode, claimUsage } = require('./src/utils/promo-code-store');
 
 // Core pipeline modules
 const { parseExcel, scanFormulaErrors }                             = require('./src/parser');
@@ -275,12 +276,30 @@ const FSCORE_BAND_PRICE = { Low: 3, Moderate: 4, High: 6, Critical: 7 };
 // Shared by both /api/unique-formulas and /api/submit-order's server-side
 // price re-verification — extracted specifically so both call sites can
 // never drift out of sync with each other.
-function calculatePricing(fscoreDist) {
+//
+// discount is optional: { type: 'percent' | 'fixed', value: number }.
+// Confirmed formula: discount applies to the subtotal, before GST is
+// added - not to the final total. A $10 minimum is enforced on the
+// final, actually-charged amount (post-GST), regardless of how large
+// the discount is.
+const MINIMUM_CHARGE = 10;
+function calculatePricing(fscoreDist, discount) {
   const priceTotal = Object.entries(fscoreDist)
     .reduce((sum, [band, count]) => sum + count * (FSCORE_BAND_PRICE[band] || 0), 0);
-  const gstTotal = Math.round(priceTotal * 0.1);
-  const grandTotal = priceTotal + gstTotal;
-  return { priceTotal, gstTotal, grandTotal };
+
+  let discountAmount = 0;
+  if (discount && discount.type === 'percent') {
+    discountAmount = Math.round(priceTotal * (discount.value / 100));
+  } else if (discount && discount.type === 'fixed') {
+    discountAmount = discount.value;
+  }
+  const discountedSubtotal = Math.max(0, priceTotal - discountAmount);
+
+  const gstTotal = Math.round(discountedSubtotal * 0.1);
+  let grandTotal = discountedSubtotal + gstTotal;
+  if (grandTotal < MINIMUM_CHARGE) grandTotal = MINIMUM_CHARGE;
+
+  return { priceTotal, discountAmount, gstTotal, grandTotal };
 }
 
 // Unique-formula + F-score estimate — deliberately stops after Tier 0's
@@ -387,7 +406,7 @@ app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (re
 const EMAIL_SYNTAX_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 app.post('/api/submit-order', requireApiKey, async (req, res) => {
-  const { storedAs, fullName, company, email, eWayEncryptedPayload, quotedGrandTotal } = req.body || {};
+  const { storedAs, fullName, company, email, eWayEncryptedPayload, quotedGrandTotal, promoCode } = req.body || {};
   const clientIp = getClientIp(req);
 
   // ── Validate the basics before touching the filesystem or Anthropic-adjacent work ──
@@ -417,6 +436,20 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
     return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Referenced file not found — it may have expired. Please re-upload and try again.' });
   }
 
+  // ── If a promo code was applied, re-validate it server-side - the
+  //    exact same reasoning as the price re-verification below: never
+  //    trust the client's "this code is valid and applied" state for
+  //    an actual charge. It may have expired or been used by this same
+  //    email between the Apply tap and this submission. ──
+  let discount = null;
+  if (promoCode && String(promoCode).trim()) {
+    const promoResult = validatePromoCode(promoCode, email);
+    if (!promoResult.valid) {
+      return res.status(400).json({ success: false, code: 'PROMO_CODE_INVALID', message: promoResult.reason });
+    }
+    discount = { type: promoResult.discountType, value: promoResult.discountValue };
+  }
+
   // ── Security requirement, not optional: re-verify the price server-side
   //    against the actual file, never trust a client-supplied amount ──
   let grandTotal, uniqueFormulaTotal, fscoreDist, fileSizeBytes;
@@ -426,7 +459,7 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
     fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
     uniqueFormulaTotal = (tier0.stats && tier0.stats.uniqueFormulaCount) || 0;
     fileSizeBytes = fs.statSync(filePath).size;
-    ({ grandTotal } = calculatePricing(fscoreDist));
+    ({ grandTotal } = calculatePricing(fscoreDist, discount));
   } catch (err) {
     console.error('   \u26a0\ufe0f  Price re-verification failed:', err.message);
     return res.status(500).json({ success: false, code: 'VALIDATION_ERROR', message: 'Could not verify pricing for this file. Please try again.' });
@@ -465,10 +498,25 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
       fileSizeBytes,
       transactionId: chargeResult.transactionId,
       ip: clientIp,
+      promoCode: discount ? promoCode.trim() : null,
     });
   } catch (err) {
     console.error('   \u26a0\ufe0f  Order creation failed after successful payment:', err.message);
     return res.status(500).json({ success: false, code: 'VALIDATION_ERROR', message: 'Payment succeeded but the order could not be recorded. Please contact support with your transaction reference.' });
+  }
+
+  // Only claim the code's usage now that both payment and order
+  // creation have genuinely succeeded - a code should never be
+  // consumed for an order that didn't actually go through.
+  if (discount) {
+    try {
+      claimUsage(promoCode, email, order.orderId);
+    } catch (err) {
+      // The order itself is already real and paid for at this point -
+      // a failure to record usage shouldn't fail the whole request,
+      // just needs visibility for manual follow-up.
+      console.error('   \u26a0\ufe0f  Order succeeded but promo code usage could not be recorded:', err.message);
+    }
   }
 
   logAuditEvent({ event: 'order_created', orderId: order.orderId, originalName: safeFilename, ip: clientIp, grandTotal });
@@ -511,6 +559,38 @@ app.post('/api/submit-demo-request', requireApiKey, async (req, res) => {
 
 app.get('/api/demo-requests', requireApiKey, (req, res) => {
   res.json({ demoRequests: listDemoRequests() });
+});
+
+app.post('/api/validate-promo-code', requireApiKey, (req, res) => {
+  const { code, email } = req.body || {};
+  if (!code || !String(code).trim()) {
+    return res.status(400).json({ valid: false, reason: 'Please enter a code.' });
+  }
+  if (!email || !EMAIL_SYNTAX_RE.test(String(email).trim())) {
+    return res.status(400).json({ valid: false, reason: 'A valid email is required to check a code.' });
+  }
+  const result = validatePromoCode(code, email);
+  res.json(result);
+});
+
+app.post('/api/promo-codes', requireApiKey, (req, res) => {
+  const { code, expiryDate, discountType, discountValue, singleUse } = req.body || {};
+  try {
+    const record = createPromoCode({
+      code,
+      expiryDate: expiryDate || null,
+      discountType,
+      discountValue: Number(discountValue),
+      singleUse: !!singleUse,
+    });
+    res.json({ success: true, promoCode: record });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+app.get('/api/promo-codes', requireApiKey, (req, res) => {
+  res.json({ promoCodes: listPromoCodes() });
 });
 
 app.get('/api/view-log/:orderId', requireApiKey, (req, res) => {
