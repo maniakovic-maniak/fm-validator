@@ -13,7 +13,47 @@
     --text: #1a1917; --text-2: #5a5955; --text-3: #9a9894;
     --accent-bg: #e6f1fb; --accent-text: #185fa5;
   }
-  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); padding: 32px; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 200px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border);
+    padding: 24px 12px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .sidebar-title { font-size: 13px; font-weight: 700; padding: 0 12px 16px; color: var(--text); }
+  .sidebar-item {
+    background: none; border: none; text-align: left; padding: 9px 12px; border-radius: 8px;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text-2); cursor: pointer;
+  }
+  .sidebar-item:hover { background: var(--surface-2); color: var(--text); }
+  .sidebar-item.is-active { background: var(--accent-bg); color: var(--accent-text); font-weight: 700; }
+  .main-content { flex: 1; padding: 32px; min-width: 0; }
+  .price-discounted { color: var(--accent-text); font-weight: 700; }
+  .promo-create-card {
+    background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    padding: 18px 20px; margin-bottom: 20px;
+  }
+  .promo-create-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+  .promo-create-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .promo-field { display: flex; flex-direction: column; gap: 4px; }
+  .promo-field--narrow { width: 90px; }
+  .promo-field label { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.02em; }
+  .promo-field input, .promo-field select {
+    border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px 9px;
+    font-family: 'DM Mono', monospace; font-size: 12.5px; background: var(--surface); color: var(--text);
+  }
+  .promo-create-btn {
+    background: var(--text); color: var(--surface); border: none; border-radius: 6px;
+    padding: 8px 18px; font-size: 12.5px; font-weight: 700; font-family: inherit; cursor: pointer;
+  }
+  .promo-create-btn:hover { opacity: 0.85; }
+  .promo-create-error { color: #b03a3a; font-size: 12px; margin-top: 10px; }
+  .promo-search-row { margin-bottom: 12px; }
+  .promo-search-row input {
+    width: 280px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px 10px;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; background: var(--surface); color: var(--text);
+  }
+  .promo-status-active { color: #1d9e75; font-weight: 700; }
+  .promo-status-expired { color: var(--text-3); }
   .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
   .header h1 { font-size: 18px; font-weight: 700; }
   .header .meta { font-size: 12.5px; color: var(--text-2); }
@@ -77,28 +117,104 @@
 </head>
 <body>
 
-<div class="header">
-  <h1>Submission Form Admin</h1>
-  <span class="meta" id="orderCount">Loading…</span>
+<div class="app-shell">
+  <div class="sidebar">
+    <div class="sidebar-title">FM Validator</div>
+    <button class="sidebar-item is-active" data-page="submissions">FM Submission</button>
+    <button class="sidebar-item" data-page="promo">Promo Code</button>
+  </div>
+
+  <div class="main-content">
+
+    <div class="page" id="page-submissions">
+      <div class="header">
+        <h1>Submission Form Admin</h1>
+        <span class="meta" id="orderCount">Loading…</span>
+      </div>
+
+      <table id="ordersTable" style="display:none">
+        <thead>
+          <tr>
+            <th data-sort="orderId">ID</th>
+            <th data-sort="createdAt">Date/Time</th>
+            <th data-sort="originalName">Model name</th>
+            <th data-sort="fileSizeBytes">Size Mb</th>
+            <th>Unique Formula</th>
+            <th data-sort="grandTotal">Price $</th>
+            <th>Promo Code</th>
+            <th>Pipeline Run</th>
+            <th>Action Items</th>
+          </tr>
+        </thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+
+      <div class="empty-state" id="emptyState" style="display:none">No orders yet.</div>
+    </div>
+
+    <div class="page" id="page-promo" style="display:none">
+      <div class="header">
+        <h1>Promo Codes</h1>
+        <span class="meta" id="promoCount">Loading…</span>
+      </div>
+
+      <div class="promo-create-card">
+        <div class="promo-create-title">Create a new code</div>
+        <div class="promo-create-row">
+          <div class="promo-field">
+            <label for="promo-code-input">Code</label>
+            <input id="promo-code-input" type="text" placeholder="e.g. LAUNCH20" />
+          </div>
+          <div class="promo-field">
+            <label for="promo-expiry-input">Expiry date</label>
+            <input id="promo-expiry-input" type="date" />
+          </div>
+          <div class="promo-field promo-field--narrow">
+            <label for="promo-discount-type">Discount</label>
+            <select id="promo-discount-type">
+              <option value="percent">%</option>
+              <option value="fixed">$</option>
+            </select>
+          </div>
+          <div class="promo-field promo-field--narrow">
+            <label for="promo-discount-value">Value</label>
+            <input id="promo-discount-value" type="number" min="0" step="any" placeholder="20" />
+          </div>
+          <div class="promo-field promo-field--narrow">
+            <label for="promo-single-use">Single use</label>
+            <select id="promo-single-use">
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </div>
+          <button class="promo-create-btn" id="promoCreateBtn">Create</button>
+        </div>
+        <p class="promo-create-error" id="promoCreateError" hidden></p>
+      </div>
+
+      <div class="promo-search-row">
+        <input id="promoSearchInput" type="text" placeholder="Search codes…" />
+      </div>
+
+      <table id="promoTable" style="display:none">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Expiry</th>
+            <th>Discount</th>
+            <th>Single Use</th>
+            <th>Usage (unique users)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="promoBody"></tbody>
+      </table>
+
+      <div class="empty-state" id="promoEmptyState" style="display:none">No promo codes yet.</div>
+    </div>
+
+  </div>
 </div>
-
-<table id="ordersTable" style="display:none">
-  <thead>
-    <tr>
-      <th data-sort="orderId">ID</th>
-      <th data-sort="createdAt">Date/Time</th>
-      <th data-sort="originalName">Model name</th>
-      <th data-sort="fileSizeBytes">Size Mb</th>
-      <th>Unique Formula</th>
-      <th data-sort="grandTotal">Price $</th>
-      <th>Pipeline Run</th>
-      <th>Action Items</th>
-    </tr>
-  </thead>
-  <tbody id="ordersBody"></tbody>
-</table>
-
-<div class="empty-state" id="emptyState" style="display:none">No orders yet.</div>
 
 <div class="log-modal-overlay" id="logModal">
   <div class="log-modal-card">
@@ -147,7 +263,8 @@
             ${o.fscoreDist ? Object.entries(o.fscoreDist).map(([band, count]) => `<div><span>${band}</span><span>${count}</span></div>`).join('') : 'No breakdown available'}
           </div>
         </td>
-        <td>${formatPrice(o.grandTotal)}</td>
+        <td class="${o.promoCode ? 'price-discounted' : ''}">${formatPrice(o.grandTotal)}</td>
+        <td>${o.promoCode || '\u2014'}</td>
         <td>${runStateCell(o.orderId)}</td>
         <td>${actionItemsCell(o)}</td>
       </tr>
@@ -407,6 +524,119 @@
       document.getElementById('orderCount').textContent = 'Could not load orders';
       console.error(err);
     });
+
+  // ── Sidebar page switching ──────────────────────────────────────────
+  document.querySelectorAll('.sidebar-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+      document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+      document.getElementById(`page-${btn.dataset.page}`).style.display = 'block';
+      if (btn.dataset.page === 'promo' && !promoCodes.length) loadPromoCodes();
+    });
+  });
+
+  // ── Promo Code page ─────────────────────────────────────────────────
+  let promoCodes = [];
+
+  function formatPromoDiscount(code) {
+    return code.discountType === 'percent' ? `${code.discountValue}%` : formatPrice(code.discountValue);
+  }
+
+  function isPromoExpired(code) {
+    return code.expiryDate && new Date(code.expiryDate).getTime() < Date.now();
+  }
+
+  function renderPromoCodes() {
+    const query = (document.getElementById('promoSearchInput').value || '').trim().toLowerCase();
+    const filtered = query
+      ? promoCodes.filter(c => c.code.toLowerCase().includes(query))
+      : promoCodes;
+
+    document.getElementById('promoCount').textContent = `${promoCodes.length} code${promoCodes.length !== 1 ? 's' : ''}`;
+
+    if (promoCodes.length === 0) {
+      document.getElementById('promoEmptyState').style.display = 'block';
+      document.getElementById('promoTable').style.display = 'none';
+      return;
+    }
+    document.getElementById('promoEmptyState').style.display = 'none';
+    document.getElementById('promoTable').style.display = 'table';
+
+    document.getElementById('promoBody').innerHTML = filtered.map(c => {
+      const expired = isPromoExpired(c);
+      return `
+        <tr>
+          <td>${c.code}</td>
+          <td>${c.expiryDate ? formatDate(c.expiryDate).slice(0, 10) : '\u2014'}</td>
+          <td>${formatPromoDiscount(c)}</td>
+          <td>${c.singleUse ? 'Yes' : 'No'}</td>
+          <td>${c.usageCount}</td>
+          <td class="${expired ? 'promo-status-expired' : 'promo-status-active'}">${expired ? 'Expired' : 'Active'}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function loadPromoCodes() {
+    try {
+      const res = await fetch('api/promo-codes');
+      const data = await res.json();
+      promoCodes = data.promoCodes || [];
+      renderPromoCodes();
+    } catch (err) {
+      document.getElementById('promoCount').textContent = 'Could not load promo codes';
+      console.error(err);
+    }
+  }
+
+  document.getElementById('promoSearchInput').addEventListener('input', renderPromoCodes);
+
+  document.getElementById('promoCreateBtn').addEventListener('click', async () => {
+    const code = document.getElementById('promo-code-input').value.trim();
+    const expiryDate = document.getElementById('promo-expiry-input').value;
+    const discountType = document.getElementById('promo-discount-type').value;
+    const discountValue = Number(document.getElementById('promo-discount-value').value);
+    const singleUse = document.getElementById('promo-single-use').value === 'true';
+    const errorEl = document.getElementById('promoCreateError');
+    errorEl.hidden = true;
+
+    if (!code) {
+      errorEl.textContent = 'A code is required.';
+      errorEl.hidden = false;
+      return;
+    }
+    if (!Number.isFinite(discountValue) || discountValue <= 0) {
+      errorEl.textContent = 'Enter a valid discount value.';
+      errorEl.hidden = false;
+      return;
+    }
+
+    try {
+      const res = await fetch('api/promo-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          expiryDate: expiryDate ? new Date(expiryDate).toISOString() : null,
+          discountType, discountValue, singleUse,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        errorEl.textContent = data.message || 'Could not create this code.';
+        errorEl.hidden = false;
+        return;
+      }
+      document.getElementById('promo-code-input').value = '';
+      document.getElementById('promo-expiry-input').value = '';
+      document.getElementById('promo-discount-value').value = '';
+      loadPromoCodes();
+    } catch (err) {
+      errorEl.textContent = 'Could not reach the server. Please try again.';
+      errorEl.hidden = false;
+    }
+  });
 </script>
 </body>
 </html>

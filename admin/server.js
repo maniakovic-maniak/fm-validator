@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { listOrders, getOrder, updateOrder } = require('../src/utils/order-store');
+const { listPromoCodes, createPromoCode } = require('../src/utils/promo-code-store');
 const { getProgress } = require('../src/utils/run-progress');
 const { fetch: undiciFetch, Agent } = require('undici');
 
@@ -62,6 +63,32 @@ app.get('/api/orders/:orderId', (req, res) => {
     return res.status(404).json({ error: 'Order not found.' });
   }
   res.json({ order });
+});
+
+app.get('/api/promo-codes', (req, res) => {
+  try {
+    const promoCodes = listPromoCodes();
+    res.json({ promoCodes });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Failed to list promo codes:', err.message);
+    res.status(500).json({ error: 'Could not load promo codes.' });
+  }
+});
+
+app.post('/api/promo-codes', (req, res) => {
+  const { code, expiryDate, discountType, discountValue, singleUse } = req.body || {};
+  try {
+    const record = createPromoCode({
+      code,
+      expiryDate: expiryDate || null,
+      discountType,
+      discountValue: Number(discountValue),
+      singleUse: !!singleUse,
+    });
+    res.json({ success: true, promoCode: record });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
 });
 
 app.get('/api/run-progress/:orderId', async (req, res) => {
