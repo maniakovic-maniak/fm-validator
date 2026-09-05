@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FM Validator — _PROCESSED.xlsx Report Builder
+FM Validator — _VALIDATED.xlsx Report Builder
 16-tab transaction-grade audit report
 """
 import sys, json, os, re
@@ -148,6 +148,24 @@ def build_report(data_path, output_path):
                         +[dict(r,_tier='Tier 2') for r in _cl.get('tier2',[])])
     except Exception:
         checklist_rules=[]
+
+    # FIX: filter out rules genuinely belonging to a different domain's
+    # skill file - found via a direct, real investigation into a reported
+    # 62.8% completion rate on a RIIO gas transmission model. Confirmed
+    # 174 of 175 "Not Performed" rules were genuinely, structurally
+    # mining-domain-specific (source_id: skill-mining.md), which could
+    # never possibly apply to a gas transmission model - not a real
+    # execution gap, a wrong denominator. Only rules whose source_id is
+    # either domain-agnostic (no skill-*.md pattern - the base FMAC-coded
+    # rules) or matches this model's own, actual domainSkill are counted
+    # as genuinely "planned" for this specific model.
+    _this_model_domain = os.path.basename(domainSkill or 'skill-generic.md')
+    def _rule_applies_to_this_model(rule):
+        src = rule.get('source_id','')
+        if not (isinstance(src,str) and src.startswith('skill-') and src.endswith('.md')):
+            return True  # domain-agnostic (FMAC-coded base rule) - always applicable
+        return src == _this_model_domain
+    checklist_rules=[r for r in checklist_rules if _rule_applies_to_this_model(r)]
 
     # ── P1/P2/P3 framework renewal, Tier 3 ───────────────────────────────────
     # Four named readiness gates from the memo's own "Not Ready for
