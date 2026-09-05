@@ -216,6 +216,21 @@ function loadDomainSkill(modelType) {
         }
       }
 
+      // Sub-domain: RIIO/PCFM regulatory mechanics are specific enough
+      // that a generic 'infrastructure' classification doesn't capture
+      // them, but a RIIO model is still genuinely infrastructure - this
+      // appends the specific content on top of whatever main file was
+      // already selected above, rather than replacing it, so a RIIO
+      // model gets both the generic infrastructure knowledge and the
+      // regulatory-specific mechanics together.
+      const riioRe = /\b(riio|pcfm|ofgem|gt1|gt2|gt3|et1|et2|et3|gd1|gd2|gd3|ed1|ed2|ed3|gas transmission|electricity transmission|gas distribution|electricity distribution|energy network regulation|network price control)\b/i;
+      if (riioRe.test(String(modelType || ''))) {
+        const riioFilepath = path.join(skillDir, 'skill-riio-pcfm.md');
+        if (fs.existsSync(riioFilepath)) {
+          content += `\n\n---\n\n${fs.readFileSync(riioFilepath, 'utf8')}`;
+        }
+      }
+
       return {
         content,
         file: filename
