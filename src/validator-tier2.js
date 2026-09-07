@@ -137,6 +137,28 @@ function extractMeaningfulRows(rows, maxRows = 20) {
   }
   const remainingNumeric = numeric.filter(row => !priorityKeys.has(row));
 
+  // FIX: the remaining budget (after priority-matched rows) was
+  // previously filled with only the FIRST N of what's left, in
+  // original sheet order - so a sheet's closing rows (totals,
+  // conclusions, final-period summary figures) got no better chance of
+  // inclusion than any other middle row, and never any deliberate
+  // look-in. Splitting the remaining budget between the first and last
+  // rows of what's left restores that guarantee without displacing the
+  // priority-matched rows above, which are unaffected by this change.
+  // When the remaining budget is large enough to already cover the
+  // whole remaining set, first-and-last would otherwise select
+  // overlapping/duplicate rows - guarded against explicitly below by
+  // just taking everything in that case, no split needed at all.
+  function selectFirstAndLast(rowsArr, budget) {
+    if (budget <= 0) return [];
+    if (rowsArr.length <= budget) return rowsArr;
+    const lastCount = Math.floor(budget / 2);
+    const firstCount = budget - lastCount; // the odd remainder favors the first side, matching this function's existing highCap/lowCap convention above
+    const firstPart = rowsArr.slice(0, firstCount);
+    const lastPart = lastCount > 0 ? rowsArr.slice(-lastCount) : [];
+    return [...firstPart, ...lastPart];
+  }
+
   // FIX: found via verifying a real claim in a forensic audit review —
   // a model's own "MODEL STATUS: REVIEW REQUIRED" self-flag lives in a
   // non-numeric row (a row of pure text/status labels, no parseable
@@ -152,7 +174,7 @@ function extractMeaningfulRows(rows, maxRows = 20) {
   // however many numeric rows a sheet happens to have.
   const nonNumericReserved = nonNumeric.slice(0, 5);
   const numericSlots = Math.max(0, maxRows - nonNumericReserved.length);
-  const numericSelected = [...priority, ...remainingNumeric.slice(0, Math.max(0, numericSlots - priority.length))];
+  const numericSelected = [...priority, ...selectFirstAndLast(remainingNumeric, Math.max(0, numericSlots - priority.length))];
 
   const selected = [...numericSelected, ...nonNumericReserved].slice(0, maxRows);
 
