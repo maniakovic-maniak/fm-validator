@@ -552,16 +552,30 @@
     });
 
   // ── Sidebar page switching ──────────────────────────────────────────
+  const ACTIVE_TAB_KEY = 'fmValidatorAdminActiveTab';
+
+  function switchToTab(pageName) {
+    const btn = document.querySelector(`.sidebar-item[data-page="${pageName}"]`);
+    if (!btn) return;
+    document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('is-active'));
+    btn.classList.add('is-active');
+    document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+    document.getElementById(`page-${pageName}`).style.display = 'block';
+    localStorage.setItem(ACTIVE_TAB_KEY, pageName);
+    if (pageName === 'promo' && !promoCodes.length) loadPromoCodes();
+    if (pageName === 'partner-review') loadPartnerReviewEngagements();
+  }
+
   document.querySelectorAll('.sidebar-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('is-active'));
-      btn.classList.add('is-active');
-      document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
-      document.getElementById(`page-${btn.dataset.page}`).style.display = 'block';
-      if (btn.dataset.page === 'promo' && !promoCodes.length) loadPromoCodes();
-      if (btn.dataset.page === 'partner-review') loadPartnerReviewEngagements();
-    });
+    btn.addEventListener('click', () => switchToTab(btn.dataset.page));
   });
+
+  // Restore whichever tab was last active, rather than always defaulting
+  // to FM Submission on every page load/refresh.
+  const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
+  if (savedTab && document.querySelector(`.sidebar-item[data-page="${savedTab}"]`)) {
+    switchToTab(savedTab);
+  }
 
   // ── Promo Code page ─────────────────────────────────────────────────
   let promoCodes = [];
