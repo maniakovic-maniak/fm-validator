@@ -13,8 +13,9 @@ const { fetch: undiciFetch, Agent } = require('undici');
 // path, since that would silently assume a specific directory layout.
 const PARTNER_REVIEW_PATH = process.env.PARTNER_REVIEW_PATH || path.join(require('os').homedir(), 'partner-review');
 let listPartnerReviewEngagements = null;
+let createPartnerReviewEngagement = null;
 try {
-  ({ listEngagements: listPartnerReviewEngagements } = require(path.join(PARTNER_REVIEW_PATH, 'src', 'engagement-store')));
+  ({ listEngagements: listPartnerReviewEngagements, createEngagement: createPartnerReviewEngagement } = require(path.join(PARTNER_REVIEW_PATH, 'src', 'engagement-store')));
 } catch (err) {
   console.warn(`   \u26a0\ufe0f  Partner Review integration unavailable - could not load from ${PARTNER_REVIEW_PATH}: ${err.message}`);
   console.warn('      The admin dashboard will still start normally; only the Partner Review endpoints will report unavailable.');
@@ -99,6 +100,23 @@ app.post('/api/partner-review/:orderId', (req, res) => {
   const reportFilePath = path.join(__dirname, '..', 'processed', order.reportName);
   if (!require('fs').existsSync(modelFilePath)) {
     return res.status(400).json({ error: 'The original model file is no longer available - Partner Review requires it within the retention window.' });
+  }
+
+  const engagementId = `PR-${order.orderId}`;
+  // Create the real record immediately, before anything else runs - the
+  // real gap this fixes: previously, the engagement only got created
+  // deep inside run-engagement.js, well after the export and report
+  // extraction steps already finished (15-30+ seconds on a real model),
+  // so the admin page showed genuinely nothing during that whole window,
+  // looking exactly like the trigger had silently failed.
+  if (createPartnerReviewEngagement) {
+    try {
+      createPartnerReviewEngagement({ engagementId, orderId: order.orderId, modelName: order.originalName });
+    } catch (err) {
+      // Already exists (e.g. a prior attempt) - not a real error, the
+      // spawned process below will correctly resume it, matching
+      // run-engagement.js's own resume-safe logic.
+    }
   }
 
   // Genuinely spawned as a real, detached background process - Phase A

@@ -29,6 +29,23 @@ fs.mkdirSync(workDir, { recursive: true });
 const exportPath = path.join(workDir, 'export.json');
 const reportJsonPath = path.join(workDir, 'report.json');
 
+// Same cross-repo require pattern already established in admin/server.js -
+// gracefully unavailable rather than a hard crash, since this is only
+// used to record a real failure, not required for the pipeline's own
+// core steps to run.
+let updateEngagementStatus = null;
+try {
+  ({ updateEngagement: updateEngagementStatus } = require(path.join(PARTNER_REVIEW_PATH, 'src', 'engagement-store')));
+} catch (_) { /* best-effort only - see failAndExit below */ }
+
+function failAndExit(message) {
+  console.error(`[${engagementId}] ${message}`);
+  if (updateEngagementStatus) {
+    try { updateEngagementStatus(engagementId, { status: 'failed', error: message }); } catch (_) { /* genuinely nothing more we can do here */ }
+  }
+  process.exit(1);
+}
+
 function logStep(label) {
   console.log(`[${engagementId}] ${label}...`);
 }
@@ -46,20 +63,14 @@ const LARGE_BUFFER = 200 * 1024 * 1024; // 200MB - comfortably covers even the l
 
 logStep('Exporting model data');
 const exportResult = spawnSync('node', [path.join(__dirname, 'export-for-partner-review.js'), modelFilePath, orderId], { encoding: 'utf8', maxBuffer: LARGE_BUFFER });
-if (exportResult.status !== 0) {
-  console.error(`[${engagementId}] Export failed:`, exportResult.error || exportResult.stderr);
-  process.exit(1);
-}
+if (exportResult.status !== 0) failAndExit(`Export failed: ${exportResult.error || exportResult.stderr}`);
 fs.writeFileSync(exportPath, exportResult.stdout);
 console.error(exportResult.stderr);
 
 // Step 2 - real report extraction, same pattern.
 logStep('Extracting the completed report');
 const reportResult = spawnSync('python3', [path.join(__dirname, 'extract_report_for_partner_review.py'), reportFilePath], { encoding: 'utf8', maxBuffer: LARGE_BUFFER });
-if (reportResult.status !== 0) {
-  console.error(`[${engagementId}] Report extraction failed:`, reportResult.error || reportResult.stderr);
-  process.exit(1);
-}
+if (reportResult.status !== 0) failAndExit(`Report extraction failed: ${reportResult.error || reportResult.stderr}`);
 fs.writeFileSync(reportJsonPath, reportResult.stdout);
 console.error(reportResult.stderr);
 
@@ -69,5 +80,13 @@ const engagementResult = spawnSync(
   'node', ['--env-file=.env', 'run-engagement.js', engagementId, orderId, exportPath, reportJsonPath],
   { cwd: PARTNER_REVIEW_PATH, encoding: 'utf8', stdio: 'inherit' }
 );
+// A non-zero exit here can mean run-engagement.js's own code genuinely
+// ran and already recorded a real, specific failure itself (in which
+// case this is redundant but harmless) - OR it can mean the process
+// never even started at all (a missing .env, a missing node binary,
+// etc.), in which case nothing else would ever have recorded this
+// failure, and the engagement would otherwise stay silently,
+// permanently stuck at "queued" forever.
+if (engagementResult.status !== 0) failAndExit(`The engagement process itself failed to complete (exit code ${engagementResult.status}): ${engagementResult.error || 'see above output'}`);
 
-process.exit(engagementResult.status || 0);
+process.exit(0);
