@@ -8,6 +8,7 @@ const { dumpFailedResponse } = require('./utils/dump-failed-response');
 const { normalizeFormula: normalizeFormulaShape, colToNum } = require('./utils/formula-pattern-consistency-check');
 const { CHARS_PER_TOKEN: FORMULA_CHARS_PER_TOKEN } = require('./utils/formula-token-estimator');
 const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-results');
+const { buildVisibilityRecord } = require('./utils/build-visibility-record');
 
 const client = new Anthropic({
   // Explicit, not relying on SDK defaults — several frameworks have
@@ -864,6 +865,13 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       const pct = Math.round(100 * badLocationCount / normalised.length);
       console.log(`   \u26a0\ufe0f  ${badLocationCount} of ${normalised.length} Tier 2 finding(s) (${pct}%) have an unusable location — cell defaulted to "A1", or sheet is blank/not a real sheet name in this workbook.`);
       console.log(`      Breakdown: ${a1CellCount} used the "A1" cell fallback, ${badSheetCount} had a blank or invalid sheet name (some findings may count toward both).`);
+    }
+
+    if (!useFullParse) {
+      // Only meaningful on the curated path - full-parse mode already sees
+      // everything, so there's no visibility gap to record there at all.
+      const visibilityRecord = buildVisibilityRecord({ dataSubset, deepDataSubset });
+      Object.defineProperty(normalised, '_visibilityRecord', { value: visibilityRecord, enumerable: false });
     }
 
     return normalised;

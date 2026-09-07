@@ -3250,6 +3250,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         runLogFilename: runLog.filename,
         reportName,
         driveWebViewLink: driveResult ? driveResult.webViewLink : null,
+        // Genuinely captured from this real run's own curated-route
+        // selection - never recomputed later, since keySheets itself
+        // comes from an earlier, non-deterministic LLM call
+        // (Familiarisation), so a later recomputation could genuinely
+        // differ from what this specific run actually, really showed.
+        visibilityRecord: t2Results._visibilityRecord || null,
       });
     }
 
