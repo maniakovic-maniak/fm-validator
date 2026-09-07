@@ -219,6 +219,9 @@
         <h1>Partner Review</h1>
         <span class="meta" id="partnerReviewCount">Loading…</span>
       </div>
+      <div style="text-align:right; margin-bottom: 0.5rem;">
+        <span class="meta" id="partnerReviewLastChecked" style="font-size: 0.75rem; color: var(--text-3);"></span>
+      </div>
 
       <table id="partnerReviewTable" style="display:none">
         <thead>
@@ -729,16 +732,30 @@
   }
 
   async function loadPartnerReviewEngagements() {
+    const countEl = document.getElementById('partnerReviewCount');
+    const originalText = countEl.textContent;
     try {
+      // A real, brief, visible signal that a check is genuinely
+      // happening right now - separate from whether the underlying
+      // data turns out to have changed.
+      countEl.textContent = 'Checking for updates…';
+
       const res = await fetch('api/partner-review-engagements');
       if (!res.ok) {
         const err = await res.json();
-        document.getElementById('partnerReviewCount').textContent = err.error || 'Could not load Partner Review engagements';
+        countEl.textContent = err.error || 'Could not load Partner Review engagements';
         return;
       }
       const data = await res.json();
       partnerReviewEngagements = data.engagements || [];
       renderPartnerReviewEngagements();
+
+      // A real, visible timestamp of the last genuine check, regardless
+      // of whether anything actually changed - lets the person directly
+      // confirm auto-refresh is genuinely firing, rather than wondering
+      // whether the page is silently stuck.
+      const lastCheckedEl = document.getElementById('partnerReviewLastChecked');
+      if (lastCheckedEl) lastCheckedEl.textContent = `Last checked: ${new Date().toLocaleTimeString()}`;
 
       // Targeted auto-refresh - only polls while this page is genuinely
       // the visible one AND there's genuinely an in-progress engagement
@@ -751,7 +768,7 @@
         partnerReviewPollTimer = setTimeout(loadPartnerReviewEngagements, 5000);
       }
     } catch (err) {
-      document.getElementById('partnerReviewCount').textContent = 'Could not load Partner Review engagements';
+      countEl.textContent = 'Could not load Partner Review engagements';
       console.error(err);
     }
   }
