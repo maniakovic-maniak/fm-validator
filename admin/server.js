@@ -1,9 +1,24 @@
 const express = require('express');
 const path = require('path');
+const { spawn } = require('child_process');
 const { listOrders, getOrder, updateOrder } = require('../src/utils/order-store');
 const { listPromoCodes, createPromoCode } = require('../src/utils/promo-code-store');
 const { getProgress } = require('../src/utils/run-progress');
 const { fetch: undiciFetch, Agent } = require('undici');
+
+// Partner Review is a genuinely separate project/repo (different
+// provider, different cost/lifecycle profile - see its own README for
+// why), living as a sibling directory on this same VPS, not inside this
+// repo at all. Configurable via env var rather than a hardcoded relative
+// path, since that would silently assume a specific directory layout.
+const PARTNER_REVIEW_PATH = process.env.PARTNER_REVIEW_PATH || path.join(require('os').homedir(), 'partner-review');
+let listPartnerReviewEngagements = null;
+try {
+  ({ listEngagements: listPartnerReviewEngagements } = require(path.join(PARTNER_REVIEW_PATH, 'src', 'engagement-store')));
+} catch (err) {
+  console.warn(`   \u26a0\ufe0f  Partner Review integration unavailable - could not load from ${PARTNER_REVIEW_PATH}: ${err.message}`);
+  console.warn('      The admin dashboard will still start normally; only the Partner Review endpoints will report unavailable.');
+}
 
 // Node's built-in global fetch() is backed by its OWN internal undici
 // instance, which is NOT the same as this separately-installed undici
@@ -72,6 +87,54 @@ app.get('/api/promo-codes', (req, res) => {
   } catch (err) {
     console.error('   \u26a0\ufe0f  Failed to list promo codes:', err.message);
     res.status(500).json({ error: 'Could not load promo codes.' });
+  }
+});
+
+app.post('/api/partner-review/:orderId', (req, res) => {
+  const order = getOrder(req.params.orderId);
+  if (!order) return res.status(404).json({ error: 'Order not found.' });
+  if (!order.reportName) return res.status(400).json({ error: 'This order has no completed report yet - Partner Review needs a finished run to compare against.' });
+
+  const modelFilePath = path.join(__dirname, '..', 'uploads', order.storedAs);
+  const reportFilePath = path.join(__dirname, '..', 'processed', order.reportName);
+  if (!require('fs').existsSync(modelFilePath)) {
+    return res.status(400).json({ error: 'The original model file is no longer available - Partner Review requires it within the retention window.' });
+  }
+
+  // Genuinely spawned as a real, detached background process - Phase A
+  // alone can take several minutes on a real model, so this endpoint
+  // returns immediately rather than holding the request open. Progress
+  // is tracked via the engagement store itself (GET
+  // /api/partner-review-engagements), the same polling pattern already
+  // used for fm-validator's own long-running Tier 2 runs.
+  //
+  // Output is redirected to a real, per-engagement log file, not
+  // discarded - a spawned process's own console output is the only real
+  // way to debug what happened if something goes wrong, matching the
+  // established runLog pattern already used for fm-validator's own runs.
+  const logsDir = path.join(__dirname, '..', 'partner-review-logs');
+  if (!require('fs').existsSync(logsDir)) require('fs').mkdirSync(logsDir, { recursive: true });
+  const logPath = path.join(logsDir, `PR-${order.orderId}.log`);
+  const logFd = require('fs').openSync(logPath, 'a');
+
+  const child = spawn('node', [
+    path.join(__dirname, '..', 'scripts', 'run-partner-review-pipeline.js'),
+    order.orderId, modelFilePath, reportFilePath,
+  ], { detached: true, stdio: ['ignore', logFd, logFd] });
+  child.unref();
+
+  res.json({ success: true, engagementId: `PR-${order.orderId}` });
+});
+
+app.get('/api/partner-review-engagements', (req, res) => {
+  if (!listPartnerReviewEngagements) {
+    return res.status(503).json({ error: 'Partner Review integration is not available on this server.' });
+  }
+  try {
+    res.json({ engagements: listPartnerReviewEngagements() });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Failed to list Partner Review engagements:', err.message);
+    res.status(500).json({ error: 'Could not load Partner Review engagements.' });
   }
 });
 

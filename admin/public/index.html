@@ -122,6 +122,7 @@
     <div class="sidebar-title">FM Validator</div>
     <button class="sidebar-item is-active" data-page="submissions">FM Submission</button>
     <button class="sidebar-item" data-page="promo">Promo Code</button>
+    <button class="sidebar-item" data-page="partner-review">Partner Review</button>
   </div>
 
   <div class="main-content">
@@ -213,6 +214,29 @@
       <div class="empty-state" id="promoEmptyState" style="display:none">No promo codes yet.</div>
     </div>
 
+    <div class="page" id="page-partner-review" style="display:none">
+      <div class="header">
+        <h1>Partner Review</h1>
+        <span class="meta" id="partnerReviewCount">Loading…</span>
+      </div>
+
+      <table id="partnerReviewTable" style="display:none">
+        <thead>
+          <tr>
+            <th>Engagement</th>
+            <th>Order</th>
+            <th>Model</th>
+            <th>Status</th>
+            <th>Verdict</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="partnerReviewBody"></tbody>
+      </table>
+
+      <div class="empty-state" id="partnerReviewEmptyState" style="display:none">No Partner Review engagements yet.</div>
+    </div>
+
   </div>
 </div>
 
@@ -274,6 +298,7 @@
   const ICON_LOG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>';
   const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>';
   const ICON_EMAIL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 6l8 7 8-7"/></svg>';
+  const ICON_PARTNER_REVIEW = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 00-2 2v4"/><path d="M15 3h4a2 2 0 012 2v4"/><path d="M9 21H5a2 2 0 01-2-2v-4"/><path d="M15 21h4a2 2 0 002-2v-4"/></svg>';
 
   function actionItemsCell(order) {
     const hasLog = !!order.runLogFilename;
@@ -283,6 +308,7 @@
         <button class="action-icon" ${hasLog ? `onclick="viewLog('${order.orderId}')"` : 'disabled'} title="View log">${ICON_LOG}</button>
         <button class="action-icon" ${hasReport ? `onclick="downloadReport('${order.orderId}')"` : 'disabled'} title="Download report">${ICON_DOWNLOAD}</button>
         <button class="action-icon" ${hasReport ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="Send email">${ICON_EMAIL}</button>
+        <button class="action-icon" ${hasReport ? `onclick="triggerPartnerReview('${order.orderId}')"` : 'disabled'} title="Request Partner Review">${ICON_PARTNER_REVIEW}</button>
       </div>
     `;
   }
@@ -533,6 +559,7 @@
       document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
       document.getElementById(`page-${btn.dataset.page}`).style.display = 'block';
       if (btn.dataset.page === 'promo' && !promoCodes.length) loadPromoCodes();
+      if (btn.dataset.page === 'partner-review') loadPartnerReviewEngagements();
     });
   });
 
@@ -637,6 +664,102 @@
       errorEl.hidden = false;
     }
   });
+
+  // ── Partner Review page ─────────────────────────────────────────────
+  let partnerReviewEngagements = [];
+  let partnerReviewPollTimer = null;
+
+  const PARTNER_REVIEW_STATUS_LABELS = {
+    queued: 'Queued',
+    phase_a_running: 'Phase A running',
+    phase_a_complete: 'Phase A complete',
+    phase_b_running: 'Phase B running',
+    complete: 'Complete',
+    failed: 'Failed',
+  };
+  const PARTNER_REVIEW_IN_PROGRESS_STATUSES = ['queued', 'phase_a_running', 'phase_a_complete', 'phase_b_running'];
+
+  function renderPartnerReviewEngagements() {
+    document.getElementById('partnerReviewCount').textContent =
+      `${partnerReviewEngagements.length} engagement${partnerReviewEngagements.length !== 1 ? 's' : ''}`;
+
+    if (partnerReviewEngagements.length === 0) {
+      document.getElementById('partnerReviewEmptyState').style.display = 'block';
+      document.getElementById('partnerReviewTable').style.display = 'none';
+      return;
+    }
+    document.getElementById('partnerReviewEmptyState').style.display = 'none';
+    document.getElementById('partnerReviewTable').style.display = 'table';
+
+    document.getElementById('partnerReviewBody').innerHTML = partnerReviewEngagements.map(e => {
+      const statusLabel = PARTNER_REVIEW_STATUS_LABELS[e.status] || e.status;
+      const statusClass = e.status === 'complete' ? 'promo-status-active'
+        : e.status === 'failed' ? 'promo-status-expired'
+        : '';
+      // A failed engagement's real, honest error - shown directly, not
+      // hidden behind a generic "failed" label with no further detail.
+      const verdictOrError = e.status === 'failed'
+        ? `<span style="color:#b03a3a">${e.error || 'Unknown error'}</span>`
+        : (e.verdict || '\u2014');
+      return `
+        <tr>
+          <td>${e.engagementId}</td>
+          <td>${e.orderId || '\u2014'}</td>
+          <td>${e.modelName || '\u2014'}</td>
+          <td class="${statusClass}">${statusLabel}</td>
+          <td>${verdictOrError}</td>
+          <td>${formatDate(e.updatedAt)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function loadPartnerReviewEngagements() {
+    try {
+      const res = await fetch('api/partner-review-engagements');
+      if (!res.ok) {
+        const err = await res.json();
+        document.getElementById('partnerReviewCount').textContent = err.error || 'Could not load Partner Review engagements';
+        return;
+      }
+      const data = await res.json();
+      partnerReviewEngagements = data.engagements || [];
+      renderPartnerReviewEngagements();
+
+      // Targeted auto-refresh - only polls while this page is genuinely
+      // the visible one AND there's genuinely an in-progress engagement
+      // to wait on, avoiding wasteful, indefinite polling once
+      // everything's settled or the user's looking at a different page.
+      const hasInProgress = partnerReviewEngagements.some(e => PARTNER_REVIEW_IN_PROGRESS_STATUSES.includes(e.status));
+      const isVisible = document.getElementById('page-partner-review').style.display !== 'none';
+      if (partnerReviewPollTimer) { clearTimeout(partnerReviewPollTimer); partnerReviewPollTimer = null; }
+      if (hasInProgress && isVisible) {
+        partnerReviewPollTimer = setTimeout(loadPartnerReviewEngagements, 5000);
+      }
+    } catch (err) {
+      document.getElementById('partnerReviewCount').textContent = 'Could not load Partner Review engagements';
+      console.error(err);
+    }
+  }
+
+  async function triggerPartnerReview(orderId) {
+    if (!confirm(`Request a Partner Review for order ${orderId}? This runs a real, independent review and may take several minutes.`)) return;
+    try {
+      const res = await fetch(`api/partner-review/${orderId}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Could not start Partner Review.');
+        return;
+      }
+      alert(`Partner Review started: ${data.engagementId}. Track its progress on the Partner Review page.`);
+      // Switch straight to the Partner Review page so the person can see
+      // it actually start, rather than leaving them on the submissions
+      // page wondering if anything happened.
+      document.querySelector('.sidebar-item[data-page="partner-review"]').click();
+    } catch (err) {
+      alert('Could not reach the server: ' + err.message);
+    }
+  }
 </script>
 </body>
 </html>
