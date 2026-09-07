@@ -7,6 +7,7 @@ const { extractJson } = require('./utils/json-extract');
 const { dumpFailedResponse } = require('./utils/dump-failed-response');
 const { normalizeFormula: normalizeFormulaShape, colToNum } = require('./utils/formula-pattern-consistency-check');
 const { CHARS_PER_TOKEN: FORMULA_CHARS_PER_TOKEN } = require('./utils/formula-token-estimator');
+const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-results');
 
 const client = new Anthropic({
   // Explicit, not relying on SDK defaults — several frameworks have
@@ -676,16 +677,38 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   // Reusable batch runner with consistent error handling
   async function runOneBatch(rules, data, label, errorIdPrefix) {
     if (rules.length === 0) return;
+    // `data` can now be a single data object (the existing, default
+    // behavior - fully unchanged) OR an array of data chunks, when the
+    // batch's own data was too large for one call and had to be split by
+    // sheet/size (Blocker 3's real scenario - not to be confused with
+    // chunkRulesForOutputSafety's existing rule-count split, where every
+    // chunk sees the same, full data and no reconciliation is needed).
+    const dataChunks = Array.isArray(data) ? data : [data];
     try {
-      const { results, meta } = await runBatch(
-        rules, data, parsed.sheetNames, systemPrompt, label,
-        { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt },
-        useFullParse
-      );
-      allResults.push(...results);
-      if (meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined) &&
-          topLevelMeta.audit_completion_percent === undefined) {
-        topLevelMeta = meta;
+      const chunkResultArrays = [];
+      let sawMeta = null;
+      for (let i = 0; i < dataChunks.length; i++) {
+        const chunkLabel = dataChunks.length > 1 ? `${label} (data chunk ${i + 1}/${dataChunks.length})` : label;
+        const { results, meta } = await runBatch(
+          rules, dataChunks[i], parsed.sheetNames, systemPrompt, chunkLabel,
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt },
+          useFullParse
+        );
+        chunkResultArrays.push(results);
+        if (!sawMeta && meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined)) {
+          sawMeta = meta;
+        }
+      }
+      // A single data chunk (the default, existing case for every
+      // current caller) reconciles to itself unchanged - this is not a
+      // behavior change for anything that doesn't opt into multiple
+      // chunks.
+      const reconciled = dataChunks.length > 1
+        ? reconcileDataSplitResults(chunkResultArrays)
+        : chunkResultArrays[0];
+      allResults.push(...reconciled);
+      if (sawMeta && topLevelMeta.audit_completion_percent === undefined) {
+        topLevelMeta = sawMeta;
       }
     } catch (e) {
       console.error(`   ❌ ${label} error:`, e.message);
