@@ -29,3 +29,6 @@ __pycache__/
 # bug-scan-agent.js's transient per-scan cache — regenerated on every
 # scan, never meant to be committed (see scripts/bug-scan-agent.js)
 .bug-scan-findings.json
+run-engagement.js
+src/engagement-store.js
+src/orchestrate.js
