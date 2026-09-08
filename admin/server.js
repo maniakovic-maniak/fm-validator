@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { listOrders, getOrder, updateOrder } = require('../src/utils/order-store');
 const { listPromoCodes, createPromoCode } = require('../src/utils/promo-code-store');
 const { getProgress } = require('../src/utils/run-progress');
@@ -14,8 +14,13 @@ const { fetch: undiciFetch, Agent } = require('undici');
 const PARTNER_REVIEW_PATH = process.env.PARTNER_REVIEW_PATH || path.join(require('os').homedir(), 'partner-review');
 let listPartnerReviewEngagements = null;
 let createPartnerReviewEngagement = null;
+let getPartnerReviewEngagement = null;
 try {
-  ({ listEngagements: listPartnerReviewEngagements, createEngagement: createPartnerReviewEngagement } = require(path.join(PARTNER_REVIEW_PATH, 'src', 'engagement-store')));
+  ({
+    listEngagements: listPartnerReviewEngagements,
+    createEngagement: createPartnerReviewEngagement,
+    getEngagement: getPartnerReviewEngagement,
+  } = require(path.join(PARTNER_REVIEW_PATH, 'src', 'engagement-store')));
 } catch (err) {
   console.warn(`   \u26a0\ufe0f  Partner Review integration unavailable - could not load from ${PARTNER_REVIEW_PATH}: ${err.message}`);
   console.warn('      The admin dashboard will still start normally; only the Partner Review endpoints will report unavailable.');
@@ -153,6 +158,54 @@ app.get('/api/partner-review-engagements', (req, res) => {
   } catch (err) {
     console.error('   \u26a0\ufe0f  Failed to list Partner Review engagements:', err.message);
     res.status(500).json({ error: 'Could not load Partner Review engagements.' });
+  }
+});
+
+app.get('/api/partner-review/:engagementId/report', (req, res) => {
+  if (!getPartnerReviewEngagement) {
+    return res.status(503).json({ error: 'Partner Review integration is not available on this server.' });
+  }
+  try {
+    const engagement = getPartnerReviewEngagement(req.params.engagementId);
+    if (!engagement) return res.status(404).json({ error: 'Engagement not found.' });
+    if (engagement.status !== 'complete') {
+      return res.status(400).json({ error: `This engagement is not yet complete (status: ${engagement.status}) - the report can only be generated once both phases finish.` });
+    }
+    if (!engagement.phaseAFrozenPath || !engagement.phaseBResultPath) {
+      return res.status(400).json({ error: 'This engagement is missing one of its phase result files - cannot generate a report.' });
+    }
+
+    // The engagement record stores these as paths relative to Partner
+    // Review's own directory (since run-engagement.js runs with that as
+    // its cwd) - admin/server.js runs from a different directory entirely,
+    // so these must be resolved explicitly against PARTNER_REVIEW_PATH,
+    // not this process's own cwd.
+    const phaseAFrozenPath = path.resolve(PARTNER_REVIEW_PATH, engagement.phaseAFrozenPath);
+    const phaseBResultPath = path.resolve(PARTNER_REVIEW_PATH, engagement.phaseBResultPath);
+
+    const reportPath = path.join(PARTNER_REVIEW_PATH, 'engagements', `${engagement.engagementId}-report.xlsx`);
+    const downloadName = `${engagement.orderId || engagement.engagementId}-partner-review-report.xlsx`;
+
+    // Real, genuine caching - only regenerate if a report doesn't already
+    // exist for this engagement, since both phase files are immutable
+    // once the engagement is complete.
+    if (!require('fs').existsSync(reportPath)) {
+      const genResult = spawnSync('python3', [
+        path.join(PARTNER_REVIEW_PATH, 'generate-report-xlsx.py'),
+        engagement.engagementId, phaseAFrozenPath, phaseBResultPath, reportPath,
+      ], { encoding: 'utf8' });
+      if (genResult.status !== 0) {
+        console.error('   \u26a0\ufe0f  Report generation failed:', genResult.stderr || genResult.error);
+        return res.status(500).json({ error: 'Could not generate the report. See server logs for details.' });
+      }
+    }
+
+    res.download(reportPath, downloadName, (err) => {
+      if (err) console.error('   \u26a0\ufe0f  Report download failed:', err.message);
+    });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Unexpected error generating Partner Review report:', err.message);
+    res.status(500).json({ error: 'An unexpected error occurred generating the report.' });
   }
 });
 

@@ -232,6 +232,7 @@
             <th>Status</th>
             <th>Verdict</th>
             <th>Updated</th>
+            <th>Report</th>
           </tr>
         </thead>
         <tbody id="partnerReviewBody"></tbody>
@@ -718,6 +719,9 @@
       const verdictOrError = e.status === 'failed'
         ? `<span style="color:#b03a3a">${e.error || 'Unknown error'}</span>`
         : (e.verdict || '\u2014');
+      const downloadCell = e.status === 'complete'
+        ? `<button class="action-icon" onclick="downloadPartnerReviewReport('${e.engagementId}')" title="Download report">${ICON_DOWNLOAD}</button>`
+        : `<button class="action-icon" disabled title="Available once the engagement completes">${ICON_DOWNLOAD}</button>`;
       return `
         <tr>
           <td>${e.engagementId}</td>
@@ -726,6 +730,7 @@
           <td class="${statusClass}">${statusLabel}</td>
           <td>${verdictOrError}</td>
           <td>${formatDate(e.updatedAt)}</td>
+          <td>${downloadCell}</td>
         </tr>
       `;
     }).join('');
@@ -790,6 +795,10 @@
     } catch (err) {
       alert('Could not reach the server: ' + err.message);
     }
+  }
+
+  function downloadPartnerReviewReport(engagementId) {
+    window.location.href = `api/partner-review/${engagementId}/report`;
   }
 </script>
 </body>
