@@ -60,6 +60,25 @@ const CHECK_LABEL_RE = /\b(check|reconciliation|recon|validation|balance[\s-]?ch
 // explicit admission it isn't a live, automated check at all.
 const CHECK_RESULT_VALUE_RE = /^(ok|pass(ed)?|fail(ed)?|error|true|false|balanced|yes|no|tie[sd]?|clean|reconciled|manual(?:ly)?\s*review(?:ed)?)(\s*[-\u2013\u2014:]|$)/i;
 
+// FIX: found via direct investigation of a real production false
+// positive - FinancialRatios!G23, row-labeled "PMICR sense-check",
+// value "scalar". Confirmed directly against the real file: the entire
+// column in that section is a units/type-descriptor column ("£m
+// nominal" for every money row, "scalar" for the one ratio row), not a
+// check-result column at all - the row label happening to contain
+// "check" triggered detection, but the adjacent cell was never a
+// hardcoded check outcome to begin with. A units/type label is
+// structurally never going to be formula-driven regardless of whether
+// its row is a genuine check row, so it should be excluded entirely,
+// not merely marked low-confidence (which still counts it as a
+// finding). Deliberately narrow - only common, short unit/type tokens,
+// not a broad exclusion that could hide a genuinely hardcoded result.
+const UNIT_OR_TYPE_LABEL_RE = /^[£$€]?\s*(m|bn|k|%|x|scalar|ratio|years?|days?|months?|nominal|real)(\s+(nominal|real))?$/i;
+
+function looksLikeUnitOrTypeLabel(value) {
+  return typeof value === 'string' && UNIT_OR_TYPE_LABEL_RE.test(value.trim());
+}
+
 function looksLikeCheckResult(value) {
   if (typeof value === 'boolean') return true;
   if (typeof value === 'number') return value === 0;
@@ -133,6 +152,7 @@ function checkHardcodedCheckCells(workbook) {
         if (isMergeSlave(cell)) return;
         if (!cellHasContent(cell)) return;
         if (hasFormula(cell)) return; // real, recalculating check — fine
+        if (looksLikeUnitOrTypeLabel(cell.value)) return; // a units/type descriptor, not a hardcoded check result — see UNIT_OR_TYPE_LABEL_RE above
         resultCell = cell;
         resultColNumber = colNumber;
       });
