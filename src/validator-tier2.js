@@ -902,3 +902,4 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
 }
 
 module.exports = { runTier2, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows };
+// workspace-id fix test Thu Sep 10 05:50:20 AEST 2026
