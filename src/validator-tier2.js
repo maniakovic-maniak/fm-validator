@@ -16,6 +16,14 @@ const client = new Anthropic({
   // at the underlying HTTP-transport layer, which can silently hang a
   // request past its documented timeout with no error ever thrown.
   timeout: 600_000, // 10 minutes
+  // Required because the current ANTHROPIC_API_KEY is an unscoped,
+  // "All Workspaces" key rather than one scoped to a single workspace -
+  // Anthropic's own API rejects every request from such a key unless
+  // this header names which workspace to run in. A single-workspace key
+  // wouldn't need this at all, but the real key in use today does.
+  defaultHeaders: process.env.ANTHROPIC_WORKSPACE_ID
+    ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID }
+    : undefined,
 });
 
 // Load soul and universal skill — always loaded once at startup, never change

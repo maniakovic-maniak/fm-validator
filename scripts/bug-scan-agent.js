@@ -536,7 +536,15 @@ async function scanChangedFiles(sinceRef) {
   const graph = buildDependencyGraph(files);
 
   const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment, same as validator-tier2.js
+  // Reads ANTHROPIC_API_KEY from the environment, same as
+  // validator-tier2.js. The workspace-id header is required because the
+  // current key is an unscoped, "All Workspaces" key - see the matching
+  // comment in validator-tier2.js for the full explanation.
+  const client = new Anthropic({
+    defaultHeaders: process.env.ANTHROPIC_WORKSPACE_ID
+      ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID }
+      : undefined,
+  });
 
   const bugs = await reviewFileBatch(client, files, graph);
   saveFindings(files, bugs);
@@ -560,7 +568,11 @@ async function scanAllFiles() {
   console.log(`   Reviewing all ${files.length} tracked file(s) across ${batches.length} batch(es), ordered by dependency proximity (this takes longer and costs real API usage — not the routine post-commit mode).\n`);
 
   const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic();
+  const client = new Anthropic({
+    defaultHeaders: process.env.ANTHROPIC_WORKSPACE_ID
+      ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID }
+      : undefined,
+  });
 
   const allBugs = [];
   for (let i = 0; i < batches.length; i++) {
