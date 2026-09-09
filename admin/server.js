@@ -182,6 +182,11 @@ app.get('/api/partner-review/:engagementId/report', (req, res) => {
     // not this process's own cwd.
     const phaseAFrozenPath = path.resolve(PARTNER_REVIEW_PATH, engagement.phaseAFrozenPath);
     const phaseBResultPath = path.resolve(PARTNER_REVIEW_PATH, engagement.phaseBResultPath);
+    // Genuinely optional - an engagement completed before Phase C
+    // existed, or run with SKIP_PHASE_C, won't have this field at all.
+    const phaseCResultPath = engagement.phaseCResultPath
+      ? path.resolve(PARTNER_REVIEW_PATH, engagement.phaseCResultPath)
+      : null;
 
     const reportPath = path.join(PARTNER_REVIEW_PATH, 'engagements', `${engagement.engagementId}-report.xlsx`);
     const downloadName = `${engagement.orderId || engagement.engagementId}-partner-review-report.xlsx`;
@@ -190,10 +195,12 @@ app.get('/api/partner-review/:engagementId/report', (req, res) => {
     // exist for this engagement, since both phase files are immutable
     // once the engagement is complete.
     if (!require('fs').existsSync(reportPath)) {
-      const genResult = spawnSync('python3', [
+      const scriptArgs = [
         path.join(PARTNER_REVIEW_PATH, 'generate-report-xlsx.py'),
         engagement.engagementId, phaseAFrozenPath, phaseBResultPath, reportPath,
-      ], { encoding: 'utf8' });
+      ];
+      if (phaseCResultPath) scriptArgs.push(phaseCResultPath);
+      const genResult = spawnSync('python3', scriptArgs, { encoding: 'utf8' });
       if (genResult.status !== 0) {
         console.error('   \u26a0\ufe0f  Report generation failed:', genResult.stderr || genResult.error);
         return res.status(500).json({ error: 'Could not generate the report. See server logs for details.' });
