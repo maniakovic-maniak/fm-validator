@@ -662,4 +662,169 @@ async function sendDemoRequestEmail(demoRequest) {
   return { success: true };
 }
 
-module.exports = { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail };
+/**
+ * Order status update email - sent whenever an order's status changes to
+ * one of the three real states below. A single, unified function rather
+ * than three near-duplicate ones, since only the label/body copy differs
+ * between them - everything else (header, card, footer, resilience
+ * pattern) is identical, matching every other email in this file.
+ *
+ * status must be one of: 'pending_review', 'in_review', 'review_complete'
+ */
+const ORDER_STATUS_CONTENT = {
+  pending_review: {
+    label: 'PENDING REVIEW',
+    subject: (order) => `Your order ${escHtml(order.orderId)} is pending review`,
+    body: (order) => `
+      <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#eef1f8;">Hi ${escHtml(order.fullName)},</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Your submission of <strong>${escHtml(order.originalName)}</strong> (order ${escHtml(order.orderId)}) has been received and is now queued for review.</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">We'll email you again as soon as processing begins.</p>
+    `,
+  },
+  in_review: {
+    label: 'IN REVIEW',
+    subject: (order) => `Your order ${escHtml(order.orderId)} is now in review`,
+    body: (order) => `
+      <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#eef1f8;">Hi ${escHtml(order.fullName)},</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;"><strong>${escHtml(order.originalName)}</strong> (order ${escHtml(order.orderId)}) is now in review and being processed.</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">We'll email you again as soon as this is complete.</p>
+    `,
+  },
+  review_complete: {
+    label: 'REVIEW COMPLETE',
+    subject: (order) => `Your review for ${escHtml(order.originalName)} is complete`,
+    body: (order) => `
+      <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#eef1f8;">Hi ${escHtml(order.fullName)},</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Your review for <strong>${escHtml(order.originalName)}</strong> (order ${escHtml(order.orderId)}) is complete and the report has been generated.</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">The full report is ready and will be sent to you within 24 hours.</p>
+    `,
+  },
+};
+
+async function sendOrderStatusUpdateEmail(order, status) {
+  const content = ORDER_STATUS_CONTENT[status];
+  if (!content) {
+    console.error(`   \u26a0\ufe0f  Cannot send order status email - unrecognized status: ${status}`);
+    return { error: `Unrecognized status: ${status}` };
+  }
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`   (Skipping order status email [${status}] — RESEND_API_KEY not set.)`);
+    return { skipped: true };
+  }
+
+  const subject = content.subject(order);
+  const html = `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="dark only">
+<meta name="supported-color-schemes" content="dark only">
+<title>${content.label}</title>
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<style>table {border-collapse: collapse;}</style>
+<![endif]-->
+<style>
+  body, table, td { margin: 0; padding: 0; }
+  img { border: 0; line-height: 100%; outline: none; text-decoration: none; }
+  table { border-collapse: collapse !important; }
+  body { height: 100% !important; width: 100% !important; }
+
+  .body-bg { background-color: #05070d; }
+  .card-bg { background-color: #0d1018; }
+  .text-primary { color: #eef1f8; }
+  .text-secondary { color: #a9b1c4; }
+  .text-muted { color: #7d8598; }
+  .border-hair { border-color: rgba(233,237,245,0.14); }
+  .footer-bg { background-color: #0a0c12; }
+  .accent { color: #5DCAA5; }
+
+  @media screen and (max-width: 600px) {
+    .email-container { width: 100% !important; }
+    .fluid-padding { padding-left: 24px !important; padding-right: 24px !important; }
+  }
+</style>
+</head>
+<body class="body-bg" style="margin:0; padding:0; background-color:#05070d; font-family: Arial, Helvetica, sans-serif;">
+
+<center class="body-bg" style="width:100%; background-color:#05070d;">
+  <!--[if mso]>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" align="center">
+  <tr><td>
+  <![endif]-->
+
+  <table role="presentation" class="email-container" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px; margin:0 auto;">
+
+    <tr>
+      <td class="fluid-padding" style="padding:36px 32px 24px 32px; text-align:left;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="background-color:#3d8b85; padding:8px 12px; font-family: Georgia, 'Times New Roman', serif; font-style:italic; font-size:16px; color:#ffffff;">fx</td>
+            <td style="background-color:#16171A; padding:8px 16px; font-family: Arial, Helvetica, sans-serif; font-weight:bold; font-size:16px; color:#ffffff; letter-spacing:0.5px;">PlsFx</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td class="fluid-padding" style="padding:0 32px 32px 32px;">
+        <table role="presentation" class="card-bg" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#0d1018; border-radius:12px;">
+          <tr>
+            <td class="fluid-padding" style="padding:36px 40px 40px 40px;">
+              <p class="accent" style="margin:0 0 18px 0; font-family: 'Courier New', Courier, monospace; font-size:12px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; color:#5DCAA5;">${content.label}</p>
+              ${content.body(order)}
+              <p class="text-secondary" style="margin:28px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">- The PlsFx team</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td class="footer-bg fluid-padding" style="background-color:#0a0c12; padding:24px 32px;">
+        <p class="text-muted" style="margin:0; font-family: 'Courier New', Courier, monospace; font-size:11px; line-height:1.6; color:#7d8598;">&copy; Copyright 2026 BIRDHOUSE TRADING PTY LTD. - All Rights Reserved / ABN: 61692125616</p>
+      </td>
+    </tr>
+
+  </table>
+
+  <!--[if mso]>
+  </td></tr>
+  </table>
+  <![endif]-->
+</center>
+
+</body>
+</html>
+  `;
+
+  let sendResult;
+  try {
+    sendResult = await getResendClient().emails.send({
+      from: 'PLSFX model review <no-reply@report.plsfx.ai>',
+      to: order.email,
+      replyTo: 'mikhail@plsfx.ai',
+      subject,
+      html,
+    });
+  } catch (e) {
+    console.error(`   \u26a0\ufe0f  Order status email [${status}] failed to send: ${e.message}`);
+    return { error: e.message };
+  }
+  if (sendResult && sendResult.error) {
+    console.error(`   \u26a0\ufe0f  Order status email [${status}] was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
+    return { error: JSON.stringify(sendResult.error) };
+  }
+  console.log(`Order status email [${status}] sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
+  return { success: true };
+}
+
+module.exports = { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail, sendOrderStatusUpdateEmail };
