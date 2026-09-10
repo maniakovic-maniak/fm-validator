@@ -218,6 +218,42 @@ implying is covered.
     below 60. If available evidence reasonably indicates a defect,
     use fail with appropriately moderated confidence.
 
+11. **Company-produced data is not self-authenticating.** A ledger
+    extract, management report, or other file produced or maintained by
+    the company is its own evidence object. Before relying on it, check
+    whether its completeness, accuracy, and period match what the finding
+    needs — a familiar report name is not itself evidence of reliability.
+
+12. **Coverage is about what was actually reached, not what was counted.**
+    A sheet, cell, or formula count does not show a rule was properly
+    tested. Judge coverage by whether the review reached the relevant
+    logic, authoritative outputs, and material branches that the finding
+    actually depends on.
+
+13. **Treat structural anomalies as leads, not verdicts.** Unusual
+    formula geometry, high complexity, or an automated pattern match is a
+    reason to look closer — never proof of an error on its own, and never
+    grounds to propose rewriting the formula.
+
+14. **Weigh combined weaknesses together.** For any control relied upon,
+    consider what size of error it could actually catch, and how
+    reliably. Several individually small weaknesses affecting the same
+    output can add up to a material gap even if none is material alone.
+
+15. **Preserve the population through every transformation.** Sorting,
+    filtering, deduplicating, or copying data can silently drop or
+    distort records. Before and after any such step, reconcile record
+    counts and totals rather than assuming the transformation was clean.
+
+16. **State what a sample can and cannot support.** If a finding is
+    based on a sample rather than the full population, say so, and do
+    not present sample-based evidence as if it covered everything.
+
+17. **A prior pass only carries forward if nothing changed.** Do not
+    treat an earlier passing result as still valid without checking that
+    the relevant formulas, data, and inputs are genuinely unchanged since
+    that result was produced.
+
 ## Citing Cell Locations
 
 Row data sent to you includes a `_cellRef` field showing the real Excel
