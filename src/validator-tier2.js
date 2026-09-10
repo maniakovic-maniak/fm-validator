@@ -79,6 +79,33 @@ function buildSystemPrompt(domain, modelContext) {
 const PRIORITY_LABEL_RE_HIGH = /\b(dscr|llcr|covenant|yield|npv|irr|xnpv|property value|dcf value)\b/i;
 const PRIORITY_LABEL_RE_LOW = /\b(cash|check|balance|total|equity|reconcil\w*)\b/i;
 
+/**
+ * FIX: found via investigating a real report where 91% of findings showed
+ * cell 'A1' - closer investigation confirmed the large majority are
+ * genuinely, correctly A1 (aggregate-count findings, "not tested"
+ * markers, genuine absence queries - none of these structurally have a
+ * single cell to cite). But a real, narrower bug was confirmed
+ * underneath: a handful of findings' own prose text genuinely cites real
+ * cells (e.g. "check rows found (AH20, AH36, AH67, AH131) are genuine
+ * audit checks") while the model's own structured cell field came back
+ * empty, silently falling through to A1 anyway.
+ *
+ * This is a narrow, deterministic, conservative fallback - only reached
+ * when the structured field is genuinely missing, and only extracts the
+ * FIRST plausible cell reference found, never a confident correction of
+ * a field Claude actually populated. Deliberately excludes matches
+ * directly adjacent to a hyphen (checklist IDs like T2-S10, S1-S4 follow
+ * this exact shape) and requires a genuine word boundary on both sides,
+ * since a wrong extracted cell is worse than an honest A1 default.
+ */
+const CELL_REF_RE = /(?<![A-Za-z0-9-])(?!P[1-3]\b)(?!Q[1-4]\b)(?!H[1-2]\b)(?!FY[0-9])([A-Z]{1,3}[0-9]{1,7})(?![A-Za-z0-9-])/;
+
+function extractCellReferenceFromText(text) {
+  if (!text || typeof text !== 'string') return null;
+  const match = text.match(CELL_REF_RE);
+  return match ? match[1] : null;
+}
+
 function rowMatchesPriority(row, re) {
   // Checks every string value in the row, not just the first — a row
   // can carry multiple, entirely unrelated label/value pairs packed
@@ -805,7 +832,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       method:                   r.method || 'automated',
       reason:                   r.reason || '',
       sheet:                    r.sheet || '',
-      cell:                     r.cell && r.cell !== 'Unknown' ? r.cell : 'A1',
+      cell:                     r.cell && r.cell !== 'Unknown' ? r.cell : (extractCellReferenceFromText(r.reason) || 'A1'),
       periods_affected:         r.periods_affected || [],
       dollar_impact:            r.dollar_impact || 'unquantified',
       root_cause:               r.root_cause || '',
@@ -901,4 +928,4 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   }
 }
 
-module.exports = { runTier2, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows };
+module.exports = { runTier2, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows, extractCellReferenceFromText };
