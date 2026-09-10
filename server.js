@@ -101,7 +101,7 @@ const { shouldUseFullParseRoute }                = require('./src/utils/formula-
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
-const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail } = require('./src/notifier');
+const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail, sendOrderStatusUpdateEmail } = require('./src/notifier');
 const { createOrder, getOrder, updateOrder }      = require('./src/utils/order-store');
 const { createDemoRequest, listDemoRequests }     = require('./src/utils/demo-store');
 const { chargeViaEway }                           = require('./src/utils/eway-payment');
@@ -523,6 +523,8 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
 
   sendOrderConfirmation(order).catch(() => {});
   sendAdminOrderNotification(order).catch(() => {});
+  updateOrder(order.orderId, { status: 'pending_review' });
+  sendOrderStatusUpdateEmail(order, 'pending_review').catch(() => {});
 
   res.json({ success: true, orderId: order.orderId });
 });
@@ -705,6 +707,14 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     event: 'upload_received', originalName, storedAs: path.basename(filePath),
     ip: clientIp, sizeBytes: fs.statSync(filePath).size, runLog: runLog.filename
   });
+
+  if (req.body.orderId) {
+    const orderForStatus = getOrder(req.body.orderId);
+    if (orderForStatus) {
+      updateOrder(req.body.orderId, { status: 'in_review' });
+      sendOrderStatusUpdateEmail(orderForStatus, 'in_review').catch(() => {});
+    }
+  }
 
   console.log(`\n─────────────────────────────────────`);
   console.log(`FM VALIDATOR — ${originalName}`);
@@ -3246,7 +3256,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     clearProgress(runId);
     if (shouldCleanup) fs.unlink(filePath, () => {});
     if (req.body.orderId) {
-      updateOrder(req.body.orderId, {
+      const completedOrder = updateOrder(req.body.orderId, {
         runLogFilename: runLog.filename,
         reportName,
         driveWebViewLink: driveResult ? driveResult.webViewLink : null,
@@ -3256,7 +3266,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         // (Familiarisation), so a later recomputation could genuinely
         // differ from what this specific run actually, really showed.
         visibilityRecord: t2Results._visibilityRecord || null,
+        status: 'review_complete',
       });
+      if (completedOrder) sendOrderStatusUpdateEmail(completedOrder, 'review_complete').catch(() => {});
     }
 
     res.json({
