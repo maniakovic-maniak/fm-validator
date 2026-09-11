@@ -1640,3 +1640,71 @@ This is a manual_only test requiring formula text (Mode B).
 | master_check_visible_throughout | 30 |
 | rounding_presentation_only | 30 |
 | traceable_cross_sheet_references | 30 |
+
+### test: label_matches_formula_behaviour
+Check whether a cell's own explicit label (e.g. "straight line") genuinely
+matches what its formula computes (e.g. a sum-of-digits denominator
+instead of the asset-life denominator a straight-line calculation
+requires).
+- If the formula's real behaviour matches its label → pass, confidence 90+
+- If they genuinely diverge → fail. Name the label, the formula actually
+  used, and the quantified impact if material (e.g. "factor understated
+  by 28.5x vs a genuine straight-line calculation").
+- If the formula cannot be traced from the data provided → uncertain
+
+### test: switch_relabel_disclosed
+Check whether a line item's own displayed label and calculation change
+based on a hardcoded switch cell elsewhere in the model, without an
+explicit warning at the point of use.
+- If no such switch-driven relabelling exists → pass, confidence 85+
+- If it exists but is clearly disclosed (a visible note near the line
+  item) → pass, confidence 70
+- If it exists with no disclosure → fail. Name the switch cell, its
+  current value, and what the line item currently means under that value.
+
+### test: no_hardcoded_sign_in_denominator
+Check whether a ratio or similar formula hardcodes a negation (e.g.
+"-AH12") on an input cell, assuming a fixed sign convention, rather than
+deriving the correct sign structurally.
+- If the formula derives sign structurally (e.g. ABS(), or genuinely
+  guaranteed by upstream logic) → pass, confidence 80+
+- If a bare hardcoded negation exists on an assumed-sign cell → fail,
+  even if the current cached value produces a plausible-looking ratio.
+  A plausible result does not confirm the sign logic is safe.
+- Do not mark a workbook-wide "sign convention consistent" claim as pass
+  purely on a spot-check of one or two cells — confirm the underlying
+  formulas do not hardcode sign assumptions.
+
+### test: single_authoritative_metric_definition
+Check whether a key metric (net debt, RAV, revenue, or similar) is
+computed independently in multiple modules/sheets, with the version used
+downstream being a composite of several without a clear, traceable
+explanation of what it includes and excludes.
+- If a single, clearly-traceable authoritative definition exists → pass,
+  confidence 85+
+- If multiple genuine candidates exist and the downstream composite's
+  real composition is not self-evident from labels alone → fail. Trace
+  the exact formula composition actually relied upon and state what it
+  does and does not include.
+- A metric name alone (e.g. "closing net debt") is not sufficient
+  evidence of a single, unambiguous definition.
+
+### test: riio_iteration_state_integrity
+Trigger: the workbook contains a SavedResults/LiveResults pattern,
+OFFSET-based recall blocks, and/or VBA that manipulates calculation or
+writes values.
+- If a stale-state warning, a run log recording the last refresh, and a
+  deterministic reset mechanism all exist → pass, confidence 80+
+- If one or more of these three controls is genuinely absent → fail.
+  Name which is missing.
+- If the trigger condition doesn't apply to this workbook → not applicable
+
+### test: year_index_offset_boundary_robust
+Trigger: a formula of the form PRODUCT(OFFSET(..., width = YEAR(t) -
+YEAR(y))) or a genuinely equivalent year-difference-as-width pattern.
+- If the formula's own logic genuinely handles a zero/negative width
+  case (an explicit guard) → pass, confidence 75+
+- If no such guard exists → fail. Name the exact cell(s) using this
+  pattern and state what happens at the boundary case (year difference
+  of zero or negative).
+- If the trigger condition doesn't apply to this workbook → not applicable
