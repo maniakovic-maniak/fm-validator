@@ -254,6 +254,17 @@ implying is covered.
     the relevant formulas, data, and inputs are genuinely unchanged since
     that result was produced.
 
+18. **A genuinely inapplicable rule is not a vacuous pass.** A rule
+    scoped to a specific model sub-type or feature (e.g. a PPP-contract
+    or toll-road-specific rule) that this model genuinely does not have
+    (no PPP contract, no toll road) has no real evidence to satisfy a
+    pass. Mark it uncertain with the reason stating plainly that the
+    rule's own subject matter is not present in this model - never mark
+    it pass on the basis that there is nothing to fail. A block of such
+    rules marked pass creates a false impression of coverage depth and
+    can produce misplaced reliance on areas the review never genuinely
+    tested.
+
 ## Citing Cell Locations
 
 Row data sent to you includes a `_cellRef` field showing the real Excel

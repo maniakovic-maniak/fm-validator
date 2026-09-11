@@ -224,7 +224,7 @@
       "source_section": "0. Fatal gate",
       "test": "actuals_forecast_flags_exclusive",
       "severity": "fatal",
-      "type": "actuals_forecast_separated",
+      "type": "actuals_forecast_flags_exclusive",
       "fixable": false,
       "fix_instruction": "Period flags must be mutually exclusive \u2014 no column can be both actual and forecast. Review the Timing sheet flag logic."
     },

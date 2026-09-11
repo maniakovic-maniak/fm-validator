@@ -68,6 +68,61 @@ function findEmbeddedActualForecastFlagRow(parsed) {
   return null;
 }
 
+// Re-locates and scans the actual/forecast flag row's own individual
+// cells for a genuine mutual-exclusivity violation - a single cell
+// whose value mentions both "actual" and "forecast" at once. Reused by
+// T1-012, which examines the same underlying row T1-009 already found
+// (or, when only a dedicated sheet name matched rather than a specific
+// row, re-scans that sheet's early rows the same way to locate it).
+// Returns an array of real cell references (possibly empty, meaning no
+// violation found), or null if the row genuinely could not be
+// re-located for a per-cell scan.
+function findAmbiguousActualForecastCells(parsed, embedded) {
+  const AMBIGUOUS_RE = /actual.{0,15}forecast|forecast.{0,15}actual/i;
+  function scanForAmbiguous(ws, rowNum) {
+    const row = ws.getRow(rowNum);
+    const ambiguous = [];
+    row.eachCell({ includeEmpty: false }, cell => {
+      const v = cell.value;
+      const raw = (v && typeof v === 'object' && 'result' in v) ? v.result : v;
+      const text = String(raw || '');
+      if (AMBIGUOUS_RE.test(text)) ambiguous.push(`${ws.name}!${cell.address}`);
+    });
+    return ambiguous;
+  }
+
+  if (parsed._raw && parsed._type === 'exceljs') {
+    let result = null;
+    parsed._raw.eachSheet(ws => {
+      if (result !== null) return;
+      if (ws.name !== embedded.sheetName) return;
+      if (embedded.rowNum) {
+        result = scanForAmbiguous(ws, embedded.rowNum);
+        return;
+      }
+      // Row number unknown (matched by sheet name only) - re-scan this
+      // sheet's early rows the same way findEmbeddedActualForecastFlagRow
+      // does, to genuinely locate the real flag row before scanning it.
+      const LABEL_RE = /actual.{0,15}forecast|forecast.{0,15}actual/i;
+      const limit = Math.min(30, ws.rowCount);
+      for (let r = 1; r <= limit; r++) {
+        const row = ws.getRow(r);
+        let flagCount = 0, hasCombinedLabel = false;
+        row.eachCell({ includeEmpty: false }, cell => {
+          const v = cell.value;
+          const raw = (v && typeof v === 'object' && 'result' in v) ? v.result : v;
+          const text = String(raw || '').toLowerCase().trim();
+          if (text === 'actual' || text === 'actuals' || text === 'forecast') flagCount++;
+          if (LABEL_RE.test(String(raw || ''))) hasCombinedLabel = true;
+        });
+        if (hasCombinedLabel && flagCount >= 2) { result = scanForAmbiguous(ws, r); break; }
+      }
+    });
+    return result;
+  }
+  return null;
+}
+
 // Safe keyword match for sheet-name checks — short/ambiguous keywords need
 // a word boundary or they false-match inside unrelated longer names.
 // Confirmed real: 'Cons' (from T1-002's sheets_known list) matching
@@ -354,21 +409,47 @@ function runTier1(parsed) {
     if (rule.type === 'actuals_forecast_flags_exclusive') {
       const flagSheets = ['timing', 'flags', 'timeline', 'inputs', 'assumptions'];
       const foundFlagSheet = resolveAny(flagSheets, parsed.sheetNames);
-      const found = !!foundFlagSheet;
-      if (!found) {
+      // FIX: found via a real, direct Partner Review comparison against
+      // T1-009 (which genuinely tests and can pass) - this rule
+      // previously never actually tested anything, unconditionally
+      // returning 'uncertain' regardless of what a dedicated sheet or
+      // an embedded flag row genuinely contained. Now re-scans the
+      // identified flag row (from the same helper T1-009 already uses,
+      // since both rules examine the same underlying row) and checks
+      // each individual cell for text genuinely mentioning both
+      // "actual" and "forecast" at once - a real, concrete mutual-
+      // exclusivity violation - rather than a stub answer.
+      const embeddedAnywhere = findEmbeddedActualForecastFlagRow(parsed);
+      const embedded = embeddedAnywhere || (foundFlagSheet ? { sheetName: foundFlagSheet, rowNum: null } : null);
+      if (!embedded) {
         results.push({
           id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
           status: 'uncertain', fixable: false,
           fix_instruction: rule.fix_instruction,
-          reason: 'No Timing or flag sheet found. Mutual exclusivity of actual/forecast flags cannot be verified automatically — manual inspection required.'
+          reason: 'No Timing/Flags sheet or embedded actual/forecast flag row was found. Mutual exclusivity cannot be verified because no genuine flag row exists to check.'
         });
       } else {
-        results.push({
-          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
-          status: 'uncertain', fixable: false,
-          fix_instruction: rule.fix_instruction,
-          reason: 'Flag sheet exists but mutual exclusivity of actual/forecast flags requires formula inspection. Verify in Excel that no column is flagged as both actual and forecast.'
-        });
+        const ambiguousCells = findAmbiguousActualForecastCells(parsed, embedded);
+        if (ambiguousCells === null) {
+          results.push({
+            id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+            status: 'uncertain', fixable: false,
+            fix_instruction: rule.fix_instruction,
+            reason: `A sheet genuinely named ${embedded.sheetName} was found, but its exact actual/forecast flag row could not be precisely located for a per-cell mutual-exclusivity scan. Manual verification required.`
+          });
+        } else if (ambiguousCells.length === 0) {
+          results.push({
+            id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+            status: 'pass', fixable: false, fix_instruction: rule.fix_instruction,
+            reason: null
+          });
+        } else {
+          results.push({
+            id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+            status: 'fail', fixable: false, fix_instruction: rule.fix_instruction,
+            reason: `${ambiguousCells.length} cell(s) on ${embedded.sheetName} genuinely mention both "actual" and "forecast" in the same value: ${ambiguousCells.slice(0, 5).join(', ')}${ambiguousCells.length > 5 ? ', ...' : ''}.`
+          });
+        }
       }
     }
 
