@@ -1095,6 +1095,23 @@ def build_report(data_path, output_path):
         _recalc_summary = (f"This model's {recalcIn.get('formula_cells',0):,} formula cells exceed the {recalcIn.get('threshold',0):,}-cell safety threshold for this check, so it was skipped to avoid an excessive run time. "
                             f"Conclusions rest on the workbook's own cached, displayed values for this run.")
         _recalc_next = 'Raise the safety threshold if server resources allow, or accept cached-value reliance for this model size'
+    elif _recalc_status_raw == 'cached_value_read_failed':
+        _recalc_status = 'Not performed'
+        _recalc_summary = (f"A genuine, independent recalculation could not even begin for this workbook: {recalcIn.get('reason', recalcIn.get('error','no reason recorded'))}. "
+                            f"Conclusions rest on the workbook's own cached, displayed values for this run.")
+        _recalc_next = 'Investigate why the workbook could not be opened for this check - see the real error above'
+    elif _recalc_status_raw == 'load_or_eval_failed':
+        # FIX: found via a real, direct report review - this status was
+        # never explicitly handled, and silently fell through to the
+        # success branch below, where mismatch_count defaults to 0 for
+        # a result that has no such key at all. This produced a false
+        # "checked 0 cells, found zero mismatches" clean bill of health
+        # for a check that never actually ran - a genuinely misleading
+        # result for a reader relying on this report.
+        _recalc_status = 'Not performed'
+        _recalc_summary = (f"A genuine, independent recalculation did not complete for this workbook: {recalcIn.get('reason', recalcIn.get('error','no reason recorded'))}. "
+                            f"Conclusions rest on the workbook's own cached, displayed values for this run - not an independently recalculated result.")
+        _recalc_next = 'Investigate the real, specific cause above before relying on this model\'s cached values for any downstream decision'
     else:
         _mismatch_count = recalcIn.get('mismatch_count', 0)
         _cells_checked = recalcIn.get('formula_cells_checked', 0)
