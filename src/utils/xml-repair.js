@@ -63,7 +63,7 @@ async function repairKnownVmlIssues(filePath) {
 
   if (!anyRepaired) return filePath;
 
-  console.log(`   \u2139\ufe0f  Repaired a known, confirmed XML issue (unclosed tag) in: ${repairedNames.join(', ')} - the file's formulas and values are untouched, only the VML comment markup was corrected.`);
+  console.error(`   \u2139\ufe0f  Repaired a known, confirmed XML issue (unclosed tag) in: ${repairedNames.join(', ')} - the file's formulas and values are untouched, only the VML comment markup was corrected.`);
 
   const outPath = path.join(os.tmpdir(), `repaired-${Date.now()}-${path.basename(filePath)}`);
   const outBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
