@@ -121,14 +121,16 @@ async function verifyUploadIntegrity(filePath, originalName) {
   // not hypothetical — treating an ExcelJS failure as certain corruption
   // would have wrongly rejected a perfectly good file. On failure, this
   // now tries openpyxl as a second opinion before concluding anything.
+  const { repairKnownVmlIssues } = require('./xml-repair');
+  const repairedPath = await repairKnownVmlIssues(filePath);
   let workbook;
   let sheetNames;
   try {
     workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.readFile(repairedPath);
     sheetNames = workbook.worksheets.map(ws => ws.name);
   } catch (excelJsErr) {
-    const fallback = await tryOpenpyxlFallback(filePath);
+    const fallback = await tryOpenpyxlFallback(repairedPath);
     if (fallback.ok) {
       // ExcelJS specifically failed, but a genuine second library opened
       // it fine — this file is not corrupted, ExcelJS just hit a

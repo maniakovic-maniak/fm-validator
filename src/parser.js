@@ -268,8 +268,11 @@ function worksheetToRows(ws) {
 // Parses an .xlsx/.xlsm file with exceljs. The original file is only ever read,
 // never modified — fixes are surfaced in a separate report.
 async function parseWorkbook(filePath) {
+  const { repairKnownVmlIssues } = require('./utils/xml-repair');
+  const repairedPath = await repairKnownVmlIssues(filePath);
+
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
+  await workbook.xlsx.readFile(repairedPath);
 
   const sheetNames = workbook.worksheets.map(ws => ws.name);
   const sheets = {};
