@@ -713,6 +713,16 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   // future domain under 100 S10-tagged rules) stay as a single batch.
   const batch2Chunks = chunkRulesForOutputSafety(batch2, 'Batch 2 — Accounting & Debt (S5-S7,S10)');
   const allResults = [];
+  // FIX: found via a real, direct transparency gap in a production
+  // report - when a batch genuinely fails (e.g. Anthropic credits ran
+  // out mid-run), the rules that batch was supposed to cover end up
+  // marked "Not Performed" in the Validation Matrix with a generic
+  // placeholder ("Rule not returned by the review") - the real, honest
+  // reason (recorded right here in the catch block below) never made it
+  // that far downstream. Tracks which real rule IDs belonged to which
+  // failed batch, and the real, actual error message, so build_report.py
+  // can use the honest reason instead of the generic one.
+  const batchFailures = [];
   let topLevelMeta = {};
 
   // Compact Wave 1 (named-range audit) and Wave 2 (VBA review) summaries —
@@ -770,6 +780,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       }
     } catch (e) {
       console.error(`   ❌ ${label} error:`, e.message);
+      batchFailures.push({ ruleIds: rules.map(r => r.id), label, error: e.message });
       allResults.push({
         id: `${errorIdPrefix}-ERROR`, status: 'uncertain', confidence: 0,
         priority: 'P2',
@@ -907,6 +918,10 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       // everything, so there's no visibility gap to record there at all.
       const visibilityRecord = buildVisibilityRecord({ dataSubset, deepDataSubset });
       Object.defineProperty(normalised, '_visibilityRecord', { value: visibilityRecord, enumerable: false });
+    }
+
+    if (batchFailures.length > 0) {
+      Object.defineProperty(normalised, '_batchFailures', { value: batchFailures, enumerable: false });
     }
 
     return normalised;

@@ -3191,7 +3191,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       vbaReview,
       deepAccountingResolvedSheets,
       recalcCheckResult,
-      ownerDecisionChecklist
+      ownerDecisionChecklist,
+      batchFailures:     t2Results._batchFailures || []
     });
 
     let driveResult = null;

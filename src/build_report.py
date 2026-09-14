@@ -124,6 +124,19 @@ def build_report(data_path, output_path):
     modelTier    = d.get('modelTier','Tier 1')
     reviewMode   = d.get('reviewMode','llm_only')
     ruleResults  = d.get('ruleResults',[])
+    batchFailures = d.get('batchFailures',[])
+    # FIX: found via a real, direct transparency gap in a production
+    # report - "Not Performed" rules previously all shared one generic
+    # placeholder reason regardless of why they were genuinely missing.
+    # Builds a real, direct rule-ID -> honest-reason lookup from the
+    # actual, specific batch failures recorded during this run (if any),
+    # so a rule genuinely skipped due to a known API/batch error says so
+    # plainly, rather than the same generic text used for every other
+    # cause.
+    _rule_to_batch_failure_reason = {}
+    for _bf in batchFailures:
+        for _rid in _bf.get('ruleIds', []):
+            _rule_to_batch_failure_reason[_rid] = f"Not performed - {_bf.get('label','a batch')} genuinely failed to complete: {_bf.get('error','unknown error')}"
     errorScan    = d.get('errorScan',[])
     redundantIn  = d.get('redundantInputs',{'applicable':False,'totalInputs':0,'redundantCount':0,'redundant':[],'inputSheets':[]})
     orphanIn     = d.get('orphanSheets',{'applicable':False,'orphanSheets':[],'financialStatementSheets':[],'reachableSheets':[],'totalSheets':0})
@@ -1150,6 +1163,21 @@ def build_report(data_path, output_path):
         ('Independent formula recalculation',_recalc_status,_recalc_summary,_recalc_next),
         ('Named range audit','Partial','Checks whether every named range is used, clearly named and resolves correctly via static formula-text analysis; a name referenced only from VBA, a user-defined function, or a chart data range would not be detected as used.','Manually confirm any VBA-only or chart-only usages if suspected'),
     ]
+    # FIX: found via a real, direct transparency gap in a production
+    # report - when a batch genuinely fails mid-run (e.g. Anthropic
+    # credits ran out), the rules it covered were marked "Not Performed"
+    # with no honest explanation anywhere in the report of why. This is
+    # a genuinely different thing from the fixed list above - those are
+    # deliberate, permanent scope exclusions; this is a real, specific
+    # failure on this one run, and is shown separately, only when one
+    # genuinely occurred.
+    for _bf in batchFailures:
+        _exclusions.append((
+            f"{_bf.get('label','A batch')} (this run only)",
+            'Not performed',
+            f"This batch genuinely failed to complete during this run: {_bf.get('error','unknown error').rstrip('.')}. The {len(_bf.get('ruleIds',[]))} rule(s) it covered are marked Not Performed in the Validation Matrix - this was a real, one-off infrastructure failure, not a deliberate scope decision.",
+            'Re-run the validation once the underlying issue is resolved'
+        ))
     _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Partial (mining-specific)':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT)}
     _col_chars = {2:22, 4:34, 5:22}  # rough usable characters per line, by column width
     for proc,status,impact,nxt in _exclusions:
@@ -1593,7 +1621,7 @@ def build_report(data_path, output_path):
         else: evidence='Standard data subset — all sheets, trimmed rows'
         refs=[f.get('id','') for f in rfnd]
         ref_txt=', '.join(refs[:4])+(f' +{len(refs)-4} more' if len(refs)>4 else '') if refs else '—'
-        if status=='Not Performed': missing='Rule not returned by the review — re-run validation or test manually'
+        if status=='Not Performed': missing=_rule_to_batch_failure_reason.get(rid, 'Rule not returned by the review — re-run validation or test manually')
         elif status=='Uncertain': missing='Evidence insufficient for a conclusive test — see related finding'
         else: missing='—'
         retest='Yes' if (issues or any(f.get('needs_retest') for f in rfnd)) else 'No'
