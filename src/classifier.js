@@ -157,6 +157,18 @@ const DOMAIN_ALIASES = {
   // shipping, or trucking model this file's freight/passenger/
   // infrastructure-entity-split content does not cover.
   infrastructure: ['infrastructure', 'railway', 'rail', 'rail transport', 'rail infrastructure'],
+  // NEW: skill-corporate.md (an FMCG/beverage operating-model domain
+  // file) requires the canonical key to be exactly 'corporate', since
+  // loadDomainSkill() always builds the path as skill-${canonical}.md -
+  // there is no separate filename-vs-routing-key concept in this
+  // codebase. Deliberately maps only narrow, specific FMCG/beverage
+  // terms here, never the bare word "corporate" itself - that word
+  // alone is exactly what caused the confirmed Carlsberg misrouting bug
+  // this same alias list had 'corporate' removed from once already (see
+  // the real, historical comment above). This is a genuinely different,
+  // narrow situation: an industry-plus-archetype classification, not a
+  // synonym for "not a named industry."
+  corporate: ['fmcg operating model', 'consumer packaged goods model', 'cpg operating model', 'branded consumer goods model', 'beverage operating model', 'brewing financial model', 'brewery operating model', 'beer volume model', 'spirits operating model', 'soft drinks bottling model', 'beverage bottler model'],
   // FIX: 'corporate' was previously mapped to 'property' here, based on
   // real evidence from one specific model (The Bend) whose
   // classification happened to include the word "corporate" alongside
