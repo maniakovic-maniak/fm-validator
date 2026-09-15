@@ -439,8 +439,8 @@ def build_report(data_path, output_path):
     if key_output_gap: _open_parts.append('an unreconciled key output')
     _open_desc = ', '.join(_open_parts)
     _has_blocker = p1_open>0 or critical_query_open>0 or other_gates_open
-    _reason = (f'{_open_desc} and {igReadiness}% audit completion ({cov_conclusive_pct}% concluded)' if _has_blocker
-               else f'{igReadiness}% audit completion ({cov_conclusive_pct}% concluded), {cov_unc} procedure(s) uncertain, {cov_np} not run' if igReadiness<100 or cov_unc or cov_np
+    _reason = (f'{_open_desc} and {cov_conclusive_pct}% audit completion' if _has_blocker
+               else f'{cov_conclusive_pct}% audit completion, {cov_unc} procedure(s) uncertain, {cov_np} not run' if cov_conclusive_pct<100 or cov_unc or cov_np
                else 'All planned procedures completed with no open P1 findings or unresolved Critical Queries')
     _next_step = ('Close all P1 items, resolve all Critical Queries (confirming whether a defect exists either way), and clear any incomplete mandatory procedures, unaudited critical modules, and unreconciled key outputs — then complete outstanding procedures and reassess.' if _has_blocker
                   else 'Resolve remaining P2 items and complete outstanding procedures before wider reliance.' if igReadiness<95
@@ -599,7 +599,7 @@ def build_report(data_path, output_path):
     kpi_card(ws1,_lbl_row,_val_row,6,7,'P3 OPEN',p3_open,fmt='#,##0;[Red](#,##0);-',val_col=(P3_TXT if p3_open>0 else CHARCOAL))
     ws1.merge_cells(f'H{_lbl_row}:I{_lbl_row}'); ws1[f'H{_lbl_row}'].value='Audit Completion'
     ws1[f'H{_lbl_row}'].font=Fn(bold=True,sz=8,col=GREY_TXT2); ws1[f'H{_lbl_row}'].fill=F(PANEL_GREY); ws1[f'H{_lbl_row}'].alignment=A(h='center')
-    ws1.merge_cells(f'H{_val_row}:I{_val_row}'); ws1[f'H{_val_row}'].value=igReadiness/100.0; ws1[f'H{_val_row}'].number_format='0%;[Red](0%);-'
+    ws1.merge_cells(f'H{_val_row}:I{_val_row}'); ws1[f'H{_val_row}'].value=cov_conclusive_pct/100.0; ws1[f'H{_val_row}'].number_format='0%;[Red](0%);-'
     ws1[f'H{_val_row}'].font=Fn(bold=True,sz=18,col=MID_BLUE); ws1[f'H{_val_row}'].fill=F(PANEL_GREY); ws1[f'H{_val_row}'].alignment=A(h='center')
     for rr in (_lbl_row,_val_row):
         for cc in range(2,10): ws1.cell(rr,cc).border=B(col=PANEL_BORDER)
@@ -659,7 +659,7 @@ def build_report(data_path, output_path):
 
     # ── Audit coverage bar + compact procedure mini-table ──────────────────────
     merge(ws1,f'B{r}:I{r}','Audit Coverage',bold=True,sz=11,col=DARK_BLUE,bg=WHITE,h='left'); set_row(ws1,r,18); r+=1
-    _filled = max(0, min(8, round(igReadiness/100.0*8)))
+    _filled = max(0, min(8, round(cov_conclusive_pct/100.0*8)))
     for i in range(8):
         col=2+i
         ws1.cell(r,col).fill = F(MID_BLUE if i<_filled else PALE_ACCENT)
@@ -1019,7 +1019,7 @@ def build_report(data_path, output_path):
                        ('Tier 1 coverage',f'{_t1_count} deterministic structural code checks'),
                        ('Tier 2 coverage',f'{_t2_count} Claude semantic checks across 13 sections'),
                        ('Accounting framework','Not confirmed in model — accrual basis assumed from statement structure'),
-                       ('Audit completion',f'{igReadiness}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)')]:
+                       ('Audit completion',f'{cov_conclusive_pct}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)')]:
         r3 = kv_row(r3,label,val)
     set_row(ws3,r3,10); r3+=1
 
