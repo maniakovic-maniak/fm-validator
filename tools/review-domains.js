@@ -129,9 +129,16 @@ function approve(modelType) {
 }
 
 function reject(modelType) {
-  const { draftPath, metaPath } = loadDraft(modelType);
+  // FIX: found via a real, direct cleanup on the server - this
+  // previously only deleted draftPath and metaPath, leaving
+  // verificationPath and checklistAdditionsPath behind as genuine
+  // orphans, even though loadDraft() already tracks all four. Now
+  // cleans up every real sidecar file this draft actually has.
+  const { draftPath, metaPath, verificationPath, checklistAdditionsPath } = loadDraft(modelType);
   fs.unlinkSync(draftPath);
   if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
+  if (fs.existsSync(verificationPath)) fs.unlinkSync(verificationPath);
+  if (fs.existsSync(checklistAdditionsPath)) fs.unlinkSync(checklistAdditionsPath);
   console.log(`   🗑️  Rejected and removed draft for "${modelType}".`);
   return true;
 }
