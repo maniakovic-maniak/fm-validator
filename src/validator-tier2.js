@@ -843,7 +843,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       method:                   r.method || 'automated',
       reason:                   r.reason || '',
       sheet:                    r.sheet || '',
-      cell:                     (r.cell && r.cell !== 'Unknown' && r.cell !== 'A1') ? r.cell : (extractCellReferenceFromText(r.reason) || 'A1'),
+      cell:                     (r.cell && r.cell !== 'Unknown' && r.cell !== 'A1') ? r.cell : (extractCellReferenceFromText(r.condition || r.what_wrong || r.reason || r.detail) || 'A1'),
       periods_affected:         r.periods_affected || [],
       dollar_impact:            r.dollar_impact || 'unquantified',
       root_cause:               r.root_cause || '',
