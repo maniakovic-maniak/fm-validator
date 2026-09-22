@@ -4,6 +4,7 @@ const { spawn, spawnSync } = require('child_process');
 const { listOrders, getOrder, updateOrder } = require('../src/utils/order-store');
 const { listPromoCodes, createPromoCode } = require('../src/utils/promo-code-store');
 const { getProgress } = require('../src/utils/run-progress');
+const { classify, loadEngagement } = require('../src/classification-store');
 const { fetch: undiciFetch, Agent } = require('undici');
 
 // Partner Review is a genuinely separate project/repo (different
@@ -370,6 +371,73 @@ app.post('/api/run/:orderId', async (req, res) => {
     const causeInfo = err.cause ? ` | cause: ${err.cause.code || err.cause.message || err.cause}` : ' | no err.cause present';
     console.error(`   \u26a0\ufe0f  [${new Date().toISOString()}] Run for ${req.params.orderId} failed:`, err.message, causeInfo);
     res.status(502).json({ error: 'Could not reach the validation pipeline. Please try again.' });
+  }
+});
+
+app.get('/api/classifications/unclassified', (req, res) => {
+  if (!listPartnerReviewEngagements) {
+    return res.status(503).json({ error: 'Partner Review integration is not available on this server.' });
+  }
+  try {
+    const engagements = listPartnerReviewEngagements().filter(e => e.status === 'complete');
+    const fs = require('fs');
+    const unclassified = [];
+
+    for (const engagement of engagements) {
+      if (!engagement.phaseBResultPath) continue;
+      const phaseBPath = path.resolve(PARTNER_REVIEW_PATH, engagement.phaseBResultPath);
+      if (!fs.existsSync(phaseBPath)) continue;
+
+      let phaseB;
+      try {
+        phaseB = JSON.parse(fs.readFileSync(phaseBPath, 'utf8'));
+      } catch (err) {
+        console.error(`   \u26a0\ufe0f  Could not parse Phase B result for ${engagement.engagementId}: ${err.message}`);
+        continue;
+      }
+
+      const alreadyClassified = new Set(loadEngagement(engagement.engagementId).map(r => r.findingId));
+
+      const auditFindings = phaseB.auditFindingClassifications || [];
+      const independentFindings = phaseB.independentFindingClassifications || [];
+
+      for (const f of auditFindings) {
+        if (!f.auditFindingId || alreadyClassified.has(f.auditFindingId)) continue;
+        unclassified.push({
+          findingId: f.auditFindingId,
+          engagementId: engagement.engagementId,
+          orderId: engagement.orderId,
+          source: 'audit',
+          classification: f.classification,
+          rationale: f.rationale,
+        });
+      }
+      for (const f of independentFindings) {
+        if (!f.independentFindingId || alreadyClassified.has(f.independentFindingId)) continue;
+        unclassified.push({
+          findingId: f.independentFindingId,
+          engagementId: engagement.engagementId,
+          orderId: engagement.orderId,
+          source: 'independent',
+          classification: f.classification,
+          rationale: f.rationale,
+        });
+      }
+    }
+
+    res.json({ findings: unclassified });
+  } catch (err) {
+    console.error('   \u26a0\ufe0f  Unexpected error listing unclassified findings:', err.message);
+    res.status(500).json({ error: 'An unexpected error occurred listing unclassified findings.' });
+  }
+});
+
+app.post('/api/classifications', (req, res) => {
+  try {
+    const record = classify(req.body || {});
+    res.json({ success: true, record });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

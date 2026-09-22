@@ -123,6 +123,7 @@
     <button class="sidebar-item is-active" data-page="submissions">FM Submission</button>
     <button class="sidebar-item" data-page="promo">Promo Code</button>
     <button class="sidebar-item" data-page="partner-review">Partner Review</button>
+    <button class="sidebar-item" data-page="review-queue">Review Queue</button>
   </div>
 
   <div class="main-content">
@@ -240,6 +241,29 @@
 
       <div class="empty-state" id="partnerReviewEmptyState" style="display:none">No Partner Review engagements yet.</div>
     </div>
+
+    <div class="page" id="page-review-queue" style="display:none">
+  <div class="header">
+    <h1>Review Queue</h1>
+    <span class="meta" id="reviewQueueCount">Loading…</span>
+  </div>
+
+  <table id="reviewQueueTable" style="display:none">
+    <thead>
+      <tr>
+        <th>Finding</th>
+        <th>Order</th>
+        <th>Source</th>
+        <th>Original classification</th>
+        <th>Rationale</th>
+        <th>Classify</th>
+      </tr>
+    </thead>
+    <tbody id="reviewQueueBody"></tbody>
+  </table>
+
+  <div class="empty-state" id="reviewQueueEmptyState" style="display:none">No unclassified findings - everything's been reviewed.</div>
+</div>
 
   </div>
 </div>
@@ -568,6 +592,7 @@
     localStorage.setItem(ACTIVE_TAB_KEY, pageName);
     if (pageName === 'promo' && !promoCodes.length) loadPromoCodes();
     if (pageName === 'partner-review') loadPartnerReviewEngagements();
+    if (pageName === 'review-queue') loadReviewQueue();
   }
 
   document.querySelectorAll('.sidebar-item').forEach(btn => {
@@ -800,6 +825,92 @@
   function downloadPartnerReviewReport(engagementId) {
     window.location.href = `api/partner-review/${engagementId}/report`;
   }
+</script>
+<script>
+let reviewQueueFindings = [];
+
+const FEEDBACK_CATEGORY_LABELS = {
+  1: 'Confirmed correct',
+  2: 'Confirmed wrong',
+  3: 'Directionally right, wrong specifics',
+  4: 'Genuinely unresolvable',
+};
+
+function renderReviewQueue() {
+  document.getElementById('reviewQueueCount').textContent =
+    `${reviewQueueFindings.length} unclassified finding${reviewQueueFindings.length !== 1 ? 's' : ''}`;
+
+  if (reviewQueueFindings.length === 0) {
+    document.getElementById('reviewQueueEmptyState').style.display = 'block';
+    document.getElementById('reviewQueueTable').style.display = 'none';
+    return;
+  }
+  document.getElementById('reviewQueueEmptyState').style.display = 'none';
+  document.getElementById('reviewQueueTable').style.display = 'table';
+
+  document.getElementById('reviewQueueBody').innerHTML = reviewQueueFindings.map((f, i) => {
+    const categoryButtons = [1, 2, 3, 4].map(n =>
+      `<button class="action-icon" title="${FEEDBACK_CATEGORY_LABELS[n]}" onclick="classifyReviewQueueFinding(${i}, ${n})">${n}</button>`
+    ).join(' ');
+    return `
+      <tr>
+        <td>${f.findingId}</td>
+        <td>${f.orderId || '\u2014'}</td>
+        <td>${f.source}</td>
+        <td>${f.classification || '\u2014'}</td>
+        <td style="max-width: 320px;">${(f.rationale || '\u2014').slice(0, 200)}</td>
+        <td>${categoryButtons}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadReviewQueue() {
+  const countEl = document.getElementById('reviewQueueCount');
+  try {
+    countEl.textContent = 'Checking for updates\u2026';
+    const res = await fetch('api/classifications/unclassified');
+    if (!res.ok) {
+      const err = await res.json();
+      countEl.textContent = err.error || 'Could not load the review queue';
+      return;
+    }
+    const data = await res.json();
+    reviewQueueFindings = data.findings || [];
+    renderReviewQueue();
+  } catch (err) {
+    countEl.textContent = 'Could not load the review queue';
+    console.error(err);
+  }
+}
+
+async function classifyReviewQueueFinding(index, category) {
+  const f = reviewQueueFindings[index];
+  const note = prompt(`Classifying ${f.findingId} as "${FEEDBACK_CATEGORY_LABELS[category]}". Optional note:`, '');
+  if (note === null) return;
+  try {
+    const res = await fetch('api/classifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        findingId: f.findingId,
+        engagementId: f.engagementId,
+        category,
+        reviewerNote: note,
+        reviewedBy: 'admin',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'Could not save this classification.');
+      return;
+    }
+    reviewQueueFindings.splice(index, 1);
+    renderReviewQueue();
+  } catch (err) {
+    alert('Could not reach the server: ' + err.message);
+  }
+}
 </script>
 </body>
 </html>
