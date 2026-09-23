@@ -251,16 +251,22 @@
   <table id="reviewQueueTable" style="display:none">
     <thead>
       <tr>
+        <th><input type="checkbox" id="reviewQueueSelectAll" onclick="toggleSelectAllReviewQueue(this)"></th>
         <th>Finding</th>
         <th>Order</th>
         <th>Source</th>
         <th>Original classification</th>
         <th>Rationale</th>
-        <th>Classify</th>
+        <th>Priority</th>
       </tr>
     </thead>
     <tbody id="reviewQueueBody"></tbody>
   </table>
+  <div style="margin-top: 12px;">
+    <button onclick="approveSelectedReviewQueue()">Approve selected</button>
+    <button onclick="rejectSelectedReviewQueue()">Mark selected irrelevant</button>
+    <span id="reviewQueueSelectedCount"></span>
+  </div>
 
   <div class="empty-state" id="reviewQueueEmptyState" style="display:none">No unclassified findings - everything's been reviewed.</div>
 </div>
@@ -828,13 +834,7 @@
 </script>
 <script>
 let reviewQueueFindings = [];
-
-const FEEDBACK_CATEGORY_LABELS = {
-  1: 'Confirmed correct',
-  2: 'Confirmed wrong',
-  3: 'Directionally right, wrong specifics',
-  4: 'Genuinely unresolvable',
-};
+let reviewQueuePriorities = {};
 
 function renderReviewQueue() {
   document.getElementById('reviewQueueCount').textContent =
@@ -849,21 +849,52 @@ function renderReviewQueue() {
   document.getElementById('reviewQueueTable').style.display = 'table';
 
   document.getElementById('reviewQueueBody').innerHTML = reviewQueueFindings.map((f, i) => {
-    const categoryButtons = [1, 2, 3, 4].map(n =>
-      `<button class="action-icon" title="${FEEDBACK_CATEGORY_LABELS[n]}" onclick="classifyReviewQueueFinding(${i}, ${n})">${n}</button>`
-    ).join(' ');
+    if (!(f.findingId in reviewQueuePriorities)) reviewQueuePriorities[f.findingId] = 'must_fix';
+    const priority = reviewQueuePriorities[f.findingId];
     return `
       <tr>
+        <td><input type="checkbox" class="review-queue-row-check" data-index="${i}"></td>
         <td>${f.findingId}</td>
         <td>${f.orderId || '\u2014'}</td>
         <td>${f.source}</td>
         <td>${f.classification || '\u2014'}</td>
         <td style="max-width: 320px;">${(f.rationale || '\u2014').slice(0, 200)}</td>
-        <td>${categoryButtons}</td>
+        <td>
+          <select onchange="setReviewQueuePriority('${f.findingId}', this.value)">
+            <option value="must_fix" ${priority === 'must_fix' ? 'selected' : ''}>Must fix</option>
+            <option value="nice_to_fix" ${priority === 'nice_to_fix' ? 'selected' : ''}>Nice to fix</option>
+          </select>
+        </td>
       </tr>
     `;
   }).join('');
+  updateReviewQueueSelectedCount();
 }
+
+function setReviewQueuePriority(findingId, value) {
+  reviewQueuePriorities[findingId] = value;
+}
+
+function toggleSelectAllReviewQueue(checkbox) {
+  document.querySelectorAll('.review-queue-row-check').forEach(c => c.checked = checkbox.checked);
+  updateReviewQueueSelectedCount();
+}
+
+function getSelectedReviewQueueIndexes() {
+  return Array.from(document.querySelectorAll('.review-queue-row-check:checked'))
+    .map(c => parseInt(c.dataset.index, 10));
+}
+
+function updateReviewQueueSelectedCount() {
+  const n = document.querySelectorAll('.review-queue-row-check:checked').length;
+  document.getElementById('reviewQueueSelectedCount').textContent = n > 0 ? `${n} selected` : '';
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target.classList && e.target.classList.contains('review-queue-row-check')) {
+    updateReviewQueueSelectedCount();
+  }
+});
 
 async function loadReviewQueue() {
   const countEl = document.getElementById('reviewQueueCount');
@@ -884,33 +915,52 @@ async function loadReviewQueue() {
   }
 }
 
-async function classifyReviewQueueFinding(index, category) {
-  const f = reviewQueueFindings[index];
-  const note = prompt(`Classifying ${f.findingId} as "${FEEDBACK_CATEGORY_LABELS[category]}". Optional note:`, '');
-  if (note === null) return;
+async function submitReviewQueueBatch(approved) {
+  const indexes = getSelectedReviewQueueIndexes();
+  if (indexes.length === 0) {
+    alert('Select at least one finding first.');
+    return;
+  }
+  const selected = indexes.map(i => reviewQueueFindings[i]);
+
+  const groups = {};
+  for (const f of selected) {
+    const priority = reviewQueuePriorities[f.findingId] || 'must_fix';
+    const key = `${f.engagementId}::${priority}`;
+    if (!groups[key]) groups[key] = { engagementId: f.engagementId, priority, findingIds: [] };
+    groups[key].findingIds.push(f.findingId);
+  }
+
   try {
-    const res = await fetch('api/classifications', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        findingId: f.findingId,
-        engagementId: f.engagementId,
-        category,
-        reviewerNote: note,
-        reviewedBy: 'admin',
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error || 'Could not save this classification.');
-      return;
+    for (const group of Object.values(groups)) {
+      const res = await fetch('api/review/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          findingIds: group.findingIds,
+          engagementId: group.engagementId,
+          approved,
+          priority: approved ? group.priority : undefined,
+          reviewedBy: 'admin',
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Could not save one of the batches.');
+        return;
+      }
     }
-    reviewQueueFindings.splice(index, 1);
+    const submittedIds = new Set(selected.map(f => f.findingId));
+    reviewQueueFindings = reviewQueueFindings.filter(f => !submittedIds.has(f.findingId));
+    document.getElementById('reviewQueueSelectAll').checked = false;
     renderReviewQueue();
   } catch (err) {
     alert('Could not reach the server: ' + err.message);
   }
 }
+
+function approveSelectedReviewQueue() { submitReviewQueueBatch(true); }
+function rejectSelectedReviewQueue() { submitReviewQueueBatch(false); }
 </script>
 </body>
 </html>

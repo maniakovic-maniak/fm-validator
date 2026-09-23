@@ -4,7 +4,7 @@ const { spawn, spawnSync } = require('child_process');
 const { listOrders, getOrder, updateOrder } = require('../src/utils/order-store');
 const { listPromoCodes, createPromoCode } = require('../src/utils/promo-code-store');
 const { getProgress } = require('../src/utils/run-progress');
-const { classify, loadEngagement } = require('../src/classification-store');
+const { reviewFinding, reviewFindingsBatch, loadEngagement, loadApprovedFixQueue } = require('../src/classification-store');
 const { fetch: undiciFetch, Agent } = require('undici');
 
 // Partner Review is a genuinely separate project/repo (different
@@ -432,12 +432,29 @@ app.get('/api/classifications/unclassified', (req, res) => {
   }
 });
 
-app.post('/api/classifications', (req, res) => {
+app.post('/api/review', (req, res) => {
   try {
-    const record = classify(req.body || {});
+    const record = reviewFinding(req.body || {});
     res.json({ success: true, record });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/review/batch', (req, res) => {
+  try {
+    const records = reviewFindingsBatch(req.body || {});
+    res.json({ success: true, records });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/fix-queue', (req, res) => {
+  try {
+    res.json({ findings: loadApprovedFixQueue() });
+  } catch (err) {
+    res.status(500).json({ error: 'An unexpected error occurred loading the fix queue.' });
   }
 });
 
