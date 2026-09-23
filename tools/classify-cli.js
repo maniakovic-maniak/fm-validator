@@ -1,29 +1,56 @@
 #!/usr/bin/env node
-// tools/classify-cli.js — the minimal manual classification script
-// for the 4-category feedback loop. No UI yet, by design (see the
-// design doc's recommended sequencing) - this is the cheap first
-// step that lets real data start accumulating immediately.
+// tools/classify-cli.js — updated for the step-3 supervisor
+// approve/reject + priority workflow. Replaces the old "category
+// 1-4" version, which no longer works against the updated
+// classification-store.js.
 //
 // Usage:
-//   node tools/classify-cli.js add <findingId> <engagementId> <category 1-4> <reviewedBy> ["note"]
+//   node tools/classify-cli.js add <findingId> <engagementId> <approved true|false> [must_fix|nice_to_fix] <reviewedBy> ["note"]
 //   node tools/classify-cli.js list <engagementId>
-//   node tools/classify-cli.js aggregate
+//   node tools/classify-cli.js fix-queue
 
-const { classify, loadEngagement, aggregateByRule, CATEGORY_LABELS } = require('../src/classification-store');
+const { reviewFinding, loadEngagement, loadApprovedFixQueue } = require('../src/classification-store');
 
 const args = process.argv.slice(2);
 const cmd = args[0];
 
 if (cmd === 'add') {
-  const [, findingId, engagementId, categoryStr, reviewedBy, note] = args;
-  if (!findingId || !engagementId || !categoryStr || !reviewedBy) {
-    console.error('Usage: node tools/classify-cli.js add <findingId> <engagementId> <category 1-4> <reviewedBy> ["note"]');
+  const [, findingId, engagementId, approvedStr, ...rest] = args;
+  if (!findingId || !engagementId || !approvedStr) {
+    console.error('Usage: node tools/classify-cli.js add <findingId> <engagementId> <approved true|false> [must_fix|nice_to_fix] <reviewedBy> ["note"]');
     process.exit(2);
   }
-  const category = parseInt(categoryStr, 10);
+  const approved = approvedStr === 'true';
+  if (approvedStr !== 'true' && approvedStr !== 'false') {
+    console.error('   \u26a0\ufe0f  approved must genuinely be "true" or "false" - got "' + approvedStr + '"');
+    process.exit(2);
+  }
+
+  // If approved, a priority is required as the next arg; if
+  // rejected, there's no priority arg at all - just reviewedBy and
+  // an optional note.
+  let priority, reviewedBy, note;
+  if (approved) {
+    [priority, reviewedBy, note] = rest;
+    if (!reviewedBy) {
+      console.error('Usage (approved): node tools/classify-cli.js add <findingId> <engagementId> true <must_fix|nice_to_fix> <reviewedBy> ["note"]');
+      process.exit(2);
+    }
+  } else {
+    [reviewedBy, note] = rest;
+    if (!reviewedBy) {
+      console.error('Usage (rejected): node tools/classify-cli.js add <findingId> <engagementId> false <reviewedBy> ["note"]');
+      process.exit(2);
+    }
+  }
+
   try {
-    const record = classify({ findingId, engagementId, category, reviewerNote: note, reviewedBy });
-    console.log(`   \u2705 Classified ${record.findingId} as category ${record.category} (${record.categoryLabel})`);
+    const record = reviewFinding({ findingId, engagementId, approved, priority, reviewerNote: note, reviewedBy });
+    if (record.approved) {
+      console.log(`   \u2705 Approved ${record.findingId} as ${record.priority}`);
+    } else {
+      console.log(`   \u2705 Marked ${record.findingId} irrelevant`);
+    }
   } catch (err) {
     console.error(`   \u26a0\ufe0f  ${err.message}`);
     process.exit(1);
@@ -36,33 +63,28 @@ if (cmd === 'add') {
   }
   const records = loadEngagement(engagementId);
   if (records.length === 0) {
-    console.log(`   No classifications recorded yet for "${engagementId}".`);
+    console.log(`   No review decisions recorded yet for "${engagementId}".`);
   } else {
-    console.log(`   ${records.length} classification(s) for "${engagementId}":`);
+    console.log(`   ${records.length} review decision(s) for "${engagementId}":`);
     for (const r of records) {
-      console.log(`   ${r.findingId}  ->  category ${r.category} (${r.categoryLabel})  by ${r.reviewedBy} at ${r.reviewedAt}${r.reviewerNote ? '  — ' + r.reviewerNote : ''}`);
+      const label = r.approved ? `approved (${r.priority})` : 'irrelevant';
+      console.log(`   ${r.findingId}  ->  ${label}  by ${r.reviewedBy} at ${r.reviewedAt}${r.reviewerNote ? '  \u2014 ' + r.reviewerNote : ''}`);
     }
   }
-} else if (cmd === 'aggregate') {
-  const byRule = aggregateByRule();
-  const ruleIds = Object.keys(byRule);
-  if (ruleIds.length === 0) {
-    console.log('   No classifications recorded yet across any engagement.');
+} else if (cmd === 'fix-queue') {
+  const queue = loadApprovedFixQueue();
+  if (queue.length === 0) {
+    console.log('   No approved findings in the fix queue yet.');
   } else {
-    console.log(`   Real category distribution across ${ruleIds.length} real, distinct finding ID(s):`);
-    for (const ruleId of ruleIds) {
-      const d = byRule[ruleId];
-      console.log(`   ${ruleId}: ${d.total} total  (1:${d[1]}  2:${d[2]}  3:${d[3]}  4:${d[4]})`);
+    console.log(`   Real fix queue - ${queue.length} approved finding(s), must_fix first:`);
+    for (const r of queue) {
+      console.log(`   [${r.priority}]  ${r.findingId}  (${r.engagementId})${r.reviewerNote ? '  \u2014 ' + r.reviewerNote : ''}`);
     }
   }
 } else {
   console.log('Usage:');
-  console.log('  node tools/classify-cli.js add <findingId> <engagementId> <category 1-4> <reviewedBy> ["note"]');
+  console.log('  node tools/classify-cli.js add <findingId> <engagementId> true <must_fix|nice_to_fix> <reviewedBy> ["note"]');
+  console.log('  node tools/classify-cli.js add <findingId> <engagementId> false <reviewedBy> ["note"]');
   console.log('  node tools/classify-cli.js list <engagementId>');
-  console.log('  node tools/classify-cli.js aggregate');
-  console.log();
-  console.log('Categories:');
-  for (const [n, label] of Object.entries(CATEGORY_LABELS)) {
-    console.log(`  ${n} - ${label}`);
-  }
+  console.log('  node tools/classify-cli.js fix-queue');
 }
