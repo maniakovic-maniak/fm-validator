@@ -904,13 +904,72 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // actually investigate.
     const a1CellCount = normalised.filter(r => r.cell === 'A1').length;
     const badSheetCount = normalised.filter(r => !r.sheet || !validSheetSet.has(String(r.sheet).toLowerCase())).length;
-    const badLocationCount = normalised.filter(r =>
+    const badLocationRows = normalised.filter(r =>
       r.cell === 'A1' || !r.sheet || !validSheetSet.has(String(r.sheet).toLowerCase())
-    ).length;
-    if (badLocationCount > 0) {
-      const pct = Math.round(100 * badLocationCount / normalised.length);
-      console.log(`   \u26a0\ufe0f  ${badLocationCount} of ${normalised.length} Tier 2 finding(s) (${pct}%) have an unusable location — cell defaulted to "A1", or sheet is blank/not a real sheet name in this workbook.`);
+    );
+
+    // FIX: the comment above this block already, correctly, says most A1
+    // findings are genuinely correct - scope-not-applicable declarations,
+    // honest Mode A limitations, workbook-level findings with no single
+    // cell to cite - but the warning below it never actually used that
+    // knowledge; it just counted every A1/bad-sheet row as equally
+    // "unusable". Confirmed directly against two real production reports
+    // tonight (ESO Fm-00028, ET Fm-00027): every single A1 finding in
+    // both had one of these three honest, correct reasons - zero were
+    // genuine extraction failures. Classify each row before counting, so
+    // the alarming percentage only ever reflects Category D (genuinely
+    // unexplained), which is the only bucket actually worth investigating.
+    function classifyLocationIssue(r) {
+      const finding = String(r.condition || '').trim();
+      const fix = String(r.fix_instruction || r.corrective_action || '').trim();
+      const findingLower = finding.toLowerCase();
+      const fixLower = fix.toLowerCase();
+
+      // Category A - scope not applicable: the rule genuinely doesn't
+      // apply to this model, so there is genuinely no cell to cite.
+      if (fixLower.startsWith('no action required') || fixLower.startsWith('no action needed')) {
+        return 'scope_not_applicable';
+      }
+      if (/^(no |there is no )/.test(findingLower)) {
+        return 'scope_not_applicable';
+      }
+
+      // Category B - honest Mode A limitation: the review works from
+      // extracted values and formula text, not full interactive Excel
+      // access, and the finding says so directly rather than guessing.
+      if (/^(cannot detect|cannot verify|cannot confirm|cannot assess|cannot exhaustively)/.test(findingLower)) {
+        return 'mode_a_limitation';
+      }
+      if (/(open (the |this |[a-z0-9&' ]+ )?(sheet|workbook|file) directly|open .* in excel|provide (the )?(full|complete)|provide .* (rows|data|detail)s? for (direct )?review|search the full workbook)/.test(fixLower)) {
+        return 'mode_a_limitation';
+      }
+
+      // Category C - workbook-level: the finding is genuinely about the
+      // whole workbook (VBA project, a missing tab), not one cell.
+      if (!r.sheet || r.sheet === 'N/A' || r.sheet === 'None') {
+        return 'workbook_level';
+      }
+
+      // Category D - everything left over. This is the only bucket that
+      // should actually raise a warning.
+      return 'genuinely_unexplained';
+    }
+
+    const locationCategories = { scope_not_applicable: 0, mode_a_limitation: 0, workbook_level: 0, genuinely_unexplained: 0 };
+    const unexplainedRows = [];
+    for (const r of badLocationRows) {
+      const cat = classifyLocationIssue(r);
+      locationCategories[cat]++;
+      if (cat === 'genuinely_unexplained') unexplainedRows.push(r);
+    }
+
+    if (unexplainedRows.length > 0) {
+      const pct = Math.round(100 * unexplainedRows.length / normalised.length);
+      console.log(`   \u26a0\ufe0f  ${unexplainedRows.length} of ${normalised.length} Tier 2 finding(s) (${pct}%) have a genuinely unusable location — cell defaulted to "A1" with no honest scope/limitation reason given, or sheet is blank/not a real sheet name in this workbook.`);
       console.log(`      Breakdown: ${a1CellCount} used the "A1" cell fallback, ${badSheetCount} had a blank or invalid sheet name (some findings may count toward both).`);
+    }
+    if (locationCategories.scope_not_applicable + locationCategories.mode_a_limitation + locationCategories.workbook_level > 0) {
+      console.log(`   \u2139\ufe0f  ${badLocationRows.length - unexplainedRows.length} additional Tier 2 finding(s) show "A1" for an honest, correct reason (not a bug): ${locationCategories.scope_not_applicable} scope-not-applicable, ${locationCategories.mode_a_limitation} Mode A limitation stated directly, ${locationCategories.workbook_level} workbook-level.`);
     }
 
     if (!useFullParse) {
