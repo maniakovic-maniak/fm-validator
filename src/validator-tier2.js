@@ -568,7 +568,7 @@ function resolveDeepAccountingSheets(sheetNames) {
   return { resolvedMap, unresolvedCategories };
 }
 
-async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false } = {}) {
+async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
   // itself failed to complete for this run. A flat, mining-style
@@ -661,6 +661,37 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   }
 
   const systemPrompt = buildSystemPrompt(domain, modelContext);
+
+  // FIX: wires the real recalculation check's own result into Tier 2's
+  // prompt for the first time. Confirmed directly: before this change,
+  // Tier 2's own LLM prompt had zero references to the recalculation
+  // check at all (it ran ~1700 lines later in server.js's old order,
+  // so the result didn't even exist yet) - every "uncertain" judgment
+  // was made with no visibility into whether an independent, genuine
+  // recalculation had even succeeded. This does not claim the fix
+  // resolves any specific finding; it honestly tells the LLM what is
+  // and isn't independently verified, so it can factor that into its
+  // own confidence rather than being blind to it.
+  if (recalcCheckResult) {
+    let recalcNote;
+    if (recalcCheckResult.status === 'success') {
+      const mismatches = recalcCheckResult.mismatch_count || 0;
+      const unconverged = recalcCheckResult.unconverged_circular_groups || 0;
+      if (mismatches === 0 && unconverged === 0) {
+        recalcNote = `A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) succeeded for this workbook: ${(recalcCheckResult.formula_cells_checked || 0).toLocaleString()} formula cell(s) checked, zero cells where the displayed result differs from what the formula actually computes. Where a finding's own confidence depends on whether the model's cached values are independently trustworthy, this recalculation genuinely supports treating them as such.`;
+      } else {
+        recalcNote = `A genuine, independent full-workbook recalculation succeeded for this workbook, but found ${mismatches} cell(s) whose cached value doesn't match a fresh recalculation and/or ${unconverged} circular group(s) that didn't converge (these are already raised as their own T0-RECALC-* findings). For any other cell, the recalculation genuinely supports treating its cached value as trustworthy.`;
+      }
+    } else if (recalcCheckResult.status === 'unavailable' || recalcCheckResult.status === 'skipped_too_large') {
+      recalcNote = `A genuine, independent full-workbook recalculation was not performed for this session (${recalcCheckResult.reason || recalcCheckResult.status}). Every figure you review rests on this workbook's own cached, displayed values, not an independently recalculated result - do not treat the mere presence of a plausible-looking cached value as confirmation it is correct.`;
+    } else {
+      // load_or_eval_failed, cached_value_read_failed, failed_to_run, or
+      // any other genuinely unrecognized status - all mean the same
+      // honest thing here: no independent recalculation exists to lean on.
+      recalcNote = `A genuine, independent full-workbook recalculation did not complete for this session (${recalcCheckResult.status}${recalcCheckResult.error ? ': ' + recalcCheckResult.error : ''}). Every figure you review rests on this workbook's own cached, displayed values, not an independently recalculated result - do not treat the mere presence of a plausible-looking cached value as confirmation it is correct.`;
+    }
+    systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\nRecalculation status for this session: ' + recalcNote;
+  }
 
   // FIX (Phase 2.2): full-parse route — builds a single unified raw-
   // formula payload covering every sheet with formula content, used
