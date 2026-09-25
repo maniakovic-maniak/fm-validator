@@ -1689,6 +1689,19 @@ explanation of what it includes and excludes.
 - A metric name alone (e.g. "closing net debt") is not sufficient
   evidence of a single, unambiguous definition.
 
+### test: rounding_equality_control_not_masking
+Trigger: a control/validation check that compares two values using
+ROUND(x, -n) = ROUND(y, -n) (or an equivalent rounding-equality
+comparison) as a pass/fail gate on financial-scale values.
+- If the check genuinely uses an absolute-difference tolerance (e.g.
+  ABS(x-y) < threshold) scaled to a real, immaterial amount → pass,
+  confidence 85+
+- If the check relies on rounding equality → fail. Name the exact
+  cell(s) and state the real rounding unit, since any discrepancy
+  smaller than half that unit is silently passed regardless of how
+  large the underlying values are.
+- If the trigger condition doesn't apply to this workbook → not applicable
+
 ### test: riio_iteration_state_integrity
 Trigger: the workbook contains a SavedResults/LiveResults pattern,
 OFFSET-based recall blocks, and/or VBA that manipulates calculation or
