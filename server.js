@@ -950,7 +950,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       }
     }
 
-    const t1Results  = runTier1(parsed);
+    const t1Results  = runTier1(parsed, { recalcCheckResult });
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
     const t2Results  = await runTier2(parsed, { domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, recalcCheckResult });

@@ -142,7 +142,8 @@ function sheetNameMatchesKeyword(sheetName, keyword) {
   return sheetName.toLowerCase().includes(kwLower) || kwLower.includes(sheetName.toLowerCase());
 }
 
-function runTier1(parsed) {
+function runTier1(parsed, opts = {}) {
+  const { recalcCheckResult } = opts;
   const results = [];
 
   for (const rule of checklist.tier1) {
@@ -392,16 +393,42 @@ function runTier1(parsed) {
       });
     }
 
-    // ── No circular references ────────────────────────────────────────────────
-    // exceljs does not expose circular reference detection directly.
-    // Return uncertain with guidance for manual verification.
+    // ── No unresolved circular references (T1-011) ──────────────────────────
+    // FIX: previously always returned 'uncertain' unconditionally, reasoning
+    // that exceljs doesn't expose circular reference detection directly.
+    // That's true for exceljs, but recalc_check.py's own Formualizer-based
+    // recalculation now genuinely determines this reliably (iterative
+    // circularity resolution, not just static detection) and is computed
+    // BEFORE runTier1() runs in server.js's own pipeline order — this was
+    // simply never plumbed through. The rule's own label ("no UNRESOLVED
+    // circular references") and fix_instruction ("documented... AND
+    // confirmed to converge reliably") both confirm the right standard is
+    // "did every circular group converge", not "zero circularity exists" —
+    // matching genuine_circular_groups/converged_circular_groups/
+    // unconverged_circular_groups exactly. Falls back to the original
+    // honest 'uncertain' whenever recalcCheckResult isn't a genuine
+    // success (unavailable, skipped, or failed) rather than guessing.
     if (rule.type === 'no_circular_references') {
-      results.push({
-        id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
-        status: 'uncertain', fixable: false,
-        fix_instruction: rule.fix_instruction,
-        reason: 'Circular reference detection requires Excel formula evaluation. Manual verification required: open the file in Excel and check Formulas → Error Checking → Circular References. Intentional circular references must be documented on the Inputs sheet.'
-      });
+      if (recalcCheckResult && recalcCheckResult.status === 'success') {
+        const unconverged = recalcCheckResult.unconverged_circular_groups || 0;
+        const genuine = recalcCheckResult.genuine_circular_groups || 0;
+        const converged = recalcCheckResult.converged_circular_groups || 0;
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+          status: unconverged === 0 ? 'pass' : 'fail', fixable: false,
+          fix_instruction: rule.fix_instruction,
+          reason: unconverged === 0
+            ? (genuine > 0 ? `${genuine} genuine circular dependency group(s) found, all ${converged} converged cleanly via iterative recalculation.` : null)
+            : `${unconverged} circular dependency group(s) did not converge (still changing after the maximum iteration count) — a genuine, unresolved circularity, not the common and usually-benign pattern that normally converges cleanly.`
+        });
+      } else {
+        results.push({
+          id: rule.id, label: rule.label, severity: rule.severity || 'fatal',
+          status: 'uncertain', fixable: false,
+          fix_instruction: rule.fix_instruction,
+          reason: 'Circular reference detection requires Excel formula evaluation. Manual verification required: open the file in Excel and check Formulas → Error Checking → Circular References. Intentional circular references must be documented on the Inputs sheet.'
+        });
+      }
     }
 
     // ── Actuals forecast flags exclusive (T1-012) ─────────────────────────────
