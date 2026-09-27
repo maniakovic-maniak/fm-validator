@@ -196,6 +196,29 @@ function normalizeDomainLabel(modelType) {
       if (re.test(lower)) return canonical;
     }
   }
+
+  // GUARD: no DOMAIN_ALIASES entry matched above — but loadDomainSkill()
+  // below builds its filename as `skill-${normalized}.md` directly from
+  // whatever this function returns, so an unmatched label whose OWN
+  // leading category word happens to be the bare word "corporate" (e.g.
+  // "corporate" alone, or "corporate — electricity system operator (UK
+  // energy regulation)") would collide with skill-corporate.md by
+  // filename coincidence — that file is deliberately narrow (FMCG/
+  // beverage operating models only, see the `corporate:` alias list
+  // above), not a general "not a named industry" skill. Any narrow
+  // FMCG/beverage phrasing already matched via the alias loop above; a
+  // label that still leads with bare "corporate" here is exactly the
+  // "not a named industry" case the removed bare-word alias used to
+  // (wrongly) catch — route it to skill-generic.md, same as any other
+  // unrecognised domain, instead of loading skill-corporate.md by
+  // accident. Confirmed real: Fm-00030 (ESO Licence Model, genuinely an
+  // infrastructure/regulated-utility model) was classified "corporate"
+  // on this run and loaded skill-corporate.md — 147 rules instead of
+  // the ~650 skill-infrastructure.md would have applied — purely from
+  // this collision.
+  const leadingWord = lower.trim().split(/[\s\-\u2013\u2014]/)[0];
+  if (leadingWord === 'corporate') return 'generic';
+
   return modelType; // no known alias — leave as-is; a genuinely new domain still works correctly, it just won't be normalized to anything yet
 }
 
