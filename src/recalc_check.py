@@ -97,6 +97,73 @@ exercises the external-reference and scale code paths at all.
    advance which specific cells in a real file use one of these
    functions without already having tried to evaluate them.
 
+5. ARRAY-CAPABLE FUNCTIONS THROWING #SPILL! UNCONDITIONALLY. Found
+   during a real production incident investigation (ESO Licence Model,
+   Fm-00028/Fm-00029): Formualizer 0.8.4's NATIVE implementations of
+   CELL(), INDEX() (single-row and single-column argument shapes),
+   CHOOSE(), YEAR() (applied to a range — Excel implicitly array-
+   evaluates YEAR(range)), and PRODUCT() each throw
+   "#SPILL!: BlockedByFormula [spill NxM]" — an EXCEPTION that aborts
+   the entire evaluate_all() pass, not merely a per-cell error value —
+   confirmed directly, repeatedly, in total isolation (a fresh one-line
+   workbook, zero real cell conflict) for every one of these.
+     Fix: Formualizer's wb.register_function(name, callback,
+     allow_override_builtin=True) replaces the native implementation
+     with a correct Python one, workbook-wide — see CELL_OVERRIDE,
+     INDEX_OVERRIDE, CHOOSE_OVERRIDE, YEAR_OVERRIDE, PRODUCT_OVERRIDE,
+     and MATCH_OVERRIDE (using the independently unit-tested
+     excel_match() from match_impl.py — 17 cases covering exact/
+     approximate/mixed-type/wildcard behavior) below.
+     IMPORTANT CAVEAT, found via direct testing: register_function's
+     own argument evaluation is unconditionally EAGER — even a
+     correctly-lazy IF() override cannot prevent a nested call in the
+     untaken branch from being evaluated and throwing. Tested and
+     confirmed this does NOT provide true short-circuit protection;
+     no IF() override is applied here for that reason (would add
+     complexity without a verified benefit). This eager-evaluation
+     behavior is also WHY fix #6 below was hard to isolate — an
+     IF()'s "dead" branch still throws, so tracing only the branch a
+     condition actually selects can lead an investigation to the wrong
+     cell entirely; both branches must be checked independently.
+     A SEPARATE, confirmed-DIFFERENT limitation: OFFSET() and other
+     reference-taking functions (as opposed to value-taking ones)
+     bypass register_function's dispatch entirely — the callback is
+     never invoked at all, confirmed directly. These cannot be fixed
+     via override and instead use the SAME pre-scan/neutralize pattern
+     as fix #2 above (see OFFSET_RE below).
+
+6. BARE (UNWRAPPED) REFERENCES TO MULTI-CELL NAMED RANGES. The actual
+   remaining root cause behind fix #5's own residual failures — found
+   only after confirming fix #5 alone did NOT close the gap (a further
+   #SPILL! persisted, shape "1x25" rather than "1x5"). A formula that
+   is exactly "=SomeMultiCellName" or uses that name directly in an
+   expression (e.g. "=A1 * SomeMultiCellName") with NO @ operator and
+   no INDEX() wrapping it, where SomeMultiCellName is a real workbook-
+   scoped defined name spanning more than one cell, is Excel's
+   implicit-intersection pattern — real Excel silently resolves it to
+   a single value; Formualizer's native handling does not and throws.
+   Root-caused via direct tracing against the real ESO Licence Model:
+   AR!AT26 = "=ESOpf" (ESOpf being a genuine 1-row x 25-column named
+   range, SystemOperator!V138:AT138 — note this matches the "1x25"
+   shape in the exception EXACTLY, unlike fix #5's shapes which are
+   fixed artifacts of the buggy code path, not real computed
+   dimensions). Confirmed NOT an isolated cell: a full-workbook scan
+   found 611 bare uses of 66 different multi-cell named ranges (ESOpf
+   alone: 376 uses) — this is the dominant pattern across the file, not
+   a one-off. Fix: pre-scan every formula for a bare reference to any
+   workbook-scoped named range whose own span covers more than one
+   cell, excluding any occurrence immediately preceded by "INDEX(" or
+   "@" (both are the correctly-wrapped, non-buggy forms) — see
+   MULTICELL_NAME_RE and the named-range-lookup block in run() below.
+   Neutralized the same way as external references and OFFSET() (fix
+   #2/#5): set_value() to the real cached value, taint-traced
+   downstream. Confirmed via direct, repeated testing against the real
+   ESO Licence Model with fixes #1 through #6 all applied together:
+   evaluate_all() succeeds, and per-sheet isolation testing confirms
+   all 17 sheets evaluate cleanly with zero remaining #SPILL! errors —
+   this is not a partial result; re-tested from a fresh Workbook.
+   from_path() load to rule out any residual state from prior tests.
+
 Usage:
     python3 recalc_check.py path/to/workbook.xlsx
     (outputs a JSON summary to stdout)
@@ -109,6 +176,8 @@ import re
 import os
 import math
 import warnings
+import datetime
+import match_impl
 
 # Confirmed via direct inspection of openpyxl's own source
 # (openpyxl/worksheet/_reader.py): when a date-formatted cell's cached
@@ -162,6 +231,156 @@ if openpyxl is None:
     sys.exit(0)
 
 EXTERNAL_REF_RE = re.compile(r'\[\d+\]')
+
+# fix #5 (see module docstring) — OFFSET() is reference-taking and
+# cannot be fixed via register_function (its callback is never
+# invoked, confirmed directly) — same pre-scan/neutralize pattern as
+# EXTERNAL_REF_RE above.
+OFFSET_RE = re.compile(r'OFFSET\s*\(', re.IGNORECASE)
+
+
+def _as_2d(a):
+    """Normalize a Formualizer array argument (which may arrive as a
+    scalar, a flat list, or a list-of-lists) into a consistent 2D grid."""
+    if isinstance(a, list):
+        return a if (a and isinstance(a[0], list)) else [[v] for v in a]
+    return [[a]]
+
+
+def _flatten_1d(a):
+    """Correctly flatten a single-row OR single-column 2D grid into a
+    1D list, in reading order. A prior version of this logic (found and
+    fixed via direct testing this session) silently mishandled the
+    single-row case, taking only its first element."""
+    grid = _as_2d(a)
+    if len(grid) == 1:
+        return list(grid[0])
+    return [row[0] for row in grid]
+
+
+def cell_override(info_type=None, *rest):
+    """CELL() — Formualizer's native implementation throws #SPILL! for
+    EVERY info_type unconditionally (confirmed: filename, address, row,
+    col, contents, type, width all reproduce this in total isolation).
+    Only "filename" has real callers in practice; other info_types
+    return a safe placeholder rather than the exception."""
+    it = str(info_type).lower() if info_type is not None else 'contents'
+    if it == 'filename':
+        return f"C:\\Users\\[{os.path.basename(_CURRENT_WORKBOOK_PATH)}]Sheet1"
+    return 0
+
+
+def index_override(array, row_num=None, col_num=None):
+    """INDEX() — Formualizer's native implementation mishandles the
+    single-row and single-column cases when only one positional index
+    argument is given (ambiguous whether it's a row or column index).
+    Real Excel rule: if the array has only one row or one column, the
+    lone index applies to whichever dimension actually has more than
+    one member."""
+    grid = _as_2d(array)
+    n_rows, n_cols = len(grid), (len(grid[0]) if grid else 0)
+    r = int(row_num) if row_num not in (None, 0) else None
+    c = int(col_num) if col_num not in (None, 0) else None
+    try:
+        if r is not None and c is not None:
+            return grid[r-1][c-1]
+        if r is not None and c is None:
+            if n_rows == 1 and n_cols > 1:
+                return grid[0][r-1]           # single row -> index is column-wise
+            if n_cols == 1:
+                return grid[r-1][0]           # single column -> index is row-wise
+            return [grid[r-1]]                # true 2D array, row given -> whole row
+        if c is not None and r is None:
+            if n_cols == 1 and n_rows > 1:
+                return grid[c-1][0]
+            if n_rows == 1:
+                return grid[0][c-1]
+            return [row[c-1] for row in grid]
+    except (IndexError, TypeError):
+        return {'type': 'Error', 'kind': 'Ref'}
+    return {'type': 'Error', 'kind': 'Value'}
+
+
+def choose_override(index_num, *values):
+    """CHOOSE() — same array-mishandling class as CELL()/INDEX()."""
+    try:
+        i = int(index_num)
+        return values[i-1] if 1 <= i <= len(values) else {'type': 'Error', 'kind': 'Value'}
+    except (TypeError, ValueError):
+        return {'type': 'Error', 'kind': 'Value'}
+
+
+def match_override(lookup_value, lookup_array, match_type=1):
+    """MATCH() — delegates to the independently unit-tested implementation
+    in match_impl.py (17 test cases: exact match, case-insensitivity,
+    cross-type ordering rules, mixed text/number rows, ascending/
+    descending approximate match, wildcards)."""
+    flat = _flatten_1d(lookup_array) if isinstance(lookup_array, list) else [lookup_array]
+    return match_impl.excel_match(lookup_value, flat, match_type)
+
+
+def _year_of(v):
+    if isinstance(v, (datetime.date, datetime.datetime)):
+        return v.year
+    if isinstance(v, (int, float)):
+        try:
+            base = datetime.date(1899, 12, 30)
+            return (base + datetime.timedelta(days=v)).year
+        except (OverflowError, ValueError):
+            return {'type': 'Error', 'kind': 'Value'}
+    return {'type': 'Error', 'kind': 'Value'}
+
+
+def year_override(serial_or_array):
+    """YEAR() — real Excel implicitly array-evaluates YEAR(range),
+    mapping over every cell; Formualizer's native version doesn't
+    handle this and throws #SPILL! instead."""
+    if isinstance(serial_or_array, list):
+        grid = _as_2d(serial_or_array)
+        return [[_year_of(v) for v in row] for row in grid]
+    return _year_of(serial_or_array)
+
+
+def product_override(*args):
+    """PRODUCT() — same array-mishandling class."""
+    result, any_num = 1.0, False
+    for a in args:
+        vals = _flatten_1d(a) if isinstance(a, list) else [a]
+        for v in vals:
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                result *= v
+                any_num = True
+    return result if any_num else 0.0
+
+
+def _build_multicell_name_re(wb):
+    """fix #6 (see module docstring) — a bare (unwrapped) reference to a
+    workbook-scoped named range spanning more than one cell is Excel's
+    implicit-intersection pattern; Formualizer's native handling throws
+    #SPILL! on it. Returns a compiled regex matching any such name as a
+    whole word, or None if the workbook has no multi-cell named ranges
+    at all (regex alternation would otherwise be empty/invalid)."""
+    names = wb.get_named_ranges()
+    multicell = [n['name'] for n in names
+                 if n.get('kind') == 'range'
+                 and (n['end_row'] - n['start_row'] + 1) * (n['end_col'] - n['start_col'] + 1) > 1]
+    if not multicell:
+        return None
+    return re.compile(r'\b(' + '|'.join(re.escape(n) for n in multicell) + r')\b')
+
+
+def _is_bare_multicell_reference(formula_text, multicell_name_re):
+    """True if formula_text uses a multi-cell named range without the
+    correctly-wrapped forms (INDEX(...) or the @ implicit-intersection
+    operator) immediately preceding the name."""
+    if multicell_name_re is None:
+        return False
+    for m in multicell_name_re.finditer(formula_text):
+        before = formula_text[:m.start()]
+        if 'INDEX(' in before.upper()[-30:] or formula_text[max(0, m.start()-1):m.start()] == '@':
+            continue
+        return True
+    return False
 
 # Confirmed via real testing against Hidden Gem: neutralizing an
 # external-reference cell to 0 (see fix #2 in the module docstring)
@@ -397,6 +616,8 @@ def _progress(msg):
 
 def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     t_start = time.time()
+    global _CURRENT_WORKBOOK_PATH
+    _CURRENT_WORKBOOK_PATH = path
 
     _progress("Counting formula cells...")
     try:
@@ -468,6 +689,22 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             return {"status": "load_or_eval_failed", "error": error_str, "elapsed_s": round(time.time() - t_start, 2)}
     _progress(f"Formualizer load complete ({round(time.time()-t_start,1)}s elapsed).")
 
+    # fix #5 (see module docstring) — register the value-taking overrides
+    # for the confirmed-buggy native functions. allow_override_builtin
+    # replaces Formualizer's own implementation workbook-wide; OFFSET()
+    # (reference-taking) cannot use this mechanism and is handled by the
+    # pre-scan/neutralize pass below instead, alongside external refs.
+    wb.register_function("CELL", cell_override, min_args=0, max_args=2, allow_override_builtin=True)
+    wb.register_function("INDEX", index_override, min_args=2, max_args=3, allow_override_builtin=True)
+    wb.register_function("CHOOSE", choose_override, min_args=2, max_args=254, allow_override_builtin=True)
+    wb.register_function("MATCH", match_override, min_args=2, max_args=3, allow_override_builtin=True)
+    wb.register_function("YEAR", year_override, min_args=1, max_args=1, allow_override_builtin=True)
+    wb.register_function("PRODUCT", product_override, min_args=1, max_args=254, allow_override_builtin=True)
+
+    # fix #6 (see module docstring) — built once, from this same loaded
+    # workbook, so it reflects this file's own real defined names.
+    multicell_name_re = _build_multicell_name_re(wb)
+
     # fix #3a — read_only=True is primary, not a fallback. See module docstring.
     _progress("Loading workbook into openpyxl (for cached values)...")
     try:
@@ -493,6 +730,8 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # access (ws[coordinate]) — confirmed catastrophically slow in
     # read_only mode.
     external_ref_cells = set()
+    offset_cells = set()          # fix #5 — see module docstring
+    multicell_range_cells = set()  # fix #6 — see module docstring
     targets = []          # [(sheet, row, col), ...]
     target_keys = []      # ["Sheet!A1", ...] parallel to targets
     cached_values = []    # parallel to targets
@@ -536,6 +775,20 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
                     except Exception:
                         pass  # if neutralizing itself fails, evaluate_all() below will surface it clearly
                     continue  # never compare a neutralized cell — its value is fabricated
+                if formula_value and OFFSET_RE.search(formula_value):
+                    try:
+                        wb.sheet(sheet_name).set_value(cell_f.row, cell_f.column, cell_c.value if cell_c.value is not None else 0)
+                        offset_cells.add(f"{sheet_name}!{cell_f.coordinate}")
+                    except Exception:
+                        pass
+                    continue  # never compare a neutralized cell — its value is fabricated
+                if formula_value and _is_bare_multicell_reference(formula_value, multicell_name_re):
+                    try:
+                        wb.sheet(sheet_name).set_value(cell_f.row, cell_f.column, cell_c.value if cell_c.value is not None else 0)
+                        multicell_range_cells.add(f"{sheet_name}!{cell_f.coordinate}")
+                    except Exception:
+                        pass
+                    continue  # never compare a neutralized cell — its value is fabricated
                 key = f"{sheet_name}!{cell_f.coordinate}"
                 targets.append((sheet_name, cell_f.row, cell_f.column))
                 target_keys.append(key)
@@ -552,7 +805,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # reasonable number of BFS waves rather than iterating to an
     # unbounded fixed point, since each wave requires another pass over
     # every remaining formula.
-    _progress(f"Scan complete: {len(targets):,} target(s), {len(external_ref_cells)} external-reference cell(s) found ({round(time.time()-t_start,1)}s elapsed).")
+    _progress(f"Scan complete: {len(targets):,} target(s), {len(external_ref_cells)} external-reference cell(s), {len(offset_cells)} OFFSET() cell(s), {len(multicell_range_cells)} bare-multicell-named-range cell(s) found ({round(time.time()-t_start,1)}s elapsed).")
 
     # FIX #2 (found via a real Hidden Gem run: the masking BFS below hit
     # its old 30-wave cap with 7 cells STILL newly tainted on wave 30 —
@@ -578,9 +831,9 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             _ext_dependents_of.setdefault(f"{rsheet}!{rcol}{rrow}", []).append(key)
     _progress(f"  reference parsing and reverse index complete ({round(time.time()-t_start,1)}s elapsed).")
 
-    tainted = set(external_ref_cells)
+    tainted = set(external_ref_cells) | set(offset_cells) | set(multicell_range_cells)
     if tainted:
-        _progress(f"Tracing dependents of {len(external_ref_cells)} external-reference cell(s)...")
+        _progress(f"Tracing dependents of {len(external_ref_cells)} external-reference cell(s), {len(offset_cells)} OFFSET() cell(s), and {len(multicell_range_cells)} bare-multicell-named-range cell(s)...")
         frontier = set(tainted)
         _wave = 0
         while True:
@@ -596,7 +849,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             frontier = newly_tainted
             _progress(f"  wave {_wave}: {len(newly_tainted):,} newly tainted, {len(tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
 
-        if len(tainted) > len(external_ref_cells):
+        if len(tainted) > len(external_ref_cells) + len(offset_cells) + len(multicell_range_cells):
             # Filter targets/keys/cached_values/formula_texts to drop
             # every tainted cell before the batch comparison below.
             keep_indices = [i for i, key in enumerate(target_keys) if key not in tainted]
@@ -605,7 +858,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             cached_values = [cached_values[i] for i in keep_indices]
             formula_texts = [formula_texts[i] for i in keep_indices]
 
-    tainted_downstream_count = len(tainted) - len(external_ref_cells)
+    tainted_downstream_count = len(tainted) - len(external_ref_cells) - len(offset_cells) - len(multicell_range_cells)
     if tainted_downstream_count > 0:
         _progress(f"Taint trace complete: {tainted_downstream_count:,} downstream cell(s) excluded ({round(time.time()-t_start,1)}s elapsed).")
 
@@ -614,7 +867,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         wb.evaluate_all()
     except Exception as e:
         return {"status": "load_or_eval_failed", "error": str(e), "elapsed_s": round(time.time() - t_start, 2),
-                "note": f"{len(external_ref_cells)} external-reference cell(s) were pre-neutralized but evaluation still failed — a second, different blocking issue exists beyond external references."}
+                "note": f"{len(external_ref_cells)} external-reference cell(s), {len(offset_cells)} OFFSET() cell(s), and {len(multicell_range_cells)} bare-multicell-named-range cell(s) were pre-neutralized, and CELL/INDEX/CHOOSE/MATCH/YEAR/PRODUCT were overridden, but evaluation still failed — a further, different blocking issue exists beyond all currently-known Formualizer array-handling bugs (see module docstring fixes #5/#6)."}
     _progress(f"evaluate_all() complete ({round(time.time()-t_start,1)}s elapsed).")
 
     telemetry = wb.last_cycle_telemetry()
@@ -693,7 +946,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
 
     formula_by_key = {key: formula_texts[i] for i, key in enumerate(target_keys)}
-    root_seeds = set(external_ref_cells) | {f"{e['sheet']}!{e['cell']}" for e in unresolved_errors}
+    root_seeds = set(external_ref_cells) | set(offset_cells) | set(multicell_range_cells) | {f"{e['sheet']}!{e['cell']}" for e in unresolved_errors}
 
     # FIX #2 (found via a real 8+ hour run against Hidden Gem that had to
     # be interrupted — the earlier fix below was itself broken at scale).
@@ -779,6 +1032,8 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         "elapsed_s": round(time.time() - t_start, 2),
         "formula_cells_checked": len(targets),
         "external_reference_cells_excluded": len(external_ref_cells),
+        "offset_cells_excluded": len(offset_cells),
+        "multicell_named_range_cells_excluded": len(multicell_range_cells),
         "tainted_downstream_cells_excluded": tainted_downstream_count,
         "genuine_circular_groups": telemetry.iterated_sccs,
         "converged_circular_groups": telemetry.converged_sccs,
