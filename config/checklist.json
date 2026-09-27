@@ -10196,6 +10196,18 @@
       "manual_only": false,
       "fixable": false,
       "fix_instruction": "Trigger: a formula of the form PRODUCT(OFFSET(..., width = YEAR(t) - YEAR(y))) or a genuinely equivalent year-difference-as-width pattern. Confirm the formula's own behaviour when the year difference evaluates to zero or negative (e.g. the reference year and the current year coincide, or the current year is later than the reference year) - OFFSET does not fail cleanly on a zero/negative width, and the result may be a silent, incorrect value rather than a visible error. Name the exact real cell(s) using this pattern and state what happens at the boundary case."
+    },
+    {
+      "id": "T2-S5-013",
+      "section": "9.13",
+      "label": "Rounding-equality control checks do not mask errors below the rounding threshold",
+      "source_id": "F-01-ESO-2026-09",
+      "source_section": "Partner Review active-testing finding",
+      "test": "rounding_equality_control_not_masking",
+      "severity": "high",
+      "manual_only": false,
+      "fixable": false,
+      "fix_instruction": "A control/validation check that compares ROUND(x, -n) = ROUND(y, -n) on financial-scale values silently passes any real discrepancy smaller than half the rounding unit (e.g. ROUND to -5 on \u00a3m-scale values masks any real error under \u00a350k). Confirm any such check instead uses an absolute-difference tolerance (e.g. ABS(x-y) < threshold, scaled to a genuinely immaterial amount), not a rounding-equality comparison. Flag any ROUND(...)= or ROUND(...)== comparison used as a pass/fail control gate for direct review."
     }
   ]
 }

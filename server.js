@@ -875,10 +875,85 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     setProgress(runId, 5, 'Running validation (this is the longest step)');
     let allFlagged = [];
 
+    // MOVED (was ~1700 lines later, after runTier2()): the recalculation
+    // check now runs first, so its real result genuinely exists in time
+    // to be included in Tier 2's own prompt - closing the gap where
+    // Tier 2's "uncertain" judgments were made with no visibility into
+    // whether a genuine, independent recalculation had even succeeded.
+    // Confirmed safe to move: this block only depends on parsed._filePath
+    // (computed well before this point), not on anything runTier1/runTier2
+    // themselves produce.
+    const recalcCheckResult = await (async () => {
+      try {
+        const scriptPath = path.join(__dirname, 'src', 'recalc_check.py');
+        const stdout = await new Promise((resolve, reject) => {
+          execFile('python3', [scriptPath, parsed._filePath],
+            { timeout: 180000, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
+            (err, stdout, stderr) => {
+              if (err) { if (stderr) err.message += `\nstderr: ${stderr}`; return reject(err); }
+              resolve(stdout);
+            });
+        });
+        return JSON.parse(stdout.trim());
+      } catch (e) {
+        console.error('   \u26a0\ufe0f  Recalculation check failed to run:', e.message);
+        return { status: 'failed_to_run' };
+      }
+    })();
+
+    if (recalcCheckResult.status === 'unavailable') {
+      console.log(`   \u2139\ufe0f  Recalculation check skipped: ${recalcCheckResult.reason} (run 'pip install formualizer openpyxl' on the server to enable)`);
+    } else if (recalcCheckResult.status === 'skipped_too_large') {
+      console.log(`   \u2139\ufe0f  Recalculation check skipped: ${recalcCheckResult.formula_cells.toLocaleString()} formula cells exceeds the ${recalcCheckResult.threshold.toLocaleString()}-cell safety threshold (see recalc_check.py for tuning notes).`);
+    } else if (recalcCheckResult.status === 'success') {
+      if (recalcCheckResult.sanitized_defined_names_count > 0) {
+        console.log(`   \u2139\ufe0f  Recalculation check succeeded after removing ${recalcCheckResult.sanitized_defined_names_count} defined name(s) containing "?" that this workbook's recalculation engine cannot parse (${recalcCheckResult.sanitized_defined_names.join(', ')}) \u2014 ${recalcCheckResult.sanitized_formula_cells_affected} formula cell(s) referencing them may show as unresolved rather than compared; every other cell was recalculated and compared normally.`);
+      }
+      if (recalcCheckResult.mismatch_count > 0) {
+        const sample = recalcCheckResult.mismatches.slice(0, 8)
+          .map(m => `${m.sheet}!${m.cell} (shows ${m.cached.toLocaleString()}, recalculates to ${m.recalculated.toLocaleString()})`).join(', ');
+        allFlagged.push({
+          id: 'T0-RECALC-001',
+          label: `${recalcCheckResult.mismatch_count} formula cell(s) recalculate to a different value than their cached result`,
+          severity: 'high', status: 'fail',
+          sheet: '', cell: 'A1', category: 'Structure',
+          condition: `A genuine, full-workbook recalculation (${recalcCheckResult.formula_cells_checked.toLocaleString()} formula cells checked, correctly resolving ${recalcCheckResult.genuine_circular_groups} genuine circular dependency group(s) via iterative calculation) found ${recalcCheckResult.mismatch_count} cell(s) whose displayed, cached value doesn't match what the formula actually computes: ${sample}. This means either the file wasn't recalculated and saved with calculation enabled before delivery, or a genuine formula error exists.`,
+          reason: `${recalcCheckResult.mismatch_count} cell(s) show a cached value inconsistent with a fresh recalculation`,
+          corrective_action: 'Open the file in Excel, force a full recalculation (Ctrl+Alt+F9), and re-save. If mismatches persist after recalculation, investigate each flagged cell\'s formula directly.',
+          workstream: 'Structure', category: 'Structure', issue_type: 'Stale or incorrect cached formula result',
+          model_risk: 'Every displayed figure in this model is only as trustworthy as its cached value — this check found cells where that trust is misplaced.',
+          key_output_impact: 'Yes', method: 'automated', needs_retest: true,
+          root_cause: 'Cached formula result does not match a genuine recalculation', escalation_flag: true,
+          urgency: 'Before next reliance', confidence: 95
+        });
+      }
+      if (recalcCheckResult.unconverged_circular_groups > 0) {
+        allFlagged.push({
+          id: 'T0-RECALC-002',
+          label: `${recalcCheckResult.unconverged_circular_groups} circular calculation group(s) did not converge`,
+          severity: 'high', status: 'fail',
+          sheet: '', cell: 'A1', category: 'Structure',
+          condition: `${recalcCheckResult.unconverged_circular_groups} circular dependency group(s) were still changing after the maximum iteration count, rather than settling to a stable value — a genuine, unresolved circularity, not the common and usually-benign interest-on-average-balance pattern that normally converges cleanly.`,
+          reason: `${recalcCheckResult.unconverged_circular_groups} circular group(s) failed to converge`,
+          corrective_action: 'Investigate the specific formulas involved — an unstable circularity can mean the underlying logic is genuinely unbounded or oscillating, not just slow to settle.',
+          workstream: 'Structure', category: 'Structure', issue_type: 'Unconverged circular calculation',
+          model_risk: 'A circular calculation that never settles means the model\'s displayed values may depend on exactly how many iterations Excel happened to run, not on a stable, well-defined answer.',
+          key_output_impact: 'Yes', method: 'automated', needs_retest: true,
+          root_cause: 'Circular calculation did not converge within the iteration limit', escalation_flag: true,
+          urgency: 'Before next reliance', confidence: 90
+        });
+      }
+    } else {
+      console.log(`   \u26a0\ufe0f  Recalculation check did not complete: ${recalcCheckResult.status}${recalcCheckResult.error ? ' — ' + recalcCheckResult.error : ''}`);
+      if (recalcCheckResult.reason) {
+        console.log(`   \u2139\ufe0f  ${recalcCheckResult.reason}`);
+      }
+    }
+
     const t1Results  = runTier1(parsed);
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
-    const t2Results  = await runTier2(parsed, { domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse });
+    const t2Results  = await runTier2(parsed, { domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, recalcCheckResult });
     const t2FailuresRaw = t2Results.filter(r => r.status !== 'pass');
     // FIX (I-11): found via an independent review confirming at least
     // 3 Tier 2 findings explicitly self-identify as duplicates of
@@ -2591,75 +2666,6 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         root_cause: 'Cell value matches a recognised PII pattern', escalation_flag: true,
         urgency: 'Before external circulation', confidence: 85
       });
-    }
-  }
-
-  // A1 — real formula recalculation vs. cached values, via Formualizer.
-  // Requires `pip install formualizer openpyxl` on the server.
-  const recalcCheckResult = await (async () => {
-    try {
-      const scriptPath = path.join(__dirname, 'src', 'recalc_check.py');
-      const stdout = await new Promise((resolve, reject) => {
-        execFile('python3', [scriptPath, parsed._filePath],
-          { timeout: 180000, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
-          (err, stdout, stderr) => {
-            if (err) { if (stderr) err.message += `\nstderr: ${stderr}`; return reject(err); }
-            resolve(stdout);
-          });
-      });
-      return JSON.parse(stdout.trim());
-    } catch (e) {
-      console.error('   \u26a0\ufe0f  Recalculation check failed to run:', e.message);
-      return { status: 'failed_to_run' };
-    }
-  })();
-
-  if (recalcCheckResult.status === 'unavailable') {
-    console.log(`   \u2139\ufe0f  Recalculation check skipped: ${recalcCheckResult.reason} (run 'pip install formualizer openpyxl' on the server to enable)`);
-  } else if (recalcCheckResult.status === 'skipped_too_large') {
-    console.log(`   \u2139\ufe0f  Recalculation check skipped: ${recalcCheckResult.formula_cells.toLocaleString()} formula cells exceeds the ${recalcCheckResult.threshold.toLocaleString()}-cell safety threshold (see recalc_check.py for tuning notes).`);
-  } else if (recalcCheckResult.status === 'success') {
-    if (recalcCheckResult.sanitized_defined_names_count > 0) {
-      console.log(`   \u2139\ufe0f  Recalculation check succeeded after removing ${recalcCheckResult.sanitized_defined_names_count} defined name(s) containing "?" that this workbook's recalculation engine cannot parse (${recalcCheckResult.sanitized_defined_names.join(', ')}) \u2014 ${recalcCheckResult.sanitized_formula_cells_affected} formula cell(s) referencing them may show as unresolved rather than compared; every other cell was recalculated and compared normally.`);
-    }
-    if (recalcCheckResult.mismatch_count > 0) {
-      const sample = recalcCheckResult.mismatches.slice(0, 8)
-        .map(m => `${m.sheet}!${m.cell} (shows ${m.cached.toLocaleString()}, recalculates to ${m.recalculated.toLocaleString()})`).join(', ');
-      allFlagged.push({
-        id: 'T0-RECALC-001',
-        label: `${recalcCheckResult.mismatch_count} formula cell(s) recalculate to a different value than their cached result`,
-        severity: 'high', status: 'fail',
-        sheet: '', cell: 'A1', category: 'Structure',
-        condition: `A genuine, full-workbook recalculation (${recalcCheckResult.formula_cells_checked.toLocaleString()} formula cells checked, correctly resolving ${recalcCheckResult.genuine_circular_groups} genuine circular dependency group(s) via iterative calculation) found ${recalcCheckResult.mismatch_count} cell(s) whose displayed, cached value doesn't match what the formula actually computes: ${sample}. This means either the file wasn't recalculated and saved with calculation enabled before delivery, or a genuine formula error exists.`,
-        reason: `${recalcCheckResult.mismatch_count} cell(s) show a cached value inconsistent with a fresh recalculation`,
-        corrective_action: 'Open the file in Excel, force a full recalculation (Ctrl+Alt+F9), and re-save. If mismatches persist after recalculation, investigate each flagged cell\'s formula directly.',
-        workstream: 'Structure', category: 'Structure', issue_type: 'Stale or incorrect cached formula result',
-        model_risk: 'Every displayed figure in this model is only as trustworthy as its cached value — this check found cells where that trust is misplaced.',
-        key_output_impact: 'Yes', method: 'automated', needs_retest: true,
-        root_cause: 'Cached formula result does not match a genuine recalculation', escalation_flag: true,
-        urgency: 'Before next reliance', confidence: 95
-      });
-    }
-    if (recalcCheckResult.unconverged_circular_groups > 0) {
-      allFlagged.push({
-        id: 'T0-RECALC-002',
-        label: `${recalcCheckResult.unconverged_circular_groups} circular calculation group(s) did not converge`,
-        severity: 'high', status: 'fail',
-        sheet: '', cell: 'A1', category: 'Structure',
-        condition: `${recalcCheckResult.unconverged_circular_groups} circular dependency group(s) were still changing after the maximum iteration count, rather than settling to a stable value — a genuine, unresolved circularity, not the common and usually-benign interest-on-average-balance pattern that normally converges cleanly.`,
-        reason: `${recalcCheckResult.unconverged_circular_groups} circular group(s) failed to converge`,
-        corrective_action: 'Investigate the specific formulas involved — an unstable circularity can mean the underlying logic is genuinely unbounded or oscillating, not just slow to settle.',
-        workstream: 'Structure', category: 'Structure', issue_type: 'Unconverged circular calculation',
-        model_risk: 'A circular calculation that never settles means the model\'s displayed values may depend on exactly how many iterations Excel happened to run, not on a stable, well-defined answer.',
-        key_output_impact: 'Yes', method: 'automated', needs_retest: true,
-        root_cause: 'Circular calculation did not converge within the iteration limit', escalation_flag: true,
-        urgency: 'Before next reliance', confidence: 90
-      });
-    }
-  } else {
-    console.log(`   \u26a0\ufe0f  Recalculation check did not complete: ${recalcCheckResult.status}${recalcCheckResult.error ? ' — ' + recalcCheckResult.error : ''}`);
-    if (recalcCheckResult.reason) {
-      console.log(`   \u2139\ufe0f  ${recalcCheckResult.reason}`);
     }
   }
 

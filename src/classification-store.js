@@ -1,25 +1,18 @@
-// src/classification-store.js — the storage layer for the 4-category
-// feedback loop. Matches this project's own established pattern
-// (orders/*.json, engagements-store/*.json) - a real, simple JSON
-// file per engagement, not a new database dependency. Genuinely
-// deployable tonight without any new infrastructure decision.
+// src/classification-store.js — the storage layer for the supervisor
+// approval workflow. Revised from the original 4-category version:
+// the supervisor now sets approved (true/false) + priority
+// ('must_fix' | 'nice_to_fix'), rather than the original 1-4
+// judgment categories. Same real JSON-file pattern as before
+// (orders/*.json, engagements-store/*.json).
 //
 // One file per engagement: classifications/<engagementId>.json
-// Each file holds an array of classification records for that
-// engagement's findings.
 
 const fs = require('fs');
 const path = require('path');
 
 const CLASSIFICATIONS_DIR = path.join(__dirname, '..', 'classifications');
 
-const VALID_CATEGORIES = [1, 2, 3, 4];
-const CATEGORY_LABELS = {
-  1: 'Confirmed correct',
-  2: 'Confirmed wrong',
-  3: 'Directionally right, wrong specifics',
-  4: 'Genuinely unresolvable by this mechanism',
-};
+const VALID_PRIORITIES = ['must_fix', 'nice_to_fix'];
 
 function ensureDirReady() {
   if (!fs.existsSync(CLASSIFICATIONS_DIR)) {
@@ -48,26 +41,31 @@ function saveEngagement(engagementId, records) {
 }
 
 /**
- * Add one real classification record. findingId and engagementId
- * must be the real, existing IDs the finding is already known by
- * (matching the Issue Log / Validation Matrix / Partner Review
- * report), so a classification can always be traced back to the
- * real finding it's about.
+ * Real, direct supervisor decision on one finding.
+ *
+ * approved=true requires a real priority ('must_fix' or 'nice_to_fix').
+ * approved=false is a genuine soft delete: the record is kept (with
+ * reviewerNote preserved) so the reasoning behind rejecting a
+ * finding isn't lost, but it's excluded from the active review
+ * queue going forward - see loadUnclassified()'s own exclusion
+ * logic, which checks this same real, existing record.
  */
-function classify({ findingId, engagementId, category, reviewerNote, reviewedBy }) {
+function reviewFinding({ findingId, engagementId, approved, priority, reviewerNote, reviewedBy }) {
   if (!findingId) throw new Error('findingId is required - must match a real, existing finding ID');
   if (!engagementId) throw new Error('engagementId is required');
-  if (!VALID_CATEGORIES.includes(category)) {
-    throw new Error(`category must be one of ${VALID_CATEGORIES.join(', ')} - got ${category}`);
+  if (typeof approved !== 'boolean') throw new Error('approved must genuinely be true or false');
+  if (approved && !VALID_PRIORITIES.includes(priority)) {
+    throw new Error(`An approved finding requires a real priority - one of ${VALID_PRIORITIES.join(', ')} - got ${priority}`);
   }
-  if (!reviewedBy) throw new Error('reviewedBy is required - who is making this classification');
+  if (!reviewedBy) throw new Error('reviewedBy is required - who is making this decision');
 
   const records = loadEngagement(engagementId);
   const record = {
     findingId: String(findingId),
     engagementId: String(engagementId),
-    category,
-    categoryLabel: CATEGORY_LABELS[category],
+    approved,
+    priority: approved ? priority : null,
+    status: approved ? 'approved' : 'irrelevant',
     reviewerNote: reviewerNote || '',
     reviewedBy,
     reviewedAt: new Date().toISOString(),
@@ -78,12 +76,24 @@ function classify({ findingId, engagementId, category, reviewerNote, reviewedBy 
 }
 
 /**
- * Real, direct query across every classification ever recorded,
- * across every engagement - needed for the aggregation view the
- * design doc calls out as the actual payoff (e.g. "rule X has 6
- * category-3 classifications out of 8 total"). Reads every real
- * classification file on disk; fine for the real volume this
- * feature will see for a long time - revisit if that changes.
+ * Real, direct batch version of reviewFinding() - approves or
+ * rejects several findings in one call, all with the same priority
+ * and reviewer, matching the "select all, set priority once" real
+ * workflow. Returns the array of real records written, in the same
+ * order as the input findingIds.
+ */
+function reviewFindingsBatch({ findingIds, engagementId, approved, priority, reviewerNote, reviewedBy }) {
+  if (!Array.isArray(findingIds) || findingIds.length === 0) {
+    throw new Error('findingIds must genuinely be a real, non-empty array');
+  }
+  return findingIds.map(findingId =>
+    reviewFinding({ findingId, engagementId, approved, priority, reviewerNote, reviewedBy })
+  );
+}
+
+/**
+ * Real, direct query across every review decision ever recorded,
+ * across every engagement.
  */
 function loadAll() {
   ensureDirReady();
@@ -98,30 +108,23 @@ function loadAll() {
 }
 
 /**
- * Real aggregation by rule ID (the prefix of findingId before any
- * per-instance suffix, e.g. "T2-S10-505" itself is already the rule
- * ID for Tier 2 findings). Returns, per rule ID, the real category
- * distribution - the concrete first version of the aggregation view
- * the design doc scopes.
+ * The real, actual fix queue - every approved finding, across every
+ * engagement, genuinely ordered must_fix first. This is the concrete
+ * artifact the supervisor hands off for execution.
  */
-function aggregateByRule() {
+function loadApprovedFixQueue() {
   const all = loadAll();
-  const byRule = {};
-  for (const rec of all) {
-    if (!byRule[rec.findingId]) {
-      byRule[rec.findingId] = { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 };
-    }
-    byRule[rec.findingId][rec.category]++;
-    byRule[rec.findingId].total++;
-  }
-  return byRule;
+  const approved = all.filter(r => r.approved);
+  const priorityOrder = { must_fix: 0, nice_to_fix: 1 };
+  approved.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+  return approved;
 }
 
 module.exports = {
-  classify,
+  reviewFinding,
+  reviewFindingsBatch,
   loadEngagement,
   loadAll,
-  aggregateByRule,
-  VALID_CATEGORIES,
-  CATEGORY_LABELS,
+  loadApprovedFixQueue,
+  VALID_PRIORITIES,
 };

@@ -568,7 +568,7 @@ function resolveDeepAccountingSheets(sheetNames) {
   return { resolvedMap, unresolvedCategories };
 }
 
-async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false } = {}) {
+async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
   // itself failed to complete for this run. A flat, mining-style
@@ -661,6 +661,37 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   }
 
   const systemPrompt = buildSystemPrompt(domain, modelContext);
+
+  // FIX: wires the real recalculation check's own result into Tier 2's
+  // prompt for the first time. Confirmed directly: before this change,
+  // Tier 2's own LLM prompt had zero references to the recalculation
+  // check at all (it ran ~1700 lines later in server.js's old order,
+  // so the result didn't even exist yet) - every "uncertain" judgment
+  // was made with no visibility into whether an independent, genuine
+  // recalculation had even succeeded. This does not claim the fix
+  // resolves any specific finding; it honestly tells the LLM what is
+  // and isn't independently verified, so it can factor that into its
+  // own confidence rather than being blind to it.
+  if (recalcCheckResult) {
+    let recalcNote;
+    if (recalcCheckResult.status === 'success') {
+      const mismatches = recalcCheckResult.mismatch_count || 0;
+      const unconverged = recalcCheckResult.unconverged_circular_groups || 0;
+      if (mismatches === 0 && unconverged === 0) {
+        recalcNote = `A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) succeeded for this workbook: ${(recalcCheckResult.formula_cells_checked || 0).toLocaleString()} formula cell(s) checked, zero cells where the displayed result differs from what the formula actually computes. Where a finding's own confidence depends on whether the model's cached values are independently trustworthy, this recalculation genuinely supports treating them as such.`;
+      } else {
+        recalcNote = `A genuine, independent full-workbook recalculation succeeded for this workbook, but found ${mismatches} cell(s) whose cached value doesn't match a fresh recalculation and/or ${unconverged} circular group(s) that didn't converge (these are already raised as their own T0-RECALC-* findings). For any other cell, the recalculation genuinely supports treating its cached value as trustworthy.`;
+      }
+    } else if (recalcCheckResult.status === 'unavailable' || recalcCheckResult.status === 'skipped_too_large') {
+      recalcNote = `A genuine, independent full-workbook recalculation was not performed for this session (${recalcCheckResult.reason || recalcCheckResult.status}). Every figure you review rests on this workbook's own cached, displayed values, not an independently recalculated result - do not treat the mere presence of a plausible-looking cached value as confirmation it is correct.`;
+    } else {
+      // load_or_eval_failed, cached_value_read_failed, failed_to_run, or
+      // any other genuinely unrecognized status - all mean the same
+      // honest thing here: no independent recalculation exists to lean on.
+      recalcNote = `A genuine, independent full-workbook recalculation did not complete for this session (${recalcCheckResult.status}${recalcCheckResult.error ? ': ' + recalcCheckResult.error : ''}). Every figure you review rests on this workbook's own cached, displayed values, not an independently recalculated result - do not treat the mere presence of a plausible-looking cached value as confirmation it is correct.`;
+    }
+    systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\nRecalculation status for this session: ' + recalcNote;
+  }
 
   // FIX (Phase 2.2): full-parse route — builds a single unified raw-
   // formula payload covering every sheet with formula content, used
@@ -904,13 +935,72 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // actually investigate.
     const a1CellCount = normalised.filter(r => r.cell === 'A1').length;
     const badSheetCount = normalised.filter(r => !r.sheet || !validSheetSet.has(String(r.sheet).toLowerCase())).length;
-    const badLocationCount = normalised.filter(r =>
+    const badLocationRows = normalised.filter(r =>
       r.cell === 'A1' || !r.sheet || !validSheetSet.has(String(r.sheet).toLowerCase())
-    ).length;
-    if (badLocationCount > 0) {
-      const pct = Math.round(100 * badLocationCount / normalised.length);
-      console.log(`   \u26a0\ufe0f  ${badLocationCount} of ${normalised.length} Tier 2 finding(s) (${pct}%) have an unusable location — cell defaulted to "A1", or sheet is blank/not a real sheet name in this workbook.`);
+    );
+
+    // FIX: the comment above this block already, correctly, says most A1
+    // findings are genuinely correct - scope-not-applicable declarations,
+    // honest Mode A limitations, workbook-level findings with no single
+    // cell to cite - but the warning below it never actually used that
+    // knowledge; it just counted every A1/bad-sheet row as equally
+    // "unusable". Confirmed directly against two real production reports
+    // tonight (ESO Fm-00028, ET Fm-00027): every single A1 finding in
+    // both had one of these three honest, correct reasons - zero were
+    // genuine extraction failures. Classify each row before counting, so
+    // the alarming percentage only ever reflects Category D (genuinely
+    // unexplained), which is the only bucket actually worth investigating.
+    function classifyLocationIssue(r) {
+      const finding = String(r.condition || '').trim();
+      const fix = String(r.fix_instruction || r.corrective_action || '').trim();
+      const findingLower = finding.toLowerCase();
+      const fixLower = fix.toLowerCase();
+
+      // Category A - scope not applicable: the rule genuinely doesn't
+      // apply to this model, so there is genuinely no cell to cite.
+      if (fixLower.startsWith('no action required') || fixLower.startsWith('no action needed')) {
+        return 'scope_not_applicable';
+      }
+      if (/^(no |there is no )/.test(findingLower)) {
+        return 'scope_not_applicable';
+      }
+
+      // Category B - honest Mode A limitation: the review works from
+      // extracted values and formula text, not full interactive Excel
+      // access, and the finding says so directly rather than guessing.
+      if (/^(cannot detect|cannot verify|cannot confirm|cannot assess|cannot exhaustively)/.test(findingLower)) {
+        return 'mode_a_limitation';
+      }
+      if (/(open (the |this |[a-z0-9&' ]+ )?(sheet|workbook|file) directly|open .* in excel|provide (the )?(full|complete)|provide .* (rows|data|detail)s? for (direct )?review|search the full workbook)/.test(fixLower)) {
+        return 'mode_a_limitation';
+      }
+
+      // Category C - workbook-level: the finding is genuinely about the
+      // whole workbook (VBA project, a missing tab), not one cell.
+      if (!r.sheet || r.sheet === 'N/A' || r.sheet === 'None') {
+        return 'workbook_level';
+      }
+
+      // Category D - everything left over. This is the only bucket that
+      // should actually raise a warning.
+      return 'genuinely_unexplained';
+    }
+
+    const locationCategories = { scope_not_applicable: 0, mode_a_limitation: 0, workbook_level: 0, genuinely_unexplained: 0 };
+    const unexplainedRows = [];
+    for (const r of badLocationRows) {
+      const cat = classifyLocationIssue(r);
+      locationCategories[cat]++;
+      if (cat === 'genuinely_unexplained') unexplainedRows.push(r);
+    }
+
+    if (unexplainedRows.length > 0) {
+      const pct = Math.round(100 * unexplainedRows.length / normalised.length);
+      console.log(`   \u26a0\ufe0f  ${unexplainedRows.length} of ${normalised.length} Tier 2 finding(s) (${pct}%) have a genuinely unusable location — cell defaulted to "A1" with no honest scope/limitation reason given, or sheet is blank/not a real sheet name in this workbook.`);
       console.log(`      Breakdown: ${a1CellCount} used the "A1" cell fallback, ${badSheetCount} had a blank or invalid sheet name (some findings may count toward both).`);
+    }
+    if (locationCategories.scope_not_applicable + locationCategories.mode_a_limitation + locationCategories.workbook_level > 0) {
+      console.log(`   \u2139\ufe0f  ${badLocationRows.length - unexplainedRows.length} additional Tier 2 finding(s) show "A1" for an honest, correct reason (not a bug): ${locationCategories.scope_not_applicable} scope-not-applicable, ${locationCategories.mode_a_limitation} Mode A limitation stated directly, ${locationCategories.workbook_level} workbook-level.`);
     }
 
     if (!useFullParse) {

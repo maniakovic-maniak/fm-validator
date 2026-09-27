@@ -273,7 +273,70 @@ def build_report(data_path, output_path):
             else:
                 _t=_f.get('id','')
         _f['title']=_t; _f['label']=_t
-    id_to_issue_row = {f.get('id'): i for i, f in enumerate(findings, 5)}  # Issue Log header now at row 4, data from row 5
+    # FIX: the project's own established convention says T0-* findings
+    # should be aggregated into one Issue Log entry with a sample when a
+    # check can fire hundreds+ times - but the Issue Log loop below has
+    # always written one row per finding, unconditionally. Confirmed
+    # directly against two real reports tonight (ESO Fm-00028, ET
+    # Fm-00027): this is why 441 T0-REGIMECHANGE-* instances and 121
+    # T0-BLANKCELLREF-* instances showed up as 562 separate rows, when
+    # investigation traced them to one likely-benign systematic pattern
+    # and one real, 14-cell shared question respectively. Group any T0-*
+    # rule that fires 5+ times under one shared prefix (e.g.
+    # "T0-REGIMECHANGE") into a single synthetic summary finding, and
+    # keep every other finding (T1-*, T2-*, and any T0-* rule below the
+    # threshold) exactly as-is.
+    from collections import defaultdict as _defaultdict
+    _T0_AGGREGATION_THRESHOLD = 5
+
+    def _t0_group_key(finding_id):
+        parts = str(finding_id or '').split('-')
+        return '-'.join(parts[:2]) if len(parts) >= 2 else finding_id
+
+    _t0_groups = _defaultdict(list)
+    _non_t0 = []
+    for _f in findings:
+        _fid = str(_f.get('id', ''))
+        if _fid.startswith('T0-'):
+            _t0_groups[_t0_group_key(_fid)].append(_f)
+        else:
+            _non_t0.append(_f)
+
+    display_findings = list(_non_t0)
+    # id_to_issue_row must map every ORIGINAL finding id (aggregated away
+    # or not) to whichever display row it now appears on, or the
+    # dashboard's existing top5 hyperlink mechanism (uses id_to_issue_row)
+    # would silently break for any aggregated finding it happens to cite.
+    _original_id_to_group_key = {}
+    for _key, _members in _t0_groups.items():
+        if len(_members) >= _T0_AGGREGATION_THRESHOLD:
+            _first = dict(_members[0])
+            _sample_cells = []
+            for _m in _members[:5]:
+                _sheet = _m.get('sheet') or ''
+                _cell = _m.get('cell') or ''
+                if _sheet and _cell and _cell != 'A1':
+                    _sample_cells.append(f'{_sheet}!{_cell}')
+            _sample_text = ', '.join(_sample_cells)
+            _remaining = len(_members) - len(_sample_cells)
+            _sample_suffix = f' (sample: {_sample_text}{f" + {_remaining} more" if _remaining > 0 else ""})' if _sample_cells else ''
+            _first['condition'] = f"{_first.get('condition', '')} — {len(_members)} instance(s) of this pattern found{_sample_suffix}"
+            _first['id'] = f'{_key} ({len(_members)} instances)'
+            _first['sheet'] = '' if len({_m.get('sheet') for _m in _members}) > 1 else _first.get('sheet', '')
+            _first['cell'] = 'A1'
+            display_findings.append(_first)
+            for _m in _members:
+                _original_id_to_group_key[_m.get('id')] = _first['id']
+        else:
+            display_findings.extend(_members)
+
+    findings = display_findings
+    id_to_issue_row = {}
+    for i, f in enumerate(findings, 5):
+        id_to_issue_row[f.get('id')] = i
+    for _orig_id, _group_id in _original_id_to_group_key.items():
+        id_to_issue_row[_orig_id] = id_to_issue_row.get(_group_id)
+    # Issue Log header now at row 4, data from row 5
 
     # Audit coverage counts — feeds the dashboard completion breakdown (V11 1.3)
     def _rmatch0(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
