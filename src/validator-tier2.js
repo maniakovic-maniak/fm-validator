@@ -677,10 +677,23 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     if (recalcCheckResult.status === 'success') {
       const mismatches = recalcCheckResult.mismatch_count || 0;
       const unconverged = recalcCheckResult.unconverged_circular_groups || 0;
+      // Coverage: formula_cells_checked is only the cells actually compared. OFFSET() cells,
+      // bare multi-cell named-range cells, external refs and their dependents are excluded.
+      const _checked = recalcCheckResult.formula_cells_checked || 0;
+      const _excl = (recalcCheckResult.offset_cells_excluded || 0) + (recalcCheckResult.multicell_named_range_cells_excluded || 0)
+        + (recalcCheckResult.external_reference_cells_excluded || 0) + (recalcCheckResult.tainted_downstream_cells_excluded || 0);
+      const _unres = recalcCheckResult.unresolved_error_count || 0;
+      let _covNote = '';
+      if (_excl > 0 && (_checked + _excl) > 0) {
+        _covNote = ` IMPORTANT COVERAGE LIMIT: only ${_checked.toLocaleString()} of ${(_checked + _excl).toLocaleString()} formula cells (${Math.round(_checked / (_checked + _excl) * 100)}%) were compared. The other ${_excl.toLocaleString()} (OFFSET() cells, cells using bare multi-cell named ranges, and everything that depends on them) were NOT independently verified - for those cells the cached value has no independent support, so treat them exactly as you would with no recalculation.`;
+      }
+      if (_unres > 0) {
+        _covNote += ` ${_unres.toLocaleString()} cell(s) returned an engine error rather than a value; they are unresolved, not confirmed correct.`;
+      }
       if (mismatches === 0 && unconverged === 0) {
-        recalcNote = `A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) succeeded for this workbook: ${(recalcCheckResult.formula_cells_checked || 0).toLocaleString()} formula cell(s) checked, zero cells where the displayed result differs from what the formula actually computes. Where a finding's own confidence depends on whether the model's cached values are independently trustworthy, this recalculation genuinely supports treating them as such.`;
+        recalcNote = `A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) succeeded for this workbook: ${(recalcCheckResult.formula_cells_checked || 0).toLocaleString()} formula cell(s) checked, zero cells where the displayed result differs from what the formula actually computes. This supports the trustworthiness of cached values only for the cells that were actually compared.${_covNote}`;
       } else {
-        recalcNote = `A genuine, independent full-workbook recalculation succeeded for this workbook, but found ${mismatches} cell(s) whose cached value doesn't match a fresh recalculation and/or ${unconverged} circular group(s) that didn't converge (these are already raised as their own T0-RECALC-* findings). For any other cell, the recalculation genuinely supports treating its cached value as trustworthy.`;
+        recalcNote = `A genuine, independent full-workbook recalculation succeeded for this workbook, but found ${mismatches} cell(s) whose cached value doesn't match a fresh recalculation and/or ${unconverged} circular group(s) that didn't converge (these are already raised as their own T0-RECALC-* findings). For other cells that were compared, the recalculation supports treating the cached value as trustworthy.${_covNote}`;
       }
     } else if (recalcCheckResult.status === 'unavailable' || recalcCheckResult.status === 'skipped_too_large') {
       recalcNote = `A genuine, independent full-workbook recalculation was not performed for this session (${recalcCheckResult.reason || recalcCheckResult.status}). Every figure you review rests on this workbook's own cached, displayed values, not an independently recalculated result - do not treat the mere presence of a plausible-looking cached value as confirmation it is correct.`;

@@ -1182,13 +1182,42 @@ def build_report(data_path, output_path):
         _sanitized_count = recalcIn.get('sanitized_defined_names_count', 0)
         _sanitized_note = (f" {_sanitized_count} defined name(s) containing unparseable characters were excluded first — formula cells referencing them are not covered by this comparison."
                             if _sanitized_count > 0 else '')
+        # Coverage transparency: 'checked' is only the cells compared against cached
+        # values. OFFSET() cells, bare multi-cell named-range cells, external refs and
+        # everything downstream of them are excluded and NOT independently verified.
+        # total = checked + all exclusions (verified: 2,960 + 354 + 611 + 4,278 = 8,203).
+        _excl_keys = ('offset_cells_excluded','multicell_named_range_cells_excluded',
+                      'external_reference_cells_excluded','tainted_downstream_cells_excluded')
+        _cov_note = ''
+        _partial = False
+        if any(k in recalcIn for k in _excl_keys):
+            _x_off = recalcIn.get('offset_cells_excluded', 0)
+            _x_multi = recalcIn.get('multicell_named_range_cells_excluded', 0)
+            _x_ext = recalcIn.get('external_reference_cells_excluded', 0)
+            _x_taint = recalcIn.get('tainted_downstream_cells_excluded', 0)
+            _x_total = _x_off + _x_multi + _x_ext + _x_taint
+            _f_total = _cells_checked + _x_total
+            _unres = recalcIn.get('unresolved_error_count', 0)
+            if _x_total > 0 and _f_total > 0:
+                _cov_pct = round(_cells_checked / _f_total * 100)
+                _partial = _cov_pct < 90
+                _parts = []
+                if _x_off: _parts.append(f"{_x_off:,} OFFSET() cell(s)")
+                if _x_multi: _parts.append(f"{_x_multi:,} cell(s) using a bare multi-cell named range")
+                if _x_ext: _parts.append(f"{_x_ext:,} external-reference cell(s)")
+                if _x_taint: _parts.append(f"{_x_taint:,} cell(s) that depend on those, directly or indirectly")
+                _cov_note = (f" Coverage: {_cells_checked:,} of {_f_total:,} formula cells ({_cov_pct}%) were included in the comparison. "
+                             f"The other {_x_total:,} were excluded and are NOT independently verified: " + "; ".join(_parts) + ".")
+            if _unres > 0:
+                _cov_note += (f" {_unres:,} cell(s) returned an engine error instead of a value; these are unresolved, not confirmed as matching.")
+        _perf_label = 'Performed (partial coverage)' if _partial else 'Performed'
         if _mismatch_count == 0:
-            _recalc_status = 'Performed'
-            _recalc_summary = (f"A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) checked {_cells_checked:,} formula cell(s), correctly resolving {_circular_groups} genuine circular dependency group(s) via iterative calculation, and found zero cells where the displayed result differs from what the formula actually computes.{_sanitized_note}")
-            _recalc_next = 'None for the cells checked'
+            _recalc_status = _perf_label
+            _recalc_summary = (f"A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) checked {_cells_checked:,} formula cell(s), correctly resolving {_circular_groups} genuine circular dependency group(s) via iterative calculation, and found zero cells where the displayed result differs from what the formula actually computes.{_sanitized_note}{_cov_note}")
+            _recalc_next = ('None for the cells compared. Excluded cells rely on cached values only and remain unverified - restructure the OFFSET / bare named-range constructs to widen coverage' if _cov_note else 'None for the cells checked')
         else:
-            _recalc_status = 'Performed'
-            _recalc_summary = (f"A genuine, independent full-workbook recalculation checked {_cells_checked:,} formula cell(s) and found {_mismatch_count} cell(s) where the displayed, cached value differs from what the formula actually computes — see the Issue Log for the specific cells.{_sanitized_note}")
+            _recalc_status = _perf_label
+            _recalc_summary = (f"A genuine, independent full-workbook recalculation checked {_cells_checked:,} formula cell(s) and found {_mismatch_count} cell(s) where the displayed, cached value differs from what the formula actually computes — see the Issue Log for the specific cells.{_sanitized_note}{_cov_note}")
             _recalc_next = 'Investigate each mismatch — see Issue Log'
     # B1 — 7 mining-specific commercial omission patterns (revenue-to-Ops
     # linkage, capex post-commissioning, tax shield, debt sculpting,
@@ -1258,7 +1287,7 @@ def build_report(data_path, output_path):
             f"This batch genuinely failed to complete during this run: {_bf.get('error','unknown error').rstrip('.')}. The {len(_bf.get('ruleIds',[]))} rule(s) it covered are marked Not Performed in the Validation Matrix - this was a real, one-off infrastructure failure, not a deliberate scope decision.",
             'Re-run the validation once the underlying issue is resolved'
         ))
-    _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Partial (mining-specific)':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT)}
+    _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Partial (mining-specific)':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT),'Performed (partial coverage)':(P2_FILL,P2_TXT)}
     _col_chars = {2:22, 4:34, 5:22}  # rough usable characters per line, by column width
     for proc,status,impact,nxt in _exclusions:
         ws3.cell(r3,2).value=proc; ws3.cell(r3,2).font=Fn(sz=9,col=CHARCOAL); ws3.cell(r3,2).fill=F(WHITE); ws3.cell(r3,2).alignment=A(wrap=True,v='center')
