@@ -13,7 +13,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     originalName, modelType, modelIndustry, modelPurpose,
     modelSummary, tier0, auditLog, overallAssessment,
     igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets, namedRangeAudit, formulaDeepDive, reasonableness, duplicateSheets, vbaReview,
-    deepAccountingResolvedSheets, crossRunStats, batchFailures
+    deepAccountingResolvedSheets, crossRunStats, batchFailures, recalcCheckResult
   } = meta;
 
   // Enrich findings with F-score using the cell-level index built by Tier 0.
@@ -74,6 +74,12 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     reasonableness: reasonableness || { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false} },
     duplicateSheets: duplicateSheets || { applicable:false, flaggedCount:0, flagged:[] },
     vbaReview:       vbaReview || { applicable:false, hasVbaProject:false, moduleCount:0, note:'', findings:[] },
+    // FIX: server.js passes recalcCheckResult in meta, but it was never destructured or
+    // added to this explicit payload, so build_report.py always fell back to its
+    // 'not run for this session' default and Scope and Reliance said 'Not performed'
+    // even when the recalculation succeeded. Same default as build_report.py so
+    // callers that do not pass it behave exactly as before.
+    recalcCheckResult: recalcCheckResult || { status:'unavailable', reason:'not run for this session' },
     // Real resolved sheet names for the deep-accounting subset (Batch 2) —
     // used by the "Evidence Reviewed" column in the Validation Matrix,
     // replacing a static string that always said "AFS/IFS/Cons/Debt/
