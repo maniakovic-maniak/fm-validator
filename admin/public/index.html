@@ -80,6 +80,7 @@
   .badge-running { background: #fff2cc; color: #8a6d1f; }
   .badge-complete { background: #e1f5ee; color: #1d9e75; }
   .badge-failed { background: #fcebeb; color: #b03a3a; }
+  .badge-held { background: #fde7cc; color: #92540a; }
   .run-btn {
     background: #0d9488; color: white; border: none; border-radius: 6px;
     padding: 5px 14px; font-size: 11.5px; font-weight: 700; font-family: inherit;
@@ -333,16 +334,23 @@
   const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>';
   const ICON_EMAIL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 6l8 7 8-7"/></svg>';
   const ICON_PARTNER_REVIEW = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 00-2 2v4"/><path d="M15 3h4a2 2 0 012 2v4"/><path d="M9 21H5a2 2 0 01-2-2v-4"/><path d="M15 21h4a2 2 0 002-2v-4"/></svg>';
+  const ICON_CLEAR_HOLD = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>';
 
   function actionItemsCell(order) {
     const hasLog = !!order.runLogFilename;
     const hasReport = !!order.reportName;
+    // Held orders keep view/download/partner-review available - a human needs to be
+    // able to open the report to actually review it - only sending to the client is
+    // blocked until the hold is cleared.
+    const canSend = hasReport && !order.held;
+    const sendTitle = order.held ? `Held: ${order.heldReason || 'awaiting review'}` : 'Send email';
     return `
       <div class="action-icons">
         <button class="action-icon" ${hasLog ? `onclick="viewLog('${order.orderId}')"` : 'disabled'} title="View log">${ICON_LOG}</button>
         <button class="action-icon" ${hasReport ? `onclick="downloadReport('${order.orderId}')"` : 'disabled'} title="Download report">${ICON_DOWNLOAD}</button>
-        <button class="action-icon" ${hasReport ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="Send email">${ICON_EMAIL}</button>
+        <button class="action-icon" ${canSend ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="${sendTitle}">${ICON_EMAIL}</button>
         <button class="action-icon" ${hasReport ? `onclick="triggerPartnerReview('${order.orderId}')"` : 'disabled'} title="Request Partner Review">${ICON_PARTNER_REVIEW}</button>
+        ${order.held ? `<button class="action-icon" onclick="clearHold('${order.orderId}')" title="${sendTitle} — click to review and clear">${ICON_CLEAR_HOLD}</button>` : ''}
       </div>
     `;
   }
@@ -361,6 +369,21 @@
   function downloadReport(orderId) {
     if (!confirm('Download the report for this order?')) return;
     window.location.href = `api/download-report/${orderId}`;
+  }
+
+  async function clearHold(orderId) {
+    const order = orders.find(o => o.orderId === orderId);
+    const reason = order ? (order.heldReason || 'no reason recorded') : '';
+    if (!confirm(`This run was held for review:\n\n${reason}\n\nHave you reviewed the report and confirmed it's ready to send?`)) return;
+    try {
+      const res = await fetch(`api/orders/${orderId}/clear-hold`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) { alert('Could not clear hold: ' + (data.error || 'unknown error')); return; }
+      if (order) { order.held = false; order.heldReason = null; }
+      render();
+    } catch (err) {
+      alert('Could not clear hold: ' + err.message);
+    }
   }
 
   async function sendReportEmail(orderId) {
@@ -387,6 +410,7 @@
       const label = p ? `${p.percent}% \u2014 ${p.label}` : 'Running\u2026';
       return `<span class="badge badge-running">${label}</span>`;
     }
+    if (state === 'held') return '<span class="badge badge-held" title="Awaiting manual review before this can be sent">Held for review</span>';
     if (state === 'complete') return '<span class="badge badge-complete">Complete</span>';
     if (state === 'failed') return '<span class="badge badge-failed">Failed</span>';
     return `<button class="run-btn" onclick="runOrder('${orderId}')">RUN</button>`;
@@ -455,7 +479,10 @@
           // just because there's no in-progress run left to find. The
           // action icons already correctly know this from the same
           // order data; the badge text just never checked it too.
-          runStates[order.orderId] = 'complete';
+          // A held order shows "Held for review" instead of "Complete" -
+          // the report exists (hence the icons work), but auto-send is
+          // blocked until a human clears it.
+          runStates[order.orderId] = order.held ? 'held' : 'complete';
         }
         // A 404 here with no reportName correctly means this order has
         // simply never been run - the genuine idle/RUN case.
@@ -533,7 +560,8 @@
         return;
       }
       const data = await res.json();
-      runStates[orderId] = (data.status === 'passed' || data.status === 'flagged') ? 'complete' : 'failed';
+      const succeeded = (data.status === 'passed' || data.status === 'flagged');
+      runStates[orderId] = succeeded ? (data.held ? 'held' : 'complete') : 'failed';
 
       // The badge state above is enough to update the "Pipeline Run"
       // column, but the action icons check the actual order object's
@@ -544,6 +572,7 @@
       if (order) {
         if (data.runLogFilename) order.runLogFilename = data.runLogFilename;
         if (data.reportName) order.reportName = data.reportName;
+        if ('held' in data) { order.held = !!data.held; order.heldReason = data.heldReason || null; }
       }
       stopPolling(orderId);
       render();

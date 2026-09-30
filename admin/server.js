@@ -292,6 +292,17 @@ app.get('/api/download-report/:orderId', async (req, res) => {
   }
 });
 
+app.post('/api/orders/:orderId/clear-hold', async (req, res) => {
+  try {
+    const order = getOrder(req.params.orderId);
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found.' });
+    updateOrder(req.params.orderId, { held: false, heldReason: null });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/send-report-email/:orderId', async (req, res) => {
   try {
     const response = await fetch(`${MAIN_APP_URL}/api/send-report-email/${req.params.orderId}`, { method: 'POST' });
@@ -355,6 +366,7 @@ app.post('/api/run/:orderId', async (req, res) => {
     const updates = {};
     if (data.runLogFilename) updates.runLogFilename = data.runLogFilename;
     if (data.reportName) updates.reportName = data.reportName;
+    if ('held' in data) { updates.held = !!data.held; updates.heldReason = data.heldReason || null; }
     if (Object.keys(updates).length > 0) {
       updateOrder(req.params.orderId, updates);
     }

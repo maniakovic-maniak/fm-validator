@@ -12,6 +12,7 @@ const { logAuditEvent, getClientIp } = require('./src/utils/audit-log');
 const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
 const { applyRuleExclusions }       = require('./src/utils/rule-exclusions');
+const { computeHoldStatus }         = require('./src/utils/compute-hold');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
 const { setProgress, clearProgress, getProgress } = require('./src/utils/run-progress');
 const { verifyUploadIntegrity }      = require('./src/utils/upload-integrity-check');
@@ -3298,6 +3299,14 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       if (completedOrder) sendOrderStatusUpdateEmail(completedOrder, 'review_complete').catch(() => {});
     }
 
+    // Hold gate: any fatal-gate procedure still Uncertain, or 2+ critical-severity
+    // procedures still Uncertain, means this run should not go to the client
+    // automatically - it's parked for a human to review and release. Computed from
+    // the same ruleResults the Validation Matrix itself shows, so this can never
+    // disagree with what a reviewer would see if they opened the report.
+    const { held, heldReason } = computeHoldStatus(ruleResults, require('./config/checklist.json'));
+    if (held) console.log(`   \u26a0\ufe0f  Run held from auto-send: ${heldReason}`);
+
     res.json({
       status:       allFlagged.length === 0 ? 'passed' : 'flagged',
       message:      allFlagged.length === 0
@@ -3324,6 +3333,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       driveLink:  driveResult ? driveResult.webViewLink : null,
       runLogFilename: runLog.filename,
       reportName,
+      held,
+      heldReason,
       flagged: allFlagged.map(f => ({
         sheet:    f.sheet,
         cell:     f.cell || 'A1',
