@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "description": "Rules that cannot apply to a given model type are excluded from the audit-completion denominator. Decisions are logged and stored server-side only (data/rule-exclusions/); nothing is shown in the report. Exclusion is an exclude-list: a rule not named here always counts.",
+  "guardrails": {
+    "maxExcludedShare": 0.5,
+    "neverExcludeSeverity": ["fatal"],
+    "neverExcludeSourceSectionContains": ["fatal gate"],
+    "neverExcludeWhenConcluded": true,
+    "requireAbsenceTypeFinding": true
+  },
+  "profiles": [
+    {
+      "id": "regulated_network_utility",
+      "appliesToDomainSkill": "skill-infrastructure.md",
+      "matchAny": ["riio", "system operator", "transmission system", "network licence", "price control", "regulated network", "electricity transmission", "gas transmission", "distribution network"],
+      "tiers": {
+        "A_physical_sector_mismatch": {
+          "enabled": true,
+          "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]
+        },
+        "B_ppp_contract_archetype": {
+          "enabled": false,
+          "families": ["ppp", "pfi", "vfm", "public"]
+        },
+        "C_generation_and_efficiency": {
+          "enabled": false,
+          "families": ["energy_efficiency", "power_wind", "power_ppa", "power_merchant", "power_tariff", "power_cod", "power_degradation", "power_offtaker", "power_decommissioning", "power_units", "power_generation", "power_dispatch"]
+        }
+      }
+    }
+  ]
+}

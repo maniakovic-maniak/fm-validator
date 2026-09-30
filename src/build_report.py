@@ -179,6 +179,13 @@ def build_report(data_path, output_path):
             return True  # domain-agnostic (FMAC-coded base rule) - always applicable
         return src == _this_model_domain
     checklist_rules=[r for r in checklist_rules if _rule_applies_to_this_model(r)]
+    # Rules out of scope for this model type were decided server-side (server.js) and are already
+    # absent from ruleResults and the findings; drop them from the planned set too so the matrix and
+    # completion figure share one denominator. Deliberately not listed or counted anywhere in the report.
+    _excluded_rule_ids = set(d.get('excludedRuleIds') or [])
+    if _excluded_rule_ids:
+        checklist_rules=[r for r in checklist_rules if r.get('id') not in _excluded_rule_ids]
+    _scope_narrowed = bool(_excluded_rule_ids)
 
     # ── P1/P2/P3 framework renewal, Tier 3 ───────────────────────────────────
     # Four named readiness gates from the memo's own "Not Ready for
@@ -1077,12 +1084,12 @@ def build_report(data_path, output_path):
     # in index.js/server.js.
     _t1_count = len([r for r in checklist_rules if r.get('_tier')=='Tier 1'])
     _t2_count = len([r for r in checklist_rules if r.get('_tier')=='Tier 2'])
-    for label,val in [('Rules applied',f'{len(findings)} findings from a {len(checklist_rules)}-rule checklist'),
+    for label,val in [('Rules applied',(f'{len(findings)} findings from {len(checklist_rules)} procedures scheduled for this model type' if _scope_narrowed else f'{len(findings)} findings from a {len(checklist_rules)}-rule checklist')),
                        ('Tier 0 coverage',f'{t0.get("stats",{}).get("totalFormulaCells",0):,} formula cells scanned across all sheets'),
                        ('Tier 1 coverage',f'{_t1_count} deterministic structural code checks'),
                        ('Tier 2 coverage',f'{_t2_count} Claude semantic checks across 13 sections'),
                        ('Accounting framework','Not confirmed in model — accrual basis assumed from statement structure'),
-                       ('Audit completion',f'{cov_conclusive_pct}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)')]:
+                       ('Audit completion',(f'{cov_conclusive_pct}% of the {cov_total_planned} procedures scheduled for this model type ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)' if _scope_narrowed else f'{cov_conclusive_pct}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)'))]:
         r3 = kv_row(r3,label,val)
     set_row(ws3,r3,10); r3+=1
 
@@ -1696,7 +1703,7 @@ def build_report(data_path, output_path):
     merge(wsm,f'B1:{get_column_letter(n_vm_cols-1)}1','VALIDATION MATRIX',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
     fill_range(wsm,1,2,1,n_vm_cols-1,DARK_BLUE); set_row(wsm,1,26)
     merge(wsm,f'B2:{get_column_letter(n_vm_cols-1)}2',
-          'Every rule in the checklist and its outcome — a procedure checklist, not a findings dump. See the Issue Log for the findings themselves.',
+          'Every procedure scheduled for this model type and its outcome — a procedure checklist, not a findings dump. See the Issue Log for the findings themselves.',
           sz=8,col=GREY_TXT2,bg=PALE_ACCENT,italic=True,wrap=True)
     set_row(wsm,2,18)
 

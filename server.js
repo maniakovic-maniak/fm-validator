@@ -11,6 +11,7 @@ const { sanitizeFilename }           = require('./src/utils/sanitize-filename');
 const { logAuditEvent, getClientIp } = require('./src/utils/audit-log');
 const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
+const { applyRuleExclusions }       = require('./src/utils/rule-exclusions');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
 const { setProgress, clearProgress, getProgress } = require('./src/utils/run-progress');
 const { verifyUploadIntegrity }      = require('./src/utils/upload-integrity-check');
@@ -972,7 +973,25 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     console.log(`   Tier 2: ${t2Results.filter(r => r.status === 'pass').length} pass, ${t2Failures.length} issues`);
 
     // Deduplicate and collect all flagged items
-    const allFailures  = [...t1Failures, ...t2Failures];
+    // Rule-scope exclusions: rules that cannot apply to this model type (e.g. toll-road tests on an
+    // electricity system operator) are dropped from the completion denominator, the Validation Matrix
+    // and the Issue Log. Logged and stored server-side only (data/rule-exclusions/) - nothing in the
+    // report mentions it, by design. Fails safe: on any error every rule counts as before.
+    const ruleExclusions = (() => {
+      try {
+        return applyRuleExclusions({
+          checklist: require('./config/checklist.json'),
+          t2Results,
+          domainFile: path.basename(String(domain.file || '')),
+          modelText: `${modelType} ${modelSummary.industry || ''} ${modelSummary.model_purpose || ''}`,
+          originalName
+        });
+      } catch (e) {
+        console.error('   \u26a0\ufe0f  Rule-scope exclusion failed (all rules counted):', e.message);
+        return { applied: false, excludedIds: [], isExcluded: () => false };
+      }
+    })();
+    const allFailures  = [...t1Failures, ...t2Failures.filter(f => !ruleExclusions.isExcluded(f.id))];
     const existingKeys = new Set();
     for (const f of allFailures) {
       // FIX: found via a real bug-scan run — server.js still had the old
@@ -3112,7 +3131,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     console.log(`   ℹ️  ${formatBreakdownLine(computeFindingBreakdown(allFlagged))}`);
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
-    const ruleResults = [...t1Results, ...t2Results].map(r => ({
+    const ruleResults = [...t1Results, ...t2Results].filter(r => !ruleExclusions.isExcluded(r.id)).map(r => ({
       id: r.id, status: r.status || 'uncertain',
       confidence: r.confidence ?? null, needs_retest: r.needs_retest ?? false
     }));
@@ -3197,6 +3216,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       vbaReview,
       deepAccountingResolvedSheets,
       recalcCheckResult,
+      excludedRuleIds: ruleExclusions.excludedIds,
       ownerDecisionChecklist,
       batchFailures:     t2Results._batchFailures || []
     });
