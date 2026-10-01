@@ -3314,7 +3314,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // and logged, never thrown, never shown to the user.
     try {
       const exclusionRecordPath = path.join(__dirname, 'data', 'rule-exclusions',
-        `${path.parse(String(req.body.orderId || originalName || 'run')).name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
+        `${path.parse(String(originalName || 'run')).name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
       const gatherArgs = [
         path.join(__dirname, 'src', 'nurse_gather.py'), reportPath,
         '--run-id', req.body.orderId || runId,
