@@ -13,6 +13,7 @@ const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
 const { applyRuleExclusions }       = require('./src/utils/rule-exclusions');
 const { computeHoldStatus }         = require('./src/utils/compute-hold');
+const { spawnSync: _nurseSpawnSync } = require('child_process');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
 const { setProgress, clearProgress, getProgress } = require('./src/utils/run-progress');
 const { verifyUploadIntegrity }      = require('./src/utils/upload-integrity-check');
@@ -3306,6 +3307,29 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // disagree with what a reviewer would see if they opened the report.
     const { held, heldReason } = computeHoldStatus(ruleResults, require('./config/checklist.json'));
     if (held) console.log(`   \u26a0\ufe0f  Run held from auto-send: ${heldReason}`);
+
+    // Nurse pipeline, Gather step: runs once, right after the report is built, reading
+    // the report's own Validation Matrix + Issue Log (never a second, parallel
+    // representation). Must never break report delivery - any failure here is caught
+    // and logged, never thrown, never shown to the user.
+    try {
+      const exclusionRecordPath = path.join(__dirname, 'data', 'rule-exclusions',
+        `${path.parse(String(req.body.orderId || originalName || 'run')).name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
+      const gatherArgs = [
+        path.join(__dirname, 'src', 'nurse_gather.py'), reportPath,
+        '--run-id', req.body.orderId || runId,
+        '--original-name', originalName,
+        '--domain-file', domain.file,
+        '--rule-exclusion-record', exclusionRecordPath,
+      ];
+      if (held) { gatherArgs.push('--held'); if (heldReason) gatherArgs.push('--held-reason', heldReason); }
+      const gatherResult = _nurseSpawnSync('python3', gatherArgs, { encoding: 'utf8' });
+      if (gatherResult.status !== 0) {
+        console.error('   \u26a0\ufe0f  Nurse gather step failed (non-fatal):', gatherResult.stderr || gatherResult.error);
+      }
+    } catch (e) {
+      console.error('   \u26a0\ufe0f  Nurse gather step failed (non-fatal):', e.message);
+    }
 
     res.json({
       status:       allFlagged.length === 0 ? 'passed' : 'flagged',

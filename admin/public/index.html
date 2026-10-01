@@ -125,6 +125,7 @@
     <button class="sidebar-item" data-page="promo">Promo Code</button>
     <button class="sidebar-item" data-page="partner-review">Partner Review</button>
     <button class="sidebar-item" data-page="review-queue">Review Queue</button>
+    <button class="sidebar-item" data-page="nurse-report">Improvement Signals</button>
   </div>
 
   <div class="main-content">
@@ -242,6 +243,39 @@
 
       <div class="empty-state" id="partnerReviewEmptyState" style="display:none">No Partner Review engagements yet.</div>
     </div>
+
+    <div class="page" id="page-nurse-report" style="display:none">
+  <div class="header">
+    <h1>Improvement Signals</h1>
+    <span class="meta" id="nurseReportMeta">Loading…</span>
+  </div>
+
+  <div id="nurseStalenessBanner" style="display:none; background:#fde7cc; color:#92540a; padding:10px 14px; border-radius:6px; margin-bottom:16px; font-size:13px;"></div>
+
+  <div id="nurseHeldSummary" style="margin-bottom:20px;"></div>
+
+  <h2 style="font-size:15px; margin:20px 0 8px;">Recurring across different models (same rule, same skill file)</h2>
+  <p class="meta" style="margin-bottom:8px;">The strongest signal that a rule or its skill-file instruction needs fixing - independent of any one client's file.</p>
+  <table id="nurseCrossModelTable" style="display:none">
+    <thead>
+      <tr><th>Rule ID</th><th>Domain skill</th><th>Recurrence</th><th>Models affected</th><th>Categories seen</th><th>Sample finding</th></tr>
+    </thead>
+    <tbody id="nurseCrossModelBody"></tbody>
+  </table>
+  <div class="empty-state" id="nurseCrossModelEmpty" style="display:none">No cross-model patterns yet - either too few distinct models have been run, or nothing recurs across them.</div>
+
+  <h2 style="font-size:15px; margin:28px 0 8px;">Recurring within the same model (repeated runs)</h2>
+  <p class="meta" style="margin-bottom:8px;">Either a persistently unresolved gap in that specific model, or a rule that can't be answered for that model's sub-type.</p>
+  <table id="nurseWithinModelTable" style="display:none">
+    <thead>
+      <tr><th>Model</th><th>Rule ID</th><th>Recurrence</th><th>Runs</th><th>Categories seen</th><th>Sample finding</th></tr>
+    </thead>
+    <tbody id="nurseWithinModelBody"></tbody>
+  </table>
+  <div class="empty-state" id="nurseWithinModelEmpty" style="display:none">No within-model patterns yet.</div>
+
+  <p class="meta" style="margin-top:20px;">Only genuinely uncategorized-free findings are pattern-matched here (a_candidate, b1_strong, b1_weak) - the remainder of each run's uncertain items have no detector yet (a mix of B2/C1/C2/D) and aren't grouped until those exist.</p>
+</div>
 
     <div class="page" id="page-review-queue" style="display:none">
   <div class="header">
@@ -628,6 +662,7 @@
     if (pageName === 'promo' && !promoCodes.length) loadPromoCodes();
     if (pageName === 'partner-review') loadPartnerReviewEngagements();
     if (pageName === 'review-queue') loadReviewQueue();
+    if (pageName === 'nurse-report') loadNurseReport();
   }
 
   document.querySelectorAll('.sidebar-item').forEach(btn => {
@@ -639,6 +674,77 @@
   const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
   if (savedTab && document.querySelector(`.sidebar-item[data-page="${savedTab}"]`)) {
     switchToTab(savedTab);
+  }
+
+  // ── Improvement Signals (nurse report) page ─────────────────────────
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function loadNurseReport() {
+    fetch('api/nurse-report/latest')
+      .then(res => {
+        if (!res.ok) throw new Error(res.status === 404 ? 'No report generated yet - the weekly job runs Sundays, and once on server startup.' : `Server returned ${res.status}`);
+        return res.json();
+      })
+      .then(renderNurseReport)
+      .catch(err => {
+        document.getElementById('nurseReportMeta').textContent = err.message;
+      });
+  }
+
+  function renderNurseReport(report) {
+    const generated = new Date(report.generatedAt);
+    document.getElementById('nurseReportMeta').textContent =
+      `Generated ${generated.toLocaleString()} — ${report.runsAnalyzed} run(s) across ${report.distinctModels} model(s)`;
+
+    const ageDays = (Date.now() - generated.getTime()) / 86400000;
+    const stalenessBanner = document.getElementById('nurseStalenessBanner');
+    if (ageDays > 9) {
+      stalenessBanner.style.display = 'block';
+      stalenessBanner.textContent = `⚠️ This report is ${Math.floor(ageDays)} days old - the weekly job may not be running. Check the admin process logs.`;
+    } else {
+      stalenessBanner.style.display = 'none';
+    }
+
+    const heldDiv = document.getElementById('nurseHeldSummary');
+    const held = report.currentlyHeldRuns || [];
+    if (held.length === 0) {
+      heldDiv.innerHTML = '<span class="meta">No runs currently held for review.</span>';
+    } else {
+      heldDiv.innerHTML = `<strong>${held.length} run(s) currently held for review:</strong><ul style="margin:6px 0 0 18px; font-size:13px;">` +
+        held.map(h => `<li>${escapeHtml(h.originalName || h.runId)} — ${escapeHtml(h.heldReason || '')}</li>`).join('') + '</ul>';
+    }
+
+    const cmBody = document.getElementById('nurseCrossModelBody');
+    const cmRows = report.crossModelPatterns || [];
+    document.getElementById('nurseCrossModelTable').style.display = cmRows.length ? 'table' : 'none';
+    document.getElementById('nurseCrossModelEmpty').style.display = cmRows.length ? 'none' : 'block';
+    cmBody.innerHTML = cmRows.map(r => `
+      <tr>
+        <td>${escapeHtml(r.ruleId)}</td>
+        <td>${escapeHtml(r.domainFile)}</td>
+        <td>${r.recurrenceCount}</td>
+        <td>${r.runIds.length} run(s)</td>
+        <td>${escapeHtml((r.categoriesSeen || []).join(', '))}</td>
+        <td style="max-width:360px;">${escapeHtml(r.sampleFinding)}</td>
+      </tr>
+    `).join('');
+
+    const wmBody = document.getElementById('nurseWithinModelBody');
+    const wmRows = report.withinModelPatterns || [];
+    document.getElementById('nurseWithinModelTable').style.display = wmRows.length ? 'table' : 'none';
+    document.getElementById('nurseWithinModelEmpty').style.display = wmRows.length ? 'none' : 'block';
+    wmBody.innerHTML = wmRows.map(r => `
+      <tr>
+        <td>${escapeHtml(r.modelKey)}</td>
+        <td>${escapeHtml(r.ruleId)}</td>
+        <td>${r.recurrenceCount}</td>
+        <td>${escapeHtml(r.runIds.join(', '))}</td>
+        <td>${escapeHtml((r.categoriesSeen || []).join(', '))}</td>
+        <td style="max-width:360px;">${escapeHtml(r.sampleFinding)}</td>
+      </tr>
+    `).join('');
   }
 
   // ── Promo Code page ─────────────────────────────────────────────────

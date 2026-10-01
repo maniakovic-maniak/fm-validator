@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
+const cron = require('node-cron');
 const { listOrders, getOrder, updateOrder } = require('../src/utils/order-store');
 const { listPromoCodes, createPromoCode } = require('../src/utils/promo-code-store');
 const { getProgress } = require('../src/utils/run-progress');
@@ -47,6 +48,24 @@ const longRunningDispatcher = new Agent({
 });
 
 const app = express();
+
+// Nurse pipeline, Reason step: weekly, on this process (internal ops, isolated from
+// the customer-facing cluster) - same scheduling mechanism (node-cron) as the main
+// process's retention sweep. Reads the full history of data/nurse-logs/*.json each
+// time (stateless recompute, not an incremental diff), regenerating the current
+// pattern picture. Runs once on startup too, same as the retention sweep, so a
+// restart doesn't leave the report stale until the next Sunday.
+const NURSE_REASON_SCRIPT = path.join(__dirname, '..', 'src', 'nurse_reason.py');
+function runNurseReasonJob() {
+  const result = spawnSync('python3', [NURSE_REASON_SCRIPT], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    console.error('   \u26a0\ufe0f  Nurse reason job failed:', result.stderr || result.error);
+  } else {
+    console.log('   \u2139\ufe0f  Nurse reason job complete:', (result.stdout || '').trim());
+  }
+}
+runNurseReasonJob();
+cron.schedule('0 0 * * 0', runNurseReasonJob);
 const PORT = process.env.ADMIN_PORT || 3001;
 // The main app's own port — this is a server-to-server call, not a
 // browser request, so it never carries an Origin header at all. That
@@ -289,6 +308,18 @@ app.get('/api/download-report/:orderId', async (req, res) => {
     res.send(buffer);
   } catch (err) {
     res.status(502).json({ error: 'Could not reach the validation pipeline.' });
+  }
+});
+
+app.get('/api/nurse-report/latest', (req, res) => {
+  try {
+    const p = path.join(__dirname, '..', 'data', 'nurse-reports', 'latest.json');
+    if (!require('fs').existsSync(p)) {
+      return res.status(404).json({ error: 'No nurse report has been generated yet.' });
+    }
+    res.json(JSON.parse(require('fs').readFileSync(p, 'utf8')));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
