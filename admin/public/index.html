@@ -152,6 +152,7 @@
         </thead>
         <tbody id="ordersBody"></tbody>
       </table>
+      <div id="ordersPager" style="display:none; margin-top: 12px;"></div>
 
       <div class="empty-state" id="emptyState" style="display:none">No orders yet.</div>
     </div>
@@ -213,6 +214,7 @@
         </thead>
         <tbody id="promoBody"></tbody>
       </table>
+      <div id="promoPager" style="display:none; margin-top: 12px;"></div>
 
       <div class="empty-state" id="promoEmptyState" style="display:none">No promo codes yet.</div>
     </div>
@@ -240,6 +242,7 @@
         </thead>
         <tbody id="partnerReviewBody"></tbody>
       </table>
+      <div id="partnerReviewPager" style="display:none; margin-top: 12px;"></div>
 
       <div class="empty-state" id="partnerReviewEmptyState" style="display:none">No Partner Review engagements yet.</div>
     </div>
@@ -262,6 +265,7 @@
     </thead>
     <tbody id="nurseCrossModelBody"></tbody>
   </table>
+  <div id="nurseCrossModelPager" style="display:none; margin-top: 12px;"></div>
   <div class="empty-state" id="nurseCrossModelEmpty" style="display:none">No cross-model patterns yet - either too few distinct models have been run, or nothing recurs across them.</div>
 
   <h2 style="font-size:15px; margin:28px 0 8px;">Recurring within the same model (repeated runs)</h2>
@@ -272,6 +276,7 @@
     </thead>
     <tbody id="nurseWithinModelBody"></tbody>
   </table>
+  <div id="nurseWithinModelPager" style="display:none; margin-top: 12px;"></div>
   <div class="empty-state" id="nurseWithinModelEmpty" style="display:none">No within-model patterns yet.</div>
 
   <p class="meta" style="margin-top:20px;">Only genuinely uncategorized-free findings are pattern-matched here (a_candidate, b1_strong, b1_weak) - the remainder of each run's uncertain items have no detector yet (a mix of B2/C1/C2/D) and aren't grouped until those exist.</p>
@@ -341,6 +346,52 @@
     return '$' + dollars.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // ── Shared table pagination (50 per page) ───────────────────────────
+  // paginate(pagerId, items) returns just the current page's slice and draws that table's
+  // Previous/Next controls into <div id=pagerId>. Each table keeps its own page number, and
+  // its own re-render function is registered below so the buttons can redraw it. A page that
+  // no longer exists (e.g. the list shrank) is clamped back to the last real page, and the
+  // controls hide themselves when everything fits on one page.
+  const TABLE_PAGE_SIZE = 50;
+  const pageState = {};
+  const pageRenderers = {};
+
+  function paginate(pagerId, items) {
+    const totalPages = Math.max(1, Math.ceil(items.length / TABLE_PAGE_SIZE));
+    let page = pageState[pagerId] || 1;
+    if (page > totalPages) page = totalPages;
+    if (page < 1) page = 1;
+    pageState[pagerId] = page;
+    const start = (page - 1) * TABLE_PAGE_SIZE;
+    const slice = items.slice(start, start + TABLE_PAGE_SIZE);
+    renderPager(pagerId, page, totalPages, start, slice.length, items.length);
+    return slice;
+  }
+
+  function renderPager(pagerId, page, totalPages, start, count, total) {
+    const el = document.getElementById(pagerId);
+    if (!el) return;
+    if (totalPages <= 1) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'block';
+    el.innerHTML =
+      `<button ${page <= 1 ? 'disabled' : ''} onclick="changePage('${pagerId}', -1)">Previous</button>` +
+      `<span class="meta" style="margin: 0 10px;">Showing ${start + 1}\u2013${start + count} of ${total} \u00b7 Page ${page} of ${totalPages}</span>` +
+      `<button ${page >= totalPages ? 'disabled' : ''} onclick="changePage('${pagerId}', 1)">Next</button>`;
+  }
+
+  function changePage(pagerId, delta) {
+    pageState[pagerId] = (pageState[pagerId] || 1) + delta;
+    if (pageRenderers[pagerId]) pageRenderers[pagerId]();
+  }
+
+  function resetPage(pagerId) { pageState[pagerId] = 1; }
+
+  pageRenderers.ordersPager = () => render();
+  pageRenderers.promoPager = () => renderPromoCodes();
+  pageRenderers.partnerReviewPager = () => renderPartnerReviewEngagements();
+  pageRenderers.nurseCrossModelPager = () => { if (nurseReportData) renderNurseReport(nurseReportData); };
+  pageRenderers.nurseWithinModelPager = () => { if (nurseReportData) renderNurseReport(nurseReportData); };
+
   function render() {
     const sorted = [...orders].sort((a, b) => {
       const av = a[sortKey], bv = b[sortKey];
@@ -349,7 +400,7 @@
       return 0;
     });
 
-    document.getElementById('ordersBody').innerHTML = sorted.map(o => `
+    document.getElementById('ordersBody').innerHTML = paginate('ordersPager', sorted).map(o => `
       <tr>
         <td>${o.orderId}</td>
         <td>${formatDate(o.createdAt)}</td>
@@ -631,6 +682,7 @@
     th.addEventListener('click', () => {
       const key = th.dataset.sort;
       if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = -1; }
+      resetPage('ordersPager');
       render();
     });
   });
@@ -698,7 +750,9 @@
       });
   }
 
+  let nurseReportData = null;
   function renderNurseReport(report) {
+    nurseReportData = report;
     const generated = new Date(report.generatedAt);
     document.getElementById('nurseReportMeta').textContent =
       `Generated ${generated.toLocaleString()} — ${report.runsAnalyzed} run(s) across ${report.distinctModels} model(s)`;
@@ -725,7 +779,7 @@
     const cmRows = report.crossModelPatterns || [];
     document.getElementById('nurseCrossModelTable').style.display = cmRows.length ? 'table' : 'none';
     document.getElementById('nurseCrossModelEmpty').style.display = cmRows.length ? 'none' : 'block';
-    cmBody.innerHTML = cmRows.map(r => `
+    cmBody.innerHTML = paginate('nurseCrossModelPager', cmRows).map(r => `
       <tr>
         <td>${escapeHtml(r.ruleId)}</td>
         <td>${escapeHtml(r.domainFile)}</td>
@@ -740,7 +794,7 @@
     const wmRows = report.withinModelPatterns || [];
     document.getElementById('nurseWithinModelTable').style.display = wmRows.length ? 'table' : 'none';
     document.getElementById('nurseWithinModelEmpty').style.display = wmRows.length ? 'none' : 'block';
-    wmBody.innerHTML = wmRows.map(r => `
+    wmBody.innerHTML = paginate('nurseWithinModelPager', wmRows).map(r => `
       <tr>
         <td>${escapeHtml(r.modelKey)}</td>
         <td>${escapeHtml(r.ruleId)}</td>
@@ -774,12 +828,13 @@
     if (promoCodes.length === 0) {
       document.getElementById('promoEmptyState').style.display = 'block';
       document.getElementById('promoTable').style.display = 'none';
+      document.getElementById('promoPager').style.display = 'none';
       return;
     }
     document.getElementById('promoEmptyState').style.display = 'none';
     document.getElementById('promoTable').style.display = 'table';
 
-    document.getElementById('promoBody').innerHTML = filtered.map(c => {
+    document.getElementById('promoBody').innerHTML = paginate('promoPager', filtered).map(c => {
       const expired = isPromoExpired(c);
       return `
         <tr>
@@ -806,7 +861,7 @@
     }
   }
 
-  document.getElementById('promoSearchInput').addEventListener('input', renderPromoCodes);
+  document.getElementById('promoSearchInput').addEventListener('input', () => { resetPage('promoPager'); renderPromoCodes(); });
 
   document.getElementById('promoCreateBtn').addEventListener('click', async () => {
     const code = document.getElementById('promo-code-input').value.trim();
@@ -875,12 +930,13 @@
     if (partnerReviewEngagements.length === 0) {
       document.getElementById('partnerReviewEmptyState').style.display = 'block';
       document.getElementById('partnerReviewTable').style.display = 'none';
+      document.getElementById('partnerReviewPager').style.display = 'none';
       return;
     }
     document.getElementById('partnerReviewEmptyState').style.display = 'none';
     document.getElementById('partnerReviewTable').style.display = 'table';
 
-    document.getElementById('partnerReviewBody').innerHTML = partnerReviewEngagements.map(e => {
+    document.getElementById('partnerReviewBody').innerHTML = paginate('partnerReviewPager', partnerReviewEngagements).map(e => {
       const statusLabel = PARTNER_REVIEW_STATUS_LABELS[e.status] || e.status;
       const statusClass = e.status === 'complete' ? 'promo-status-active'
         : e.status === 'failed' ? 'promo-status-expired'
