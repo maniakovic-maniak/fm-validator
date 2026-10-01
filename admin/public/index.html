@@ -286,7 +286,7 @@
   <table id="reviewQueueTable" style="display:none">
     <thead>
       <tr>
-        <th><input type="checkbox" id="reviewQueueSelectAll" onclick="toggleSelectAllReviewQueue(this)"></th>
+        <th><input type="checkbox" id="reviewQueueSelectAll" title="Select all on this page" onclick="toggleSelectAllReviewQueue(this)"></th>
         <th>Finding</th>
         <th>Order</th>
         <th>Source</th>
@@ -297,6 +297,11 @@
     </thead>
     <tbody id="reviewQueueBody"></tbody>
   </table>
+  <div id="reviewQueuePager" style="display:none; margin-top: 12px;">
+    <button id="reviewQueuePrev" onclick="changeReviewQueuePage(-1)">Previous</button>
+    <span id="reviewQueuePageInfo" class="meta" style="margin: 0 10px;"></span>
+    <button id="reviewQueueNext" onclick="changeReviewQueuePage(1)">Next</button>
+  </div>
   <div style="margin-top: 12px;">
     <button onclick="approveSelectedReviewQueue()">Approve selected</button>
     <button onclick="rejectSelectedReviewQueue()">Mark selected irrelevant</button>
@@ -970,6 +975,8 @@
 <script>
 let reviewQueueFindings = [];
 let reviewQueuePriorities = {};
+const REVIEW_QUEUE_PAGE_SIZE = 50;
+let reviewQueuePage = 1;
 
 function renderReviewQueue() {
   document.getElementById('reviewQueueCount').textContent =
@@ -978,12 +985,24 @@ function renderReviewQueue() {
   if (reviewQueueFindings.length === 0) {
     document.getElementById('reviewQueueEmptyState').style.display = 'block';
     document.getElementById('reviewQueueTable').style.display = 'none';
+    document.getElementById('reviewQueuePager').style.display = 'none';
     return;
   }
   document.getElementById('reviewQueueEmptyState').style.display = 'none';
   document.getElementById('reviewQueueTable').style.display = 'table';
 
-  document.getElementById('reviewQueueBody').innerHTML = reviewQueueFindings.map((f, i) => {
+  // Pagination: render only the current page. Each row's data-index stays the index into the
+  // FULL reviewQueueFindings array (page offset + position on the page), because
+  // submitReviewQueueBatch() maps the checked indexes straight back into that array.
+  // Selection is per page by design: only the current page's rows exist in the DOM.
+  const totalPages = Math.max(1, Math.ceil(reviewQueueFindings.length / REVIEW_QUEUE_PAGE_SIZE));
+  if (reviewQueuePage > totalPages) reviewQueuePage = totalPages;
+  if (reviewQueuePage < 1) reviewQueuePage = 1;
+  const pageStart = (reviewQueuePage - 1) * REVIEW_QUEUE_PAGE_SIZE;
+  const pageItems = reviewQueueFindings.slice(pageStart, pageStart + REVIEW_QUEUE_PAGE_SIZE);
+  document.getElementById('reviewQueueSelectAll').checked = false;
+  document.getElementById('reviewQueueBody').innerHTML = pageItems.map((f, j) => {
+    const i = pageStart + j;
     if (!(f.findingId in reviewQueuePriorities)) reviewQueuePriorities[f.findingId] = 'must_fix';
     const priority = reviewQueuePriorities[f.findingId];
     return `
@@ -1003,7 +1022,23 @@ function renderReviewQueue() {
       </tr>
     `;
   }).join('');
+  renderReviewQueuePager(totalPages, pageStart, pageItems.length);
   updateReviewQueueSelectedCount();
+}
+
+function renderReviewQueuePager(totalPages, pageStart, pageCount) {
+  const pager = document.getElementById('reviewQueuePager');
+  if (totalPages <= 1) { pager.style.display = 'none'; return; }
+  pager.style.display = 'block';
+  document.getElementById('reviewQueuePageInfo').textContent =
+    `Showing ${pageStart + 1}\u2013${pageStart + pageCount} of ${reviewQueueFindings.length} \u00b7 Page ${reviewQueuePage} of ${totalPages}`;
+  document.getElementById('reviewQueuePrev').disabled = reviewQueuePage <= 1;
+  document.getElementById('reviewQueueNext').disabled = reviewQueuePage >= totalPages;
+}
+
+function changeReviewQueuePage(delta) {
+  reviewQueuePage += delta;
+  renderReviewQueue();
 }
 
 function setReviewQueuePriority(findingId, value) {
