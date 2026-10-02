@@ -48,7 +48,7 @@ function noop(reason) {
   return { applied: false, reason, excludedIds: [], isExcluded: () => false, record: null };
 }
 
-function applyRuleExclusions({ checklist, t2Results, domainFile, modelText, originalName, log = console.log, config = null }) {
+function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile, modelText, originalName, log = console.log, config = null }) {
   let cfg = config;
   if (!cfg) {
     try { cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')); }
@@ -62,7 +62,13 @@ function applyRuleExclusions({ checklist, t2Results, domainFile, modelText, orig
   const g = cfg.guardrails || {};
   const active = [];
   for (const [tierName, t] of Object.entries(profile.tiers || {})) {
-    if (t && t.enabled) active.push({ tierName, families: t.families || [] });
+    if (t && t.enabled) active.push({
+      tierName, families: t.families || [],
+      // explicitScope: a tier that names rule ids directly (a human scope decision) instead of
+      // matching test families. allowFatal lets it exclude fatal-gate rules, which family tiers never may.
+      ruleIds: t.ruleIds || [], explicitScope: Array.isArray(t.ruleIds) && t.ruleIds.length > 0,
+      allowFatal: t.allowFatal === true, decision: t.decision || null
+    });
   }
   if (!active.length) return noop('no_tier_enabled');
 
@@ -87,6 +93,34 @@ function applyRuleExclusions({ checklist, t2Results, domainFile, modelText, orig
     const finding = res.map(r => String(r.condition || r.finding || r.label || '')).find(s => s.trim()) || '';
     if (g.requireAbsenceTypeFinding !== false && !isAbsenceFinding(finding)) { prot('substantive_finding'); continue; }
     excluded.push({ id: rule.id, test: rule.test, tier: hit.tierName, confidence: res[0].confidence ?? null, finding: finding.slice(0, 240) });
+  }
+
+  // Explicit scope decisions: named rule ids, any tier (Tier 1 included), any section. The decision
+  // is a human one about the model TYPE, so the absence-wording test does not apply. Two things still
+  // protect a rule: a Pass/Issue verdict (real evidence always wins over a scope decision), and a
+  // rule that was never returned (so a failed batch still shows as Not Run, not as out of scope).
+  const allResults = [...t1Results, ...t2Results];
+  const checklistById = new Map([...checklist.tier1, ...checklist.tier2].map(r => [r.id, r]));
+  const alreadyExcluded = new Set(excluded.map(e => e.id));
+  for (const a of active.filter(x => x.explicitScope)) {
+    for (const rid of a.ruleIds) {
+      if (alreadyExcluded.has(rid)) continue;
+      const rule = checklistById.get(rid);
+      const prot = reason => protectedRules.push({ id: rid, test: rule ? (rule.test || rule.label || null) : null, tier: a.tierName, reason });
+      if (!rule) { prot('unknown_rule_id'); continue; }
+      const isFatal = rule.severity === 'fatal' || (g.neverExcludeSourceSectionContains || []).some(s => String(rule.source_section || '').toLowerCase().includes(s));
+      if (isFatal && !a.allowFatal) { prot('fatal_severity'); continue; }
+      const res = resultsForRule(rid, allResults);
+      if (!res.length) { prot('not_returned'); continue; }
+      if (g.neverExcludeWhenConcluded !== false && res.some(r => r.status !== 'uncertain')) { prot('concluded_verdict'); continue; }
+      excluded.push({
+        id: rid, test: rule.test || null, label: rule.label || null, tier: a.tierName,
+        severity: rule.severity || null, decision: a.decision,
+        confidence: res[0].confidence ?? null,
+        finding: String(res[0].condition || res[0].finding || res[0].reason || '').slice(0, 240)
+      });
+      alreadyExcluded.add(rid);
+    }
   }
 
   const excludedIds = excluded.map(e => e.id);
@@ -117,6 +151,8 @@ function applyRuleExclusions({ checklist, t2Results, domainFile, modelText, orig
   } catch (e) { log(`   \u26a0\ufe0f  Could not store rule-exclusion record: ${e.message}`); }
 
   log(`   \u2139\ufe0f  Rule scope (${profile.id}): ${excluded.length} of ${planned} planned procedures excluded as not applicable to this model type (server log and stored record only) - ${planned - excluded.length} remain`);
+  const explicitFatal = excluded.filter(e => e.decision && e.severity === 'fatal');
+  if (explicitFatal.length) log(`      Of which ${explicitFatal.length} fatal-gate rule(s) excluded by explicit scope decision: ${explicitFatal.map(e => e.id).join(', ')}`);
   const pr = record.protectedByReason;
   if (Object.keys(pr).length) log(`      Kept in scope despite matching a listed family: ${Object.entries(pr).map(([k, v]) => `${v} ${k}`).join(', ')}`);
   if (share > (g.maxExcludedShare ?? 0.5)) {

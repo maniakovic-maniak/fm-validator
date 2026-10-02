@@ -14,6 +14,12 @@
       "appliesToDomainSkill": "skill-infrastructure.md",
       "matchAny": ["riio", "system operator", "transmission system", "network licence", "price control", "regulated network", "electricity transmission", "gas transmission", "distribution network"],
       "tiers": {
+        "R_scope_decision_regulated_network": {
+          "enabled": true,
+          "allowFatal": true,
+          "decision": "Scope decision recorded 2026-10-03 at Mik Riazanov's instruction, after reviewing Fm-00032 and Fm-00033: these generic project-finance gates test structures (equity ownership split, retained-earnings roll-forward, cash waterfall and cash balance, capitalised vs cash interest, distributions vs cash, actual/forecast period flags) that a regulated-network allowed-revenue model does not contain. Both runs reported them absent. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
+          "ruleIds": ["T1-008", "T1-012", "T2-S5-003", "T2-S6-005", "T2-S6-008", "T2-S6-010", "T2-S6-011", "T2-S10-006", "T2-S10-008", "T2-S10-016"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]

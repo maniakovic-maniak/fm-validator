@@ -983,6 +983,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       try {
         return applyRuleExclusions({
           checklist: require('./config/checklist.json'),
+          t1Results,
           t2Results,
           domainFile: path.basename(String(domain.file || '')),
           modelText: `${modelType} ${modelSummary.industry || ''} ${modelSummary.model_purpose || ''}`,
