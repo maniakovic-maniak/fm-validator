@@ -729,9 +729,15 @@
   // Restore whichever tab was last active, rather than always defaulting
   // to FM Submission on every page load/refresh.
   const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
-  if (savedTab && document.querySelector(`.sidebar-item[data-page="${savedTab}"]`)) {
-    switchToTab(savedTab);
-  }
+  // RESTORE_AFTER_LOAD: run once the whole page has parsed. This file has two <script> blocks, and
+  // the restored tab's loader (loadReviewQueue, for one) is defined in the SECOND. Calling it from
+  // here, mid-first-block, threw a ReferenceError that aborted the rest of this block and left
+  // every later let/const (promoCodes, partnerReviewEngagements, nurseReportData...) uninitialised.
+  document.addEventListener('DOMContentLoaded', () => {
+    if (savedTab && document.querySelector(`.sidebar-item[data-page="${savedTab}"]`)) {
+      switchToTab(savedTab);
+    }
+  });
 
   // ── Improvement Signals (nurse report) page ─────────────────────────
   function escapeHtml(s) {

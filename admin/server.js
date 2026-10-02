@@ -317,7 +317,14 @@ app.get('/api/nurse-report/latest', (req, res) => {
     if (!require('fs').existsSync(p)) {
       return res.status(404).json({ error: 'No nurse report has been generated yet.' });
     }
-    res.json(JSON.parse(require('fs').readFileSync(p, 'utf8')));
+    const report = JSON.parse(require('fs').readFileSync(p, 'utf8'));
+    // "Currently held" is live state, so it is read from the order records (the same field the
+    // Send button uses) rather than from the weekly report, which would keep listing a run as held
+    // after someone released it. Everything else in the report stays as the weekly job wrote it.
+    report.currentlyHeldRuns = listOrders()
+      .filter(o => o.held)
+      .map(o => ({ runId: o.orderId, originalName: o.originalName, heldReason: o.heldReason }));
+    res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
