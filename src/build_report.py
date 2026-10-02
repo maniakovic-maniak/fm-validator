@@ -1709,6 +1709,15 @@ def build_report(data_path, output_path):
 
     def _rmatch(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
 
+    def _t1_missing_reason(unc_results, tier):
+        # Tier 1 rules are deterministic code checks. When one cannot conclude it records why (for example
+        # "no flag row was found") and there is no Issue Log finding to point at, so show that reason
+        # rather than "see related finding". Tier 2 keeps the generic text: it does have a finding.
+        if tier != 'Tier 1': return None
+        for r in unc_results:
+            if r.get('reason'): return str(r['reason'])
+        return None
+
     m_rows=[]; n_pass=n_issue=n_unc=n_np=0
     for rule in checklist_rules:
         rid=rule.get('id',''); tier=rule.get('_tier','Tier 2')
@@ -1738,7 +1747,7 @@ def build_report(data_path, output_path):
         refs=[f.get('id','') for f in rfnd]
         ref_txt=', '.join(refs[:4])+(f' +{len(refs)-4} more' if len(refs)>4 else '') if refs else '—'
         if status=='Not Performed': missing=_rule_to_batch_failure_reason.get(rid, 'Rule not returned by the review — re-run validation or test manually')
-        elif status=='Uncertain': missing='Evidence insufficient for a conclusive test — see related finding'
+        elif status=='Uncertain': missing=_t1_missing_reason(unc, tier) or 'Evidence insufficient for a conclusive test — see related finding'
         else: missing='—'
         retest='Yes' if (issues or any(f.get('needs_retest') for f in rfnd)) else 'No'
         m_rows.append(dict(rid=rid, area=rule.get('source_section','') or rule.get('section',''),

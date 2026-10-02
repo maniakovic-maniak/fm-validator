@@ -234,6 +234,8 @@ function loadDomainSkill(modelType) {
     const filepath = path.join(skillDir, filename);
     if (fs.existsSync(filepath)) {
       let content = fs.readFileSync(filepath, 'utf8');
+      const layers = [];          // extra skill files appended below, reported to the caller
+      const missingLayers = [];   // a layer that was expected but whose file does not exist
 
       // C3 — skill-creator's convention: keep the main skill file lean
       // (actionable guidance, judgment calls) and push large reference-
@@ -248,6 +250,7 @@ function loadDomainSkill(modelType) {
         if (fs.existsSync(refFilepath)) {
           const refContent = fs.readFileSync(refFilepath, 'utf8');
           content += `\n\n---\n\n${refContent}`;
+          layers.push(refFilename);
         }
       }
 
@@ -263,12 +266,17 @@ function loadDomainSkill(modelType) {
         const riioFilepath = path.join(skillDir, 'skill-riio-pcfm.md');
         if (fs.existsSync(riioFilepath)) {
           content += `\n\n---\n\n${fs.readFileSync(riioFilepath, 'utf8')}`;
+          layers.push('skill-riio-pcfm.md');
+        } else {
+          missingLayers.push('skill-riio-pcfm.md');
         }
       }
 
       return {
         content,
-        file: filename
+        file: filename,
+        layers,
+        missingLayers
       };
     }
   }

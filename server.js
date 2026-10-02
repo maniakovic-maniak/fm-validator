@@ -846,6 +846,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     const domain = loadDomainSkill(modelType);
     console.log(`   Domain skill loaded: ${domain.file}`);
+    if (domain.layers && domain.layers.length) console.log(`   Skill layers added on top: ${domain.layers.join(', ')}`);
+    if (domain.missingLayers && domain.missingLayers.length) console.log(`   \u26a0\ufe0f  Skill layer expected but its file was not found: ${domain.missingLayers.join(', ')}`);
 
     // Opportunistic, non-blocking: if this model type has no dedicated
     // skill yet, queue a draft for future review. Never awaited.
@@ -3136,7 +3138,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // Per-rule outcomes for the Validation Matrix tab (pass + fail + uncertain)
     const ruleResults = [...t1Results, ...t2Results].filter(r => !ruleExclusions.isExcluded(r.id)).map(r => ({
       id: r.id, status: r.status || 'uncertain',
-      confidence: r.confidence ?? null, needs_retest: r.needs_retest ?? false
+      confidence: r.confidence ?? null, needs_retest: r.needs_retest ?? false,
+      // Tier 1 checks are deterministic: when one cannot conclude it records why. Passed through so the
+      // Validation Matrix can show it (Tier 2 findings already have an Issue Log entry to point at).
+      reason: (String(r.id || '').startsWith('T1-') && r.reason) ? String(r.reason) : null
     }));
 
 
