@@ -568,7 +568,7 @@ function resolveDeepAccountingSheets(sheetNames) {
   return { resolvedMap, unresolvedCategories };
 }
 
-async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null } = {}) {
+async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null, outputOverwriteScan = null } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
   // itself failed to complete for this run. A flat, mining-style
@@ -704,6 +704,12 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       recalcNote = `A genuine, independent full-workbook recalculation did not complete for this session (${recalcCheckResult.status}${recalcCheckResult.error ? ': ' + recalcCheckResult.error : ''}). Every figure you review rests on this workbook's own cached, displayed values, not an independently recalculated result - do not treat the mere presence of a plausible-looking cached value as confirmation it is correct.`;
     }
     systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\nRecalculation status for this session: ' + recalcNote;
+  }
+
+  // Deterministic output-sheet scan (facts, computed by code over every cell): lets rules about outputs
+  // being overwritten be concluded from complete evidence instead of from a partial read. Not a verdict.
+  if (outputOverwriteScan && outputOverwriteScan.note) {
+    systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\nDeterministic output-sheet scan for this session: ' + outputOverwriteScan.note;
   }
 
   // FIX (Phase 2.2): full-parse route — builds a single unified raw-

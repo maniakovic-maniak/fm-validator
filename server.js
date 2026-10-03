@@ -13,6 +13,7 @@ const { runRetentionSweep }          = require('./src/utils/cleanup');
 const { startRunLog }                = require('./src/utils/run-logger');
 const { applyRuleExclusions }       = require('./src/utils/rule-exclusions');
 const { computeHoldStatus }         = require('./src/utils/compute-hold');
+const { scanOutputSheets }          = require('./src/utils/output-overwrite-scan');
 const { spawnSync: _nurseSpawnSync } = require('child_process');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
 const { setProgress, clearProgress, getProgress } = require('./src/utils/run-progress');
@@ -958,7 +959,14 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const t1Results  = runTier1(parsed, { recalcCheckResult });
     const t1Failures = t1Results.filter(r => r.status === 'fail');
 
-    const t2Results  = await runTier2(parsed, { domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, recalcCheckResult });
+    // Deterministic evidence for "outputs not manually overwritten" (T2-S13-008): facts only, passed to the
+    // reviewer, never a verdict. Any failure is non-fatal and simply means the reviewer gets no extra evidence.
+    const outputOverwriteScan = (() => {
+      try { return scanOutputSheets(parsed); }
+      catch (e) { console.error('   \u26a0\ufe0f  Output-sheet scan failed (non-fatal):', e.message); return null; }
+    })();
+    if (outputOverwriteScan) console.log(`   Output-sheet scan: ${outputOverwriteScan.summaryLine}`);
+    const t2Results  = await runTier2(parsed, { domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, recalcCheckResult, outputOverwriteScan });
     const t2FailuresRaw = t2Results.filter(r => r.status !== 'pass');
     // FIX (I-11): found via an independent review confirming at least
     // 3 Tier 2 findings explicitly self-identify as duplicates of
