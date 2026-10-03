@@ -33,3 +33,9 @@ run-engagement.js
 src/engagement-store.js
 src/orchestrate.js
 ecosystem.config.js
+/data/
+/orders/
+/classifications/
+/demo-requests/
+/promo-codes/
+/promo-usage/
