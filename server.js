@@ -493,7 +493,7 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
       fileSizeBytes,
       transactionId: chargeResult.transactionId,
       ip: clientIp,
-      promoCode: discount ? promoCode.trim() : null,
+      promoCode: discount ? String(promoCode).trim() : null,
     });
   } catch (err) {
     console.error('   \u26a0\ufe0f  Order creation failed after successful payment:', err.message);
