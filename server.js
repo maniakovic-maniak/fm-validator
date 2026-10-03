@@ -261,15 +261,6 @@ app.get('/',              (req, res) => res.sendFile(path.join(__dirname, 'publi
 app.get('/fm-validator',  (req, res) => res.sendFile(path.join(__dirname, 'public', 'fm-validator.html')));
 app.get('/api/health',    (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-app.get('/api/checklists', (req, res) => {
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'checklists', 'config.json'), 'utf-8'));
-    res.json({ status: 'success', data: config.availableChecklists || [] });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: 'Failed to load checklists' });
-  }
-});
-
 // ── Main validation endpoint ───────────────────────────────────────────────────
 // FIX: pricing-per-F-score-band is a business decision, not something
 // inferrable from the UI mockup alone — isolated here as a single named
