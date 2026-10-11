@@ -222,7 +222,7 @@ function normalizeDomainLabel(modelType) {
   return modelType; // no known alias — leave as-is; a genuinely new domain still works correctly, it just won't be normalized to anything yet
 }
 
-function loadDomainSkill(modelType) {
+function loadDomainSkill(modelType, industry) {
   const normalized = normalizeDomainLabel(modelType);
   const skillDir = path.join(__dirname, '../config');
   const candidates = [
@@ -262,7 +262,7 @@ function loadDomainSkill(modelType) {
       // model gets both the generic infrastructure knowledge and the
       // regulatory-specific mechanics together.
       const riioRe = /\b(riio|pcfm|ofgem|gt1|gt2|gt3|et1|et2|et3|gd1|gd2|gd3|ed1|ed2|ed3|gas transmission|electricity transmission|gas distribution|electricity distribution|energy network regulation|network price control)\b/i;
-      if (riioRe.test(String(modelType || ''))) {
+      if (riioRe.test(`${modelType || ''} ${industry || ''}`) /* RIIO_INDUSTRY_FIX */) {
         const riioFilepath = path.join(skillDir, 'skill-riio-pcfm.md');
         if (fs.existsSync(riioFilepath)) {
           content += `\n\n---\n\n${fs.readFileSync(riioFilepath, 'utf8')}`;

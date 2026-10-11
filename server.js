@@ -836,7 +836,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const modelType = modelSummary.model_type || 'generic';
     console.log(`   Model type: ${modelType} — ${modelSummary.industry || 'unknown'}`);
 
-    const domain = loadDomainSkill(modelType);
+    const domain = loadDomainSkill(modelType, modelSummary.industry); // RIIO_INDUSTRY_FIX: modelType is only the short domain; the sub-domain wording lives in industry
     console.log(`   Domain skill loaded: ${domain.file}`);
     if (domain.layers && domain.layers.length) console.log(`   Skill layers added on top: ${domain.layers.join(', ')}`);
     if (domain.missingLayers && domain.missingLayers.length) console.log(`   \u26a0\ufe0f  Skill layer expected but its file was not found: ${domain.missingLayers.join(', ')}`);
