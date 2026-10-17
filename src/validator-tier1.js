@@ -269,7 +269,11 @@ function runTier1(parsed, opts = {}) {
         ws.eachRow({ includeEmpty: false }, (row) => {
           const firstCell = row.getCell(1);
           const label = firstCell.text ? firstCell.text.toLowerCase() : '';
-          if (keyword && !label.includes(keyword)) return;
+          // keyword_aliases: other names for the same line; exclude_keywords: rows that contain the keyword but are
+          // a different thing (e.g. "Net cash flow", "Depreciation on PP&E"), whose negative values are normal.
+          const kwHit = !keyword || label.includes(keyword) || (rule.keyword_aliases || []).some(a => label.includes(String(a).toLowerCase()));
+          if (!kwHit) return;
+          if ((rule.exclude_keywords || []).some(x => label.includes(String(x).toLowerCase()))) return;
           anyRowMatchedKeyword = true;
           row.eachCell({ includeEmpty: false }, (cell, colNum) => {
             if (colNum === 1) return;
@@ -535,16 +539,9 @@ function runTier1(parsed, opts = {}) {
     }
 
     // ── ICAEW Financial Modelling Code additions ────────────────────────────
-    // Five of the six new handlers — T1-017 (workbook_calc_settings_check)
-    // is deliberately NOT wired here. Confirmed via direct testing: exceljs
-    // neither reads nor writes calcPr's iterate/fullPrecision attributes
-    // correctly (a round-trip test showed both silently discarded), so any
-    // handler for it would always report a false "pass" regardless of the
-    // workbook's real settings. Leaving it unwired means the rule correctly
-    // shows as "Not Run" in the Validation Matrix — honest about not having
-    // been checked — rather than a confident, wrong "pass". A real fix
-    // needs reading xl/workbook.xml directly from the raw zip, bypassing
-    // exceljs for this one property specifically.
+    // T1-017 (workbook_calc_settings_check) reads parsed._calcSettings, which the parser takes straight from
+    // xl/workbook.xml. exceljs itself neither reads nor writes calcPr's iterate/fullPrecision attributes
+    // (confirmed: a round trip silently discards both), so the exceljs object cannot answer this rule.
     if (rule.type === 'hidden_rows_columns_present') {
       const r = icaewChecks.hidden_rows_columns_present(parsed._raw, rule);
       results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
@@ -562,6 +559,11 @@ function runTier1(parsed, opts = {}) {
 
     if (rule.type === 'array_formula_check') {
       const r = icaewChecks.array_formula_check(parsed._raw, rule);
+      results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
+    }
+
+    if (rule.type === 'workbook_calc_settings_check') {
+      const r = icaewChecks.workbook_calc_settings_check(parsed._raw, rule, parsed._calcSettings);
       results.push({ id: rule.id, label: rule.label, severity: rule.severity, status: r.status, fixable: false, fix_instruction: r.fixInstruction, reason: r.message });
     }
 
@@ -586,7 +588,8 @@ function runTier1(parsed, opts = {}) {
     workbook_opens_clean:       'File integrity issue',
     no_circular_references:     'Circular reference',
     actuals_forecast_separated: 'Period flag misconfiguration',
-    actuals_forecast_flags_exclusive: 'Period flag misconfiguration'
+    actuals_forecast_flags_exclusive: 'Period flag misconfiguration',
+    workbook_calc_settings_check: 'Workbook calculation setting'
   };
   const typeById = Object.fromEntries(checklist.tier1.map(r => [r.id, r.type]));
   for (const r of results) {

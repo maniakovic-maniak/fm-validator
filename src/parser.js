@@ -285,8 +285,35 @@ async function parseWorkbook(filePath) {
     sheets,
     _raw: workbook,
     _type: 'exceljs',
-    _filePath: filePath
+    _filePath: filePath,
+    _calcSettings: await readCalcSettings(repairedPath)
   };
+}
+
+// Reads <calcPr> from xl/workbook.xml directly. exceljs drops the iterate and fullPrecision attributes, so Tier 1
+// rule T1-017 (iterative calculation / "precision as displayed") cannot be answered from the exceljs object.
+// Returns { readOk, iterate, precisionAsDisplayed, ... }; readOk:false when the file cannot be inspected.
+async function readCalcSettings(filePath) {
+  try {
+    const JSZip = require('jszip');
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+    const entry = zip.file('xl/workbook.xml');
+    if (!entry) return { readOk: false };
+    const xml = await entry.async('string');
+    const tag = (xml.match(/<calcPr\b[^>]*>/i) || [null])[0];
+    if (!tag) return { readOk: true, iterate: false, precisionAsDisplayed: false, calcPrPresent: false };
+    const attr = n => { const m = tag.match(new RegExp('\\b' + n + '="([^"]*)"')); return m ? m[1] : null; };
+    const on = v => v === '1' || v === 'true';
+    const off = v => v === '0' || v === 'false';
+    return {
+      readOk: true, calcPrPresent: true,
+      iterate: on(attr('iterate')),
+      precisionAsDisplayed: off(attr('fullPrecision')),
+      calcMode: attr('calcMode'), iterateCount: attr('iterateCount')
+    };
+  } catch (_) {
+    return { readOk: false };
+  }
 }
 
 // CLI pipeline — downloads from Drive, then parses.

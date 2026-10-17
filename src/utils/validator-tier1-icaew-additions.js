@@ -193,20 +193,20 @@ function checkNoArrayFormulas(workbook, rule) {
 // ICAEW: confirm iterative calculation is intentional/documented, and
 // "Precision as displayed" should be off — it silently rewrites values.
 // ---------------------------------------------------------------------
-function checkCalcSettingsAppropriate(workbook, rule) {
+function checkCalcSettingsAppropriate(workbook, rule, calcSettings) {
+  // calcSettings is read by the parser straight from xl/workbook.xml (<calcPr iterate=".." fullPrecision="..">),
+  // because exceljs neither reads nor writes those attributes (confirmed: a round trip silently discards both).
+  // Without it the rule cannot be answered, and says so rather than guessing a pass.
+  if (!calcSettings || calcSettings.readOk === false) {
+    return {
+      ruleId: rule.id, label: rule.label, severity: rule.severity, status: 'uncertain',
+      message: 'The workbook calculation settings could not be read from the file, so iterative calculation and "precision as displayed" were not checked.',
+      findings: [], fixInstruction: rule.fix_instruction,
+    };
+  }
   const findings = [];
 
-  // ExcelJS surfaces workbook calc properties via workbook.calcProperties
-  // (fullCalcOnLoad, calcMode, etc.) — iterative settings and "precision
-  // as displayed" are stored in the workbook's calcPr XML element, which
-  // ExcelJS may expose as workbook.properties.calcProperties or require
-  // reading workbook.model.calcProperties depending on version. Adjust
-  // the property path below to whatever your installed ExcelJS version
-  // actually exposes — verify with a quick console.log(workbook.model)
-  // against a real file before wiring this in.
-  const calcProps = workbook.calcProperties || workbook.model?.calcProperties || {};
-
-  if (calcProps.iterate === true || calcProps.iterate === '1') {
+  if (calcSettings.iterate === true) {
     findings.push({
       sheet: null,
       location: 'Workbook calculation settings',
@@ -214,17 +214,17 @@ function checkCalcSettingsAppropriate(workbook, rule) {
     });
   }
 
-  if (calcProps.fullPrecision === false || calcProps.precisionAsDisplayed === true) {
+  if (calcSettings.precisionAsDisplayed === true) {
     findings.push({
       sheet: null,
       location: 'Workbook calculation settings',
-      detail: '"Precision as displayed" appears to be enabled. This silently rewrites underlying values to match rounded display and can corrupt historical actuals — should be off.',
+      detail: '"Precision as displayed" is enabled. This silently rewrites underlying values to match rounded display and can corrupt historical actuals - should be off.',
     });
   }
 
   return buildResult(rule, findings, {
-    passMessage: 'Iterative calculation and precision-as-displayed settings are off or not flagged as risky.',
-    failMessage: `${findings.length} workbook calculation setting(s) require review.`,
+    passMessage: 'Iterative calculation and precision-as-displayed are both off.',
+    failMessage: findings.map(f => f.detail).join(' '),
   });
 }
 

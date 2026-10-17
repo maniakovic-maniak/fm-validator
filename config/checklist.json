@@ -141,8 +141,10 @@
       "test": "no_negative_ppe",
       "severity": "high",
       "type": "no_negative_values",
-      "sheet": "AFS",
+      "sheet": ["AFS", "Balance Sheet", "Statement of Financial Position", "SOFP", "Financial Statements", "Cons", "BS"],
       "keyword": "PP&E",
+      "keyword_aliases": ["property, plant", "fixed assets", "ppe"],
+      "exclude_keywords": ["depreciation", "amortisation", "amortization", "addition", "disposal", "capex", "capital expenditure", "impairment", "movement", "charge", "expense", "accumulated", "proceeds", "purchase", "revaluation"],
       "fixable": false,
       "fix_instruction": "Gross PP&E cannot be negative. Review the asset roll-forward on the AFS sheet."
     },
@@ -167,8 +169,9 @@
       "test": "no_negative_cash",
       "severity": "fatal",
       "type": "no_negative_values",
-      "sheet": "AFS",
+      "sheet": ["AFS", "Balance Sheet", "Statement of Financial Position", "SOFP", "Financial Statements", "Cons", "BS"],
       "keyword": "Cash",
+      "exclude_keywords": ["flow", "movement", "net increase", "net decrease", "change in", "interest", "tax", "paid", "received", "conversion", "sweep", "available for", "dividend", "distribution", "from operat", "from invest", "from financ", "generated", "used in"],
       "fixable": false,
       "fix_instruction": "Unexplained negative cash balance found. Any funding gap must be explicitly flagged and sized. Review funding waterfall and debt availability."
     },
