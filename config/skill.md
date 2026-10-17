@@ -136,6 +136,38 @@ missing model-wide.
 
 ---
 
+## Step 5b: Absence policy — "not present" versus "not visible"
+
+This applies to every test below. Read `dataCoverage` in the payload first.
+
+- `dataCoverage: "complete_workbook"` — you were given the whole workbook
+  (every sheet, every formula). If the thing a test requires (a schedule,
+  roll-forward, reconciliation, register, piece of documentation, control)
+  is genuinely not there after you have looked for it under other labels
+  and on other sheets (see the relabelled-concept note above), that
+  absence IS the finding. Return `fail`, open the finding with "Not present
+  in the workbook:", say what is missing and which sheets you searched, and
+  use confidence 70-85. Do not return `uncertain`: uncertain means "I could
+  not see enough to decide", and here you could see everything. This
+  overrides every "if not visible → uncertain" line in the test
+  instructions below.
+- `dataCoverage: "partial_view"` — you were given only part of the
+  workbook. Keep the behaviour described above: "not visible in the
+  reviewed subset", `uncertain`.
+
+Three cases stay `uncertain` under either coverage, and the finding should
+say which one applies:
+1. The test needs records that are not part of a workbook at all (source
+   documents, ledgers, contracts, market data) and nothing in the workbook
+   gives you something to compare with.
+2. The test needs the model to be changed and recalculated.
+3. The structure the test is about plainly does not belong in this kind of
+   model. Open the finding with "Not applicable to this model type:" and
+   give the reason. Never answer `pass` for a procedure that does not apply,
+   because a pass tells the reader something was checked and found correct.
+
+---
+
 ## Step 6: Materiality assessment
 
 Classify every finding by priority level.
@@ -345,9 +377,10 @@ finding in its own right.
   inspection is required — the same as before.
 
 ### test: no_duplicated_logic
-Genuinely stays manual_only, but for an architectural reason worth
-being explicit about — not because this was left unbuilt. This tool
-runs in Mode A: Tier 2 reasons over extracted values and labels, with
+Formula-text duplication cannot be seen from values, so a deterministic
+Tier 0 check does the looking and its result is in the payload as
+`duplicateLogicSummary`. For an architectural reason worth being explicit
+about: this tool runs in Mode A: Tier 2 reasons over extracted values and labels, with
 no access to formula text at all for the overwhelming majority of
 cells (a small subset of priority rows now carry a `_formulaSamples`
 field — see the Mode A+ section above — but that spot-check coverage
@@ -370,11 +403,16 @@ then linked to the financial statements is correct, expected
 structure — not every line item needs to independently reach a
 financial statement, only the aggregate does, and a bare reference
 (a link) is never itself "duplicated logic."
-- Return uncertain with confidence 30
-- State: "Duplicate calculation detection requires formula text
-  inspection, which this review does not have access to (Mode A). See
-  the Tier 0 duplicate-calculation-logic findings for what full
-  formula-text analysis actually found."
+Use `duplicateLogicSummary` from the payload:
+- `checked: true` and `findingCount: 0` → pass, confidence 80. State that
+  the full-formula scan found no aggregate rebuilt independently on more
+  than one sheet.
+- `checked: true` and `findingCount` > 0 → fail, confidence 75. Name the
+  function and sheets from `findings` (the same items appear as
+  T0-DUPCALC-* in the Issue Log) and give the recommendation to compute
+  once and link.
+- `checked: false` or the field is absent → uncertain, confidence 30, and
+  say the formula scan did not run for this workbook.
 
 ### test: no_mixed_periodicity
 A single sheet should not mix monthly, quarterly, and annual
@@ -412,10 +450,17 @@ All time-series sheets should reference a single master timeline.
 - If headers differ between sheets → uncertain
 
 ### test: no_hidden_sheets
-Hidden sheets cannot be detected from summary data.
-Always return uncertain with confidence 30.
-State: "Cannot detect hidden or very hidden sheets from summary data.
-Requires direct workbook inspection in Excel."
+Use `sheetFacts` from the payload: one entry per sheet with its `state`
+('visible', 'hidden' or 'veryHidden').
+- Every sheet 'visible' → pass, confidence 95. Say how many sheets were
+  checked.
+- Any 'hidden' or 'veryHidden' → fail, confidence 90. Name each such sheet
+  and its state. A 'veryHidden' sheet cannot be unhidden from Excel's normal
+  menu, so treat it as the more serious case. If the payload shows that
+  results or key outputs reference the hidden sheet, say so; if you cannot
+  tell, say that instead of guessing.
+- `sheetFacts` absent → uncertain, confidence 30, and say sheet visibility
+  was not provided.
 
 ### test: model_extendable
 Confirm model can be extended without formula rewrites.
@@ -1251,8 +1296,18 @@ use VBA" was previously something you had no reliable way to know).
     scan versus what is documented.
 
 ### test: protection_allows_review
-This test requires workbook access — cannot be fully verified from cell values alone.
-Return uncertain: "Sheet protection status requires direct workbook inspection."
+Use `sheetFacts` from the payload (`sheetProtected`, `passwordProtected`
+per sheet, plus `state`).
+- No sheet protected and none hidden → pass, confidence 90.
+- Protected sheets with no password → pass, confidence 80. Protection
+  without a password does not stop a reviewer reading the logic; name the
+  protected sheets.
+- Any sheet password-protected, or any 'veryHidden' sheet → fail,
+  confidence 80. Name the sheets: a password the reviewer does not hold
+  means the logic on that sheet could not be independently changed or
+  tested, which limits reliance. Cross-check `riskSummary`/Tier 0 findings
+  on hidden formulas if present.
+- `sheetFacts` absent → uncertain, confidence 30.
 
 ### test: named_ranges_current
 Check `namedRangeSummary` in the payload first — Wave 1's named-range

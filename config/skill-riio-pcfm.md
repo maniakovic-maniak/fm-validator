@@ -127,6 +127,16 @@ Determinations, 2025).
 profile across the entire RAV in a genuine RIIO-3 GD or GT model would not match Ofgem's own stated
 approach for new RAV additions — this is a real, checkable divergence, not stylistic.
 
+**For the generic fixed-asset tests.** In a RIIO or PCFM model the RAV roll-forward is the fixed-asset
+schedule, and the RAV depreciation line is the depreciation and amortisation schedule. When
+`fixed_asset_rollforward` or `da_schedule_reconciliation` is being tested, do not look for a
+PP&E- or NBV-labelled schedule and conclude it is missing. Test the RAV roll-forward instead:
+opening RAV + additions − depreciation (± indexation) = closing RAV, each year's closing equal to the
+next year's opening, and the depreciation figure the same one that feeds the revenue build-up. If it
+does, pass; if the chain breaks or the depreciation line is not the one used downstream, fail. Name
+the rows you followed. A statutory-accounts fixed-asset schedule may or may not also exist; its absence
+is not a finding for these two tests.
+
 ## 4. Tax pools and capital allowances
 
 RIIO/PCFM tax modelling is built on real UK capital-allowances mechanics, not a simplified
