@@ -13,6 +13,8 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.formatting.rule import CellIsRule, FormulaRule, DataBarRule
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from completion import compute_completion  # ONE_COMPLETION: shared with server.js via src/utils/rule-scope.js
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 DARK_BLUE   = '1F4E79'; MID_BLUE   = '2E75B6'; LIGHT_BLUE  = 'D6E4F0'; PALE_BLUE = 'EBF3FA'
@@ -347,14 +349,11 @@ def build_report(data_path, output_path):
 
     # Audit coverage counts — feeds the dashboard completion breakdown (V11 1.3)
     def _rmatch0(rid,xid): return xid==rid or (xid or '').startswith(rid+'-')
-    cov_perf=cov_pass=cov_issue=cov_unc=cov_np=0
-    for _rule in checklist_rules:
-        _rres=[r for r in ruleResults if _rmatch0(_rule.get('id',''),r.get('id',''))]
-        if not _rres: cov_np+=1; continue
-        cov_perf+=1
-        if any(r.get('status') not in ('pass','uncertain') for r in _rres): cov_issue+=1
-        elif any(r.get('status')=='uncertain' for r in _rres): cov_unc+=1
-        else: cov_pass+=1
+    # ONE_COMPLETION: every completion figure in this report comes from src/completion.py, the twin of
+    # computeCompletion() in src/utils/rule-scope.js that server.js uses, so no two places can disagree.
+    _cov = compute_completion(checklist_rules, ruleResults)['counts']
+    cov_pass=_cov['pass']; cov_issue=_cov['issue']; cov_unc=_cov['uncertain']; cov_np=_cov['notRun']
+    cov_perf=cov_pass+cov_issue+cov_unc
 
     # FIX: found via investigating an independent review's claim that
     # "Uncertain" outcomes get counted toward the headline completeness
@@ -369,7 +368,21 @@ def build_report(data_path, output_path):
     # procedures, with Uncertain and Not Run excluded by construction,
     # not by assumption.
     cov_total_planned = cov_pass + cov_issue + cov_unc + cov_np
-    cov_conclusive_pct = round(((cov_pass + cov_issue) / cov_total_planned) * 100) if cov_total_planned > 0 else 0
+    cov_conclusive_pct = _cov['concludedPct']
+    # The report's headline readiness figure IS the concluded share; the server-side value is only a fallback.
+    igReadiness = cov_conclusive_pct
+    cov_fch_pct = _cov['fchPct']; cov_fch_done = _cov['fch']['concluded']; cov_fch_planned = _cov['fch']['planned']
+    # What was left out of the planned set and why (counts by category; decided before the run, see config/rule-scope.json)
+    _scope = d.get('scopeSummary') or {}
+    _scope_disclose = bool(_scope) and _scope.get('discloseInReport', True)
+    _scope_ev = (_scope.get('evidenceRequired') or []) if _scope_disclose else []
+    _scope_parts = []
+    if _scope_disclose:
+        if _scope.get('notApplicable'): _scope_parts.append(f"{_scope['notApplicable']} not applicable to this model type")
+        if _scope_ev: _scope_parts.append(f"{len(_scope_ev)} needing source documents or live testing")
+        if _scope.get('extendedNotRun'): _scope_parts.append(f"{_scope['extendedNotRun']} lower-severity procedures left out of this standard review")
+    _scope_sentence = (' Not counted: ' + '; '.join(_scope_parts) + '.') if _scope_parts else ''
+    _fch_sentence = (f' Fatal, critical and high-severity procedures: {cov_fch_done} of {cov_fch_planned} concluded ({cov_fch_pct}%).' if cov_fch_planned else '')
 
     # KPMG verdict
     # Neutral audit completion header — no verdict or reliance conclusion
@@ -1089,7 +1102,7 @@ def build_report(data_path, output_path):
                        ('Tier 1 coverage',f'{_t1_count} deterministic structural code checks'),
                        ('Tier 2 coverage',f'{_t2_count} Claude semantic checks across 13 sections'),
                        ('Accounting framework','Not confirmed in model — accrual basis assumed from statement structure'),
-                       ('Audit completion',(f'{cov_conclusive_pct}% of the {cov_total_planned} procedures scheduled for this model type ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)' if _scope_narrowed else f'{cov_conclusive_pct}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)'))]:
+                       ('Audit completion',(f'{cov_conclusive_pct}% of the {cov_total_planned} procedures scheduled for this model type ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run).' + _scope_sentence + _fch_sentence if _scope_narrowed else f'{cov_conclusive_pct}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)'))]:
         r3 = kv_row(r3,label,val)
     set_row(ws3,r3,10); r3+=1
 
@@ -1294,6 +1307,18 @@ def build_report(data_path, output_path):
             f"This batch genuinely failed to complete during this run: {_bf.get('error','unknown error').rstrip('.')}. The {len(_bf.get('ruleIds',[]))} rule(s) it covered are marked Not Performed in the Validation Matrix - this was a real, one-off infrastructure failure, not a deliberate scope decision.",
             'Re-run the validation once the underlying issue is resolved'
         ))
+    # Scope disclosure (config/rule-scope.json): what was left out of the planned set before the run, shown by category.
+    if _scope_disclose and _scope_ev:
+        _ev_names = '; '.join(str(e.get('label') or e.get('id')).rstrip('.')[:80] for e in _scope_ev[:12])
+        _exclusions.append((
+            'Procedures needing source documents or live testing', 'Not performed',
+            f"{len(_scope_ev)} procedure(s) compare the model with records outside the workbook, or need the model changed and recalculated, so the Excel file alone cannot settle them. They are not counted in the completion figure: {_ev_names}.",
+            'Supply the source documents (audited accounts, ledgers, contracts, licence terms) or commission live testing of the model'))
+    if _scope_disclose and _scope.get('extendedNotRun'):
+        _exclusions.append((
+            'Extended review procedures', 'Not performed',
+            f"{_scope['extendedNotRun']} lower-severity procedure(s) that have not reached a verdict in earlier reviews of this model type were left out of this standard review. They are not counted in the completion figure.",
+            'Request a full review to run them'))
     _status_style={'Not performed':(P1_FILL,P1_TXT),'Partial':(P2_FILL,P2_TXT),'Partial (mining-specific)':(P2_FILL,P2_TXT),'Performed':(OK_FILL,OK_TXT),'Performed (targeted)':(OK_FILL,OK_TXT),'Performed (partial coverage)':(P2_FILL,P2_TXT)}
     _col_chars = {2:22, 4:34, 5:22}  # rough usable characters per line, by column width
     for proc,status,impact,nxt in _exclusions:
