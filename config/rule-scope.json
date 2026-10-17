@@ -10,8 +10,8 @@
   "evidenceRequired": {
     "enabled": true,
     "allowFatal": false,
-    "reason": "These procedures compare the model with records outside the workbook (audited accounts, general ledger or trial balance, imported source data, contract and licence terms, market benchmarks, unit definitions), need cell formatting that the review inputs do not carry (colour conventions), or need the model to be changed and recalculated (date and period edge cases). The Excel file alone cannot settle them, so they are scoped out of the completion figure and listed as work needing source documents or live testing.",
-    "ruleIds": ["T2-S2-008", "T2-S10-002", "T2-S11-003", "T2-S11-007", "T2-S12-004", "T2-S3-003", "T2-S7-004", "T2-S4-004", "T2-S8-004"]
+    "reason": "These procedures compare the model with records outside the workbook (audited accounts, general ledger or trial balance, imported source data, contract and licence terms, market benchmarks, unit definitions), need cell formatting that the review inputs do not carry (colour conventions), need a chart of accounts or general ledger to map to, or need the model to be changed and recalculated (date and period edge cases). The Excel file alone cannot settle them, so they are scoped out of the completion figure and listed as work needing source documents or live testing.",
+    "ruleIds": ["T2-S2-004", "T2-S3-004", "T2-S8-003", "T2-S8-006", "T2-S10-003", "T2-S2-008", "T2-S10-002", "T2-S11-003", "T2-S11-007", "T2-S12-004", "T2-S3-003", "T2-S7-004", "T2-S4-004", "T2-S8-004"]
   },
   "absencePolicy": {
     "enforce": true,

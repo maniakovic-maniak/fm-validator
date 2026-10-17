@@ -71,8 +71,19 @@ keeps learning which lower-severity procedures can conclude.
   It is left alone when it speaks about the reviewer's own limits (formula-only extract, no formatting, could not
   confirm) or says the structure does not belong in this model type ("Not applicable": those stay Uncertain and feed
   the scope candidates in Improvement Signals). The server log lists every conversion. `absencePolicy.enforce` in `config/rule-scope.json` switches the code check off.
+- **What "complete_workbook" means.** The full-parse payload used to hold only formula cells, so the reviewer could
+  not see a single row label, the cover note or a change log, and could not resolve a named range. It now also gets
+  every static text cell (a "# STATIC TEXT CELLS" section per sheet, capped at `TEXT_INDEX_MAX_CHARS`, about 25-30k
+  real tokens) and `namedRangeMap`. `dataCoverage` is `complete_workbook` only when all of that arrived uncut and in one
+  data chunk; if the text was narrowed to label columns A-E or truncated, or the name list was cut, it is
+  `partial_view`, and the absence policy stays off. The server log prints "Static text index: full|narrowed|truncated".
+  Numeric constants and computed values are still not sent.
 - **Colour conventions (T2-S2-008)** sits in `evidenceRequired`: the review inputs carry no cell formatting, so the
-  procedure cannot conclude.
+  procedure cannot conclude. T2-S2-004, T2-S3-004, T2-S8-003, T2-S8-006 (need the model extended, source data checked or
+  live manipulation) and T2-S10-003 (needs a chart of accounts) are there for the same reason.
+- **Regulated-network tiers R3 and R4** (`config/rule-exclusions.json`) hold the rules the reviewer itself reported as
+  having no equivalent in a notional-financing model. R4 holds the three fatal-gate ones alone so they can be switched
+  back on with `enabled: false` without touching the rest.
 
 ## Adding a new field to the report
 

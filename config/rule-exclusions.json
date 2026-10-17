@@ -27,6 +27,18 @@
           "decision": "Scope decision recorded 2026-10-17 at Mik Riazanov's instruction, after the offline triage of the 48 core rules that never reached a verdict in Fm-00033 to Fm-00035: these generic procedures test commercial and project-finance mechanics (debt sweeps, reserve accounts, preferred returns, price x volume revenue, capacity limits, payroll build, bad debts, sub-annual conversion, GST/VAT, deferred revenue, IRR/NPV, no-debt and delayed-start stress tests) that a regulated-network allowed-revenue model does not contain. The fatal-gate members of this decision (cash waterfall, ownership split) are in the tier above.",
           "ruleIds": ["T2-S6-006", "T2-S6-007", "T2-S6-009", "T2-S7-001", "T2-S7-002", "T2-S7-007", "T2-S7-008", "T2-S3-007", "T2-S3-009", "T2-S5-010", "T2-S10-010", "T2-S10-015", "T2-S4-008", "T2-S8-007", "T2-S8-008"]
         },
+        "R3_scope_decision_regulated_network_notional": {
+          "enabled": true,
+          "allowFatal": false,
+          "decision": "Scope decision recorded 2026-10-17 on Mik Riazanov's go-ahead to build the proposed scope changes after the offline pass over Fm-00036: in that run the reviewer itself reported that these structures (accruals and prepayments, equity capital flows, a balance sheet tolerance, construction/operations/exit lifecycle phases, covenant-style reverse and combined stress tests, sources and uses, a ramp-up curve, a master check sheet) have no equivalent in a notional-financing regulated network model.",
+          "ruleIds": ["T2-S10-011", "T2-S10-017", "T2-S10-019", "T2-S12-002", "T2-S9-005", "T2-S8-009", "T2-S8-011", "T2-S8-013"]
+        },
+        "R4_scope_decision_regulated_network_statutory_gates": {
+          "enabled": true,
+          "allowFatal": true,
+          "decision": "Scope decision recorded 2026-10-17 on Mik Riazanov's go-ahead to build the proposed scope changes after the offline pass over Fm-00036. These three are fatal-gate tests and are kept in their own tier so they can be switched back on alone (set enabled to false): a notional-financing regulated network model does not produce a statutory balance sheet, a classified cash flow statement or a facility debt schedule (the reviewer reported exactly this for T2-S5-001, T2-S5-002 and T2-S6-001), so the generic gate has nothing to test.",
+          "ruleIds": ["T2-S5-001", "T2-S5-002", "T2-S6-001"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]

@@ -57,6 +57,126 @@ function buildFullParseFormulaPayload(workbook) {
   return payload;
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+// Static text index and named-range map.
+//
+// The formula list above holds only cells that contain a formula. Everything a human reads to understand the model
+// - row labels, headings, the cover note, a change log, instructions, source references - is a plain text cell, and
+// was never sent. A reviewer that cannot see labels cannot say a label, a schedule or a register is missing, nor
+// confirm one exists (Fm-00036: ~20 procedures came back Uncertain for exactly this reason). Named ranges had the
+// same gap: a formula reading =ClosingRAV_real showed a name with no definition.
+//
+// Both are objective, model-independent inputs, sent for every full-parse run. They are capped; if a cap bites, the
+// run is told it saw a partial view, so "not present" is never claimed from a workbook it could not fully read.
+// ══════════════════════════════════════════════════════════════════
+const TEXT_INDEX_MAX_CHARS = 100000;     // ~25-30k real tokens: text tokenizes ~3-4 chars/token, unlike formulas
+const TEXT_CELL_MAX_CHARS = 90;
+const NARROW_MAX_COL = 5;                // fallback mode: label columns A-E only
+const NAMED_RANGE_MAX = 600;
+const NAMED_RANGE_REF_MAX = 120;
+
+function cellText(cell) {
+  const raw = cell.formula; if (raw) return null;                         // formula cells are in the formula list
+  const v = cell.value;
+  if (v === null || v === undefined) return null;
+  let t = null;
+  if (typeof v === 'string') t = v;
+  else if (typeof v === 'object' && Array.isArray(v.richText)) t = v.richText.map(r => r.text || '').join('');
+  if (t === null) return null;
+  t = t.replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  return t.length > TEXT_CELL_MAX_CHARS ? t.slice(0, TEXT_CELL_MAX_CHARS - 1) + '…' : t;
+}
+
+function colLetters(address) { return String(address).replace(/\d+/g, ''); }
+
+// One line per row: "R12: A=Receivables | D=Notes". maxCol 0 = no column limit.
+function sheetTextLines(ws, maxCol) {
+  const lines = [];
+  ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    const parts = [];
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      if (maxCol && colNumber > maxCol) return;
+      const t = cellText(cell);
+      if (t) parts.push(`${colLetters(cell.address)}=${t}`);
+    });
+    if (parts.length) lines.push(`R${rowNumber}: ${parts.join(' | ')}`);
+  });
+  return lines;
+}
+
+/**
+ * @returns {{ bySheet: Object<string,string>, mode: 'full'|'narrowed'|'truncated', chars: number, truncatedSheets: string[] }}
+ * mode 'full'      - every static text cell of every sheet is included (the only mode that supports "complete")
+ * mode 'narrowed'  - over budget, so only label columns A-E are included (sheets with no formulas stay whole)
+ * mode 'truncated' - still over budget; later sheets are cut. Partial view.
+ */
+function buildTextIndex(workbook, { maxChars = TEXT_INDEX_MAX_CHARS } = {}) {
+  const sheets = [];
+  workbook.eachSheet(ws => sheets.push(ws));
+  const hasFormula = ws => { let f = false; ws.eachRow({ includeEmpty: false }, r => { if (f) return; r.eachCell({ includeEmpty: false }, c => { if (c.formula) f = true; }); }); return f; };
+  const build = narrow => sheets.map(ws => ({ name: ws.name, lines: sheetTextLines(ws, narrow && hasFormula(ws) ? NARROW_MAX_COL : 0) }));
+  const size = built => built.reduce((n, b) => n + b.lines.reduce((m, l) => m + l.length + 1, 0), 0);
+
+  let mode = 'full';
+  let built = build(false);
+  if (size(built) > maxChars) { mode = 'narrowed'; built = build(true); }
+  const truncatedSheets = [];
+  if (size(built) > maxChars) {
+    mode = 'truncated';
+    let used = 0;
+    built = built.map(b => {
+      const kept = [];
+      for (const l of b.lines) { if (used + l.length + 1 > maxChars) break; kept.push(l); used += l.length + 1; }
+      if (kept.length < b.lines.length) truncatedSheets.push(b.name);
+      return { name: b.name, lines: kept };
+    });
+  }
+  const bySheet = {};
+  for (const b of built) if (b.lines.length) bySheet[b.name] = b.lines.join('\n');
+  return { bySheet, mode, chars: size(built), truncatedSheets };
+}
+
+function buildNamedRangeMap(workbook) {
+  let model = [];
+  try { model = (workbook.definedNames && workbook.definedNames.model) || []; } catch (_) { model = []; }
+  const names = [];
+  for (const d of model) {
+    if (!d || !d.name || /^_xlnm\./.test(d.name)) continue;                // print areas etc. are not model names
+    const ref = (Array.isArray(d.ranges) ? d.ranges.join(',') : String(d.ranges || '')).slice(0, NAMED_RANGE_REF_MAX);
+    names.push({ name: d.name, refersTo: ref });
+  }
+  return { names: names.slice(0, NAMED_RANGE_MAX), total: names.length, truncated: names.length > NAMED_RANGE_MAX };
+}
+
+/**
+ * The full-parse payload (formula list per sheet) plus the static text of each sheet, and the facts needed to say
+ * honestly how much of the workbook the reviewer was given.
+ * @returns {{ payload: Object, textIndex: Object, namedRanges: Object, coverage: 'complete_workbook'|'partial_view' }}
+ */
+function buildFullParsePayloadWithText(workbook, opts = {}) {
+  const formulas = buildFullParseFormulaPayload(workbook);
+  const textIndex = buildTextIndex(workbook, opts);
+  const namedRanges = buildNamedRangeMap(workbook);
+  const payload = {};
+  const names = new Set([...Object.keys(formulas), ...Object.keys(textIndex.bySheet)]);
+  workbook.eachSheet(ws => {                                              // keep workbook sheet order
+    if (!names.has(ws.name)) return;
+    const parts = [];
+    if (formulas[ws.name]) parts.push(formulas[ws.name]);
+    if (textIndex.bySheet[ws.name]) parts.push('# STATIC TEXT CELLS (labels, headings, notes; not formulas):\n' + textIndex.bySheet[ws.name]);
+    payload[ws.name] = parts.join('\n\n');
+  });
+  return { payload, textIndex, namedRanges, coverage: fullParseCoverage(textIndex, namedRanges) };
+}
+
+// "complete_workbook" means: every formula, every static text cell and every named range reached the reviewer.
+// Numeric constants and computed values are not part of it; absence rules never depend on them.
+function fullParseCoverage(textIndex, namedRanges) {
+  return textIndex && textIndex.mode === 'full' && !(namedRanges && namedRanges.truncated) ? 'complete_workbook' : 'partial_view';
+}
+
 // ══════════════════════════════════════════════════════════════════
 // Additional system-prompt guidance specific to full-parse mode —
 // appended to the existing static prompt (SOUL + SKILL + domain),
@@ -68,26 +188,29 @@ function buildFullParseFormulaPayload(workbook) {
 const FULL_PARSE_PROMPT_ADDENDUM = `
 FULL-PARSE MODE — IMPORTANT DIFFERENCE FROM YOUR USUAL DATA:
 
-This run is small enough to fit complete, unabridged formula text for every
-formula cell in the workbook — not curated, pre-extracted values. Each sheet's
-data below is a full list of "CellAddress: =formula" lines, exactly as the
-formula reads in the workbook.
+This run is small enough to fit the whole workbook's logic and wording. For every sheet you get:
+  1. "CellAddress: =formula" lines for every formula cell, exactly as the formula reads in the workbook; and
+  2. a "# STATIC TEXT CELLS" section, one line per row ("R12: A=Receivables | D=Notes"), holding every plain
+     text cell: row labels, headings, the cover note, change log, instructions and source references.
+The payload also carries namedRangeMap (each name and what it refers to). Numeric constants and calculated values
+are not included, except where a number is written inside a formula.
 
 State review_mode as "llm_full_parse" for every finding in this run — not
 llm_only or llm_with_partial_formulas, since both of those describe curated-
 data modes this run is not using.
 
-This means you can now directly verify formula LOGIC, not just plausibility of
+This means you can directly verify formula LOGIC, not just plausibility of
 displayed values — trace whether a labelled output genuinely computes what its
 label claims (e.g. confirm an "NPV" cell's formula actually discounts a cash
 flow series, rather than referencing an unrelated value), follow a chain of
 references across cells and sheets, and catch a defect that would be
-completely invisible from a value alone.
+completely invisible from a value alone. Use the static text to read row labels, find where a
+schedule, register or documentation sits, and check that a label matches what its formula does.
+Resolve a named range through namedRangeMap before saying its definition is not visible.
 
-Do not assume any curation or pre-filtering has already happened — every
-formula for every populated cell in a given sheet is present. Absence of a
-cell in a sheet's list means that cell is genuinely empty or contains a
-constant, not that it was filtered out.
+Do not assume any curation or pre-filtering has already happened. If dataCoverage is "complete_workbook",
+a formula or text cell that is absent from a sheet's list is genuinely not there. If it is "partial_view", the
+text section or the name list was cut to fit; say what you could not see rather than treating it as absent.
 `.trim();
 
-module.exports = { buildSheetFormulaList, buildFullParseFormulaPayload, FULL_PARSE_PROMPT_ADDENDUM };
+module.exports = { buildSheetFormulaList, buildFullParseFormulaPayload, buildFullParsePayloadWithText, buildTextIndex, buildNamedRangeMap, fullParseCoverage, FULL_PARSE_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS };

@@ -358,6 +358,8 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     // ABSENCE_POLICY: tells the reviewer whether it is looking at the whole workbook ('complete_workbook') or
     // only part of it ('partial_view'). skill.md uses it to decide whether "not present" is a finding or "uncertain".
     dataCoverage: tier0Context.dataCoverage || 'partial_view',
+    // NAMED_RANGE_MAP: what each defined name refers to, so a formula such as =ClosingRAV_real can be followed
+    namedRangeMap: tier0Context.namedRangeMap || null,
     // SHEET_FACTS: sheet visibility and protection, which cannot be seen from cell values
     sheetFacts: tier0Context.sheetFacts || null,
     // DUPLICATE_LOGIC: result of the Tier 0 full-formula scan (duplicate-calculation-logic-check.js)
@@ -731,11 +733,19 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   // model too large for this route per Phase 1's threshold), nothing
   // below this point differs from before this phase existed.
   let batch1Data = dataSubset, batch2Data = deepDataSubset, batch3Data = dataSubset;
+  // What the reviewer is told it saw. Only a full-parse payload that carries every formula, every static text cell and
+  // every named range is 'complete_workbook'; anything cut to fit makes it 'partial_view'.
+  let fullParseCoverage = 'partial_view';
+  let namedRangeMapForPrompt = null;
   if (useFullParse) {
-    const { buildFullParseFormulaPayload, FULL_PARSE_PROMPT_ADDENDUM } = require('./validator-tier2-fullparse');
-    const fullParsePayload = buildFullParseFormulaPayload(parsed._raw);
+    const { buildFullParsePayloadWithText, FULL_PARSE_PROMPT_ADDENDUM } = require('./validator-tier2-fullparse');
+    const built = buildFullParsePayloadWithText(parsed._raw);
+    const fullParsePayload = built.payload;
+    fullParseCoverage = built.coverage;
+    namedRangeMapForPrompt = built.namedRanges;
     const fullParseTokens = Math.round(JSON.stringify(fullParsePayload).length / FORMULA_CHARS_PER_TOKEN);
     console.log(`   Full-parse payload: ~${fullParseTokens.toLocaleString()} tokens across ${Object.keys(fullParsePayload).length} sheets (all 3 batches)`);
+    console.log(`   Static text index: ${built.textIndex.mode} (${built.textIndex.chars.toLocaleString()} chars, ${Object.keys(built.textIndex.bySheet).length} sheets); named ranges: ${built.namedRanges.names.length}${built.namedRanges.truncated ? ` of ${built.namedRanges.total} (cut)` : ''}; coverage: ${fullParseCoverage}${built.textIndex.truncatedSheets.length ? ' - text cut in: ' + built.textIndex.truncatedSheets.join(', ') : ''}`);
     batch1Data = batch2Data = batch3Data = fullParsePayload;
     systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\n' + FULL_PARSE_PROMPT_ADDENDUM;
   }
@@ -824,7 +834,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
         const chunkLabel = dataChunks.length > 1 ? `${label} (data chunk ${i + 1}/${dataChunks.length})` : label;
         const { results, meta } = await runBatch(
           rules, dataChunks[i], parsed.sheetNames, systemPrompt, chunkLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view' },
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt },
           useFullParse
         );
         chunkResultArrays.push(results);
@@ -839,7 +849,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
               const retryLabel = `${chunkLabel} [retry ${missingRules.length} missing]`;
               const retryOut = await runBatch(
           missingRules, dataChunks[i], parsed.sheetNames, systemPrompt, retryLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view' },
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt },
           useFullParse
         );
               const wanted = new Set(missingRules.map(r => r.id));
@@ -965,7 +975,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     try {
       const _ruleById = new Map([...(checklist.tier1 || []), ...(checklist.tier2 || [])].map(x => [x.id, x]));
       const _absEnforce = (() => { try { return (JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'rule-scope.json'), 'utf8')).absencePolicy || {}).enforce !== false; } catch (_) { return true; } })();
-      const _abs = applyAbsencePolicy(normalised, { complete: _absEnforce && useFullParse && allDataSingleChunk, ruleById: _ruleById });
+      const _abs = applyAbsencePolicy(normalised, { complete: _absEnforce && useFullParse && fullParseCoverage === 'complete_workbook' && allDataSingleChunk, ruleById: _ruleById });
       if (_abs.converted.length) {
         console.log(`   ℹ️  Absence policy: ${_abs.converted.length} "uncertain" answer(s) were plain absences in a complete workbook and are recorded as "Not present in the workbook": ${_abs.converted.join(', ')}`);
       }

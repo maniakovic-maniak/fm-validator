@@ -140,8 +140,11 @@ missing model-wide.
 
 This applies to every test below. Read `dataCoverage` in the payload first.
 
-- `dataCoverage: "complete_workbook"` — you were given the whole workbook
-  (every sheet, every formula). If the thing a test requires (a schedule,
+- `dataCoverage: "complete_workbook"` — you were given the whole workbook:
+  every formula, every static text cell (row labels, headings, cover note,
+  change log) and every named range (`namedRangeMap`). Numeric constants and
+  calculated values are not included, so a test that needs a number's value
+  is not made answerable by this flag. If the thing a test requires (a schedule,
   roll-forward, reconciliation, register, piece of documentation, control)
   is genuinely not there after you have looked for it under other labels
   and on other sheets (see the relabelled-concept note above), that

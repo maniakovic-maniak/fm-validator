@@ -68,7 +68,10 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
   const cat = (p, c) => p.preExcluded.filter(x => x.category === c).map(x => x.id);
   test('regulated model: scope decisions + evidence + extended are removed before the run', () => {
     const na = cat(eso, 'not_applicable');
-    const expected = exclCfg.profiles[0].tiers.R_scope_decision_regulated_network.ruleIds.concat(exclCfg.profiles[0].tiers.R2_scope_decision_regulated_network_commercial.ruleIds).filter(i => i.startsWith('T2-'));
+    // every enabled tier that names rule ids; a fatal rule only counts where its tier allows fatal
+    const expected = Object.values(exclCfg.profiles[0].tiers)
+      .filter(t => t.enabled && Array.isArray(t.ruleIds))
+      .flatMap(t => t.ruleIds.filter(i => i.startsWith('T2-') && (byId.get(i).severity !== 'fatal' || t.allowFatal === true)));
     assert.deepStrictEqual(na.sort(), expected.sort());
     assert.deepStrictEqual(cat(eso, 'evidence_required').sort(), [...scopeCfg.evidenceRequired.ruleIds].sort());
     assert.ok(cat(eso, 'extended_not_run').length > 0, 'expected an extended tier from the seeded history');
@@ -162,11 +165,76 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
     assert.strictEqual(rs[0].status, 'pass'); assert.strictEqual(rs[1].status, 'fail');
     assert.strictEqual(rs[2].priority, 'P2');
   });
-  test('validator-tier2.js applies the policy only when every batch saw one whole-workbook chunk', () => {
+  test('validator-tier2.js applies the policy only when the reviewer got every formula, all static text and every named range in one chunk', () => {
     const src = fs.readFileSync(path.join(__dirname, 'src', 'validator-tier2.js'), 'utf8');
-    assert.ok(/complete: _absEnforce && useFullParse && allDataSingleChunk/.test(src));
+    assert.ok(/complete: _absEnforce && useFullParse && fullParseCoverage === 'complete_workbook' && allDataSingleChunk/.test(src));
     assert.strictEqual(scopeCfg.absencePolicy.enforce, true);
     assert.ok(/if \(dataChunks\.length > 1\) allDataSingleChunk = false;/.test(src));
+  });
+
+  console.log('What the reviewer is given (formulas, static text, named ranges)');
+  const ExcelJS = require('exceljs');
+  const fp = require('./src/validator-tier2-fullparse');
+  const mkWb = () => {
+    const wb = new ExcelJS.Workbook();
+    const cover = wb.addWorksheet('Cover');
+    cover.getCell('A1').value = 'Purpose: annual revenue and RAV model';
+    cover.getCell('A3').value = 'Change log';
+    cover.getCell('B3').value = { richText: [{ text: 'v1.2 ' }, { text: 'updated tax rate' }] };
+    cover.getCell('A5').value = 42;                                   // a number is not text
+    const calc = wb.addWorksheet('Calc');
+    calc.getCell('A2').value = 'Receivables';
+    calc.getCell('B2').value = 100;
+    calc.getCell('C2').value = { formula: 'B2*1.1' };
+    calc.getCell('A3').value = 'Closing RAV';
+    calc.getCell('C3').value = { formula: 'ClosingRAV+C2' };
+    calc.getCell('H3').value = 'Wide note far from the label columns';
+    wb.definedNames.add('Calc!$C$3', 'ClosingRAV');
+    return wb;
+  };
+  test('the payload carries static text, including sheets with no formulas, plus the formulas', () => {
+    const b = fp.buildFullParsePayloadWithText(mkWb());
+    assert.ok(b.payload.Cover && b.payload.Cover.includes('A=Change log') && b.payload.Cover.includes('B=v1.2 updated tax rate'), 'cover text missing');
+    assert.ok(b.payload.Calc.includes('C2: =B2*1.1') && b.payload.Calc.includes('R2: A=Receivables'), 'calc sheet incomplete');
+    assert.ok(!b.payload.Cover.includes('42') && !b.payload.Calc.includes('=100'), 'numbers must not appear as text');
+    assert.ok(!/R2:.*B2=/.test(b.payload.Calc), 'a formula cell must not be repeated as text');
+  });
+  test('named ranges are listed with what they refer to', () => {
+    const b = fp.buildFullParsePayloadWithText(mkWb());
+    const n = b.namedRanges.names.find(x => x.name === 'ClosingRAV');
+    assert.ok(n && /Calc/.test(n.refersTo) && /C\$?3/.test(n.refersTo), JSON.stringify(b.namedRanges));
+  });
+  test('everything fits: coverage is complete_workbook', () => {
+    const b = fp.buildFullParsePayloadWithText(mkWb());
+    assert.strictEqual(b.textIndex.mode, 'full');
+    assert.strictEqual(b.coverage, 'complete_workbook');
+  });
+  test('over budget: label columns only, and the reviewer is told it saw a partial view', () => {
+    const wb = mkWb();
+    const full = fp.buildTextIndex(wb);
+    const b = fp.buildFullParsePayloadWithText(wb, { maxChars: full.chars - 5 });
+    assert.strictEqual(b.textIndex.mode, 'narrowed');
+    assert.ok(!b.payload.Calc.includes('H=Wide note'), 'wide column should be dropped in narrowed mode');
+    assert.ok(b.payload.Cover.includes('Change log'), 'a sheet with no formulas stays whole');
+    assert.strictEqual(b.coverage, 'partial_view');
+  });
+  test('still over budget: later text is cut, the cut sheets are named, coverage is partial', () => {
+    const b = fp.buildFullParsePayloadWithText(mkWb(), { maxChars: 60 });
+    assert.strictEqual(b.textIndex.mode, 'truncated');
+    assert.ok(b.textIndex.truncatedSheets.length > 0);
+    assert.ok(b.textIndex.chars <= 60);
+    assert.strictEqual(b.coverage, 'partial_view');
+  });
+  test('a cut name list also means partial_view', () => {
+    assert.strictEqual(fp.fullParseCoverage({ mode: 'full' }, { truncated: true }), 'partial_view');
+    assert.strictEqual(fp.fullParseCoverage({ mode: 'full' }, { truncated: false }), 'complete_workbook');
+    assert.strictEqual(fp.fullParseCoverage(null, null), 'partial_view');
+  });
+  test('the reviewer payload includes namedRangeMap and the prompt describes the static text section', () => {
+    const t2 = fs.readFileSync(path.join(__dirname, 'src', 'validator-tier2.js'), 'utf8');
+    assert.ok(/namedRangeMap: tier0Context\.namedRangeMap/.test(t2));
+    assert.ok(fp.FULL_PARSE_PROMPT_ADDENDUM.includes('# STATIC TEXT CELLS') && fp.FULL_PARSE_PROMPT_ADDENDUM.includes('namedRangeMap'));
+    assert.ok(/fullParseCoverage === 'complete_workbook' && dataChunks\.length === 1/.test(t2));
   });
 
   console.log('Exclusion engine');
@@ -287,7 +355,6 @@ print(json.dumps({'tile': tile, 'has99': any('99%' in t for t in texts), 'notCou
   });
 
   console.log('Tier 1');
-  const ExcelJS = require('exceljs');
   const JSZip = require('jszip');
   const { runTier1 } = require('./src/validator-tier1');
   async function parsedFrom(wb) {
