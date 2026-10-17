@@ -51,7 +51,7 @@ console.log('══════════════════════�
 // because both D1 and D2 depend on this file parsing correctly — if it
 // doesn't, their own errors would be less specific and more confusing
 // than just reporting this directly.
-console.log('[0/2] checklist.json JSON validity...');
+console.log('[0/3] checklist.json JSON validity...');
 try {
   const raw = fs.readFileSync(path.join(configDir, 'checklist.json'), 'utf8');
   const parsed = JSON.parse(raw);
@@ -70,7 +70,7 @@ try {
 // HARD FAILURE if this finds a genuine mismatch — a field skill.md
 // references that the actual Tier 2 payload doesn't contain is a real,
 // silent gap in what Claude can act on, not a judgment call.
-console.log('[1/2] D1 — skill.md <-> Tier 2 payload field consistency...');
+console.log('[1/3] D1 — skill.md <-> Tier 2 payload field consistency...');
 try {
   execFileSync('node', [path.join(scriptsDir, 'check-skill-payload-refs.js')], { stdio: 'inherit' });
   console.log('   ✅ D1 passed.\n');
@@ -88,7 +88,7 @@ try {
 // production evidence. This never blocks the gate; it still runs and
 // prints its findings so a human can judge case by case, which matters
 // most right after adding new rules (exactly what B1 needed this for).
-console.log('[2/2] D2 — checklist.json <-> skill*.md test-name consistency (informational)...');
+console.log('[2/3] D2 — checklist.json <-> skill*.md test-name consistency (informational)...');
 try {
   execFileSync('node', [path.join(scriptsDir, 'check-checklist-skill-refs.js')], { stdio: 'inherit' });
 } catch (e) {
@@ -96,5 +96,20 @@ try {
   // case that ever changes, and still does not set hasHardFailure.
 }
 summary.push({ check: 'D2 (test-name refs)', status: 'info (see output above)' });
+
+// ── Check 3: scope and completion stay in sync across layers ────────────────
+// HARD FAILURE. One scope record and one completion definition feed the report, hold gate, Improvement Signals
+// and Partner Review export (see SCOPE.md). This proves the JS and Python completion code agree, that scope
+// configs only name real rules, and that server.js and report-tab.js still agree on the report payload.
+console.log('[3/3] Scope and completion sync across platform layers...');
+try {
+  execFileSync('node', [path.join(__dirname, '..', 'test-scope-sync.js')], { stdio: 'inherit' });
+  console.log('   ✅ Scope sync passed.\n');
+  summary.push({ check: 'Scope and completion sync', status: 'pass' });
+} catch (e) {
+  console.log('   ❌ Scope sync check failed — see output above.\n');
+  summary.push({ check: 'Scope and completion sync', status: 'FAIL' });
+  hasHardFailure = true;
+}
 
 printSummaryAndExit();
