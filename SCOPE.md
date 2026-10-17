@@ -58,6 +58,22 @@ keeps learning which lower-severity procedures can conclude.
 - A procedure can never be answered from the workbook: add it to `evidenceRequired` in `config/rule-scope.json`.
 - Run `node scripts/pre-deploy-check.js` before deploying. Check 3 is the sync test.
 
+## Which profile applies, and how absences are handled
+
+- **A model-type profile is chosen by the model's description, not by the domain skill.** The classifier labels the
+  same electricity-transmission model `infrastructure` on one run and `corporate` (skill-generic.md) on the next, so a
+  profile with `appliesToAnyDomainSkill: true` in `config/rule-exclusions.json` matches on its `matchAny` keywords alone.
+  A profile without that flag still needs its own `appliesToDomainSkill`. Keep `matchAny` keywords specific to the model
+  type when you set the flag.
+- **Absence policy is enforced in code** (`src/utils/absence-policy.js`), not only asked for in `config/skill.md`.
+  When every batch saw the whole workbook in one chunk, an `uncertain` answer that opens with a plain absence
+  ("No X was found in any sheet") is recorded as a fail, "Not present in the workbook: ...", at confidence 0.7 or more.
+  It is left alone when it speaks about the reviewer's own limits (formula-only extract, no formatting, could not
+  confirm) or says the structure does not belong in this model type ("Not applicable": those stay Uncertain and feed
+  the scope candidates in Improvement Signals). The server log lists every conversion. `absencePolicy.enforce` in `config/rule-scope.json` switches the code check off.
+- **Colour conventions (T2-S2-008)** sits in `evidenceRequired`: the review inputs carry no cell formatting, so the
+  procedure cannot conclude.
+
 ## Adding a new field to the report
 
 `server.js` hands the report builder a meta object; `src/report-tab.js` copies named fields into the payload for

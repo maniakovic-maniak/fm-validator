@@ -105,6 +105,70 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
     assert.strictEqual(cat(p, 'extended_not_run').length, 0);
   });
 
+  console.log('Same model, different domain skill (Fm-00036)');
+  test('the regulated-network scope decisions follow the model description, not the domain skill the classifier picked', () => {
+    const desc = 'corporate - electricity transmission system operation (UK energy regulation)';
+    for (const skill of ['skill-infrastructure.md', 'skill-generic.md', 'skill-corporate.md']) {
+      const p = plan({ domainFile: skill, modelText: desc, configs: { exclusions: exclCfg, scope: scopeCfg, tiering: tieringCfg, history: null } });
+      assert.ok(cat(p, 'not_applicable').length > 0, `${skill}: scope decisions were not applied`);
+    }
+  });
+  test('an unrelated model is not caught by that profile under any domain skill', () => {
+    for (const skill of ['skill-infrastructure.md', 'skill-generic.md']) {
+      const p = plan({ domainFile: skill, modelText: 'three-statement model for a retail chain', configs: { exclusions: exclCfg, scope: scopeCfg, tiering: tieringCfg, history: null } });
+      assert.strictEqual(cat(p, 'not_applicable').length, 0, skill);
+    }
+  });
+  test('a profile without appliesToAnyDomainSkill still needs its own domain skill', () => {
+    const cfg = { profiles: [{ id: 'x', appliesToDomainSkill: 'skill-mining.md', matchAny: ['quarry'], tiers: {} }] };
+    assert.strictEqual(require('./src/utils/rule-exclusions').matchProfile(cfg, 'skill-generic.md', 'a quarry'), null);
+    assert.ok(require('./src/utils/rule-exclusions').matchProfile(cfg, 'skill-mining.md', 'a quarry'));
+  });
+
+  console.log('Absence policy');
+  const abs = require('./src/utils/absence-policy');
+  const unc = (condition, extra = {}) => Object.assign({ id: 'T2-S5-005', status: 'uncertain', confidence: 0.55, condition, priority: 'Query' }, extra);
+  test('a plain absence in a complete workbook is recorded as "Not present in the workbook"', () => {
+    const rs = [unc('No receivables, payables or inventory rows were found across any sheet.')];
+    const out = abs.applyAbsencePolicy(rs, { complete: true, ruleById: byId });
+    assert.deepStrictEqual(out.converted, ['T2-S5-005']);
+    assert.strictEqual(rs[0].status, 'fail');
+    assert.ok(rs[0].condition.startsWith(abs.PREFIX));
+    assert.ok(rs[0].confidence >= 0.7);
+    assert.ok(/^P[123]$/.test(rs[0].priority));
+  });
+  test('nothing changes when the reviewer saw only part of the workbook', () => {
+    const rs = [unc('No receivables rows were found across any sheet.')];
+    const out = abs.applyAbsencePolicy(rs, { complete: false, ruleById: byId });
+    assert.strictEqual(out.converted.length, 0);
+    assert.strictEqual(rs[0].status, 'uncertain');
+  });
+  test('statements about the reviewer\'s own limits, or about the model type, stay uncertain', () => {
+    const cases = [
+      unc('No cell formatting/colour information is present in this formula-only extract.'),
+      unc('No explicit plug-style row could be confirmed or ruled out from the formula text alone.'),
+      unc('No orphaned-input analysis was performed across the input cells.'),
+      unc('No balance sheet was found in any sheet.', { root_cause: 'Model type does not produce a statutory balance sheet.' }),
+      unc('Not applicable to this model type: no receivables are expected.'),
+      unc('Cover!G4 is the only formula visible, with no change log found.')
+    ];
+    const out = abs.applyAbsencePolicy(cases, { complete: true, ruleById: byId });
+    assert.deepStrictEqual(out.converted, []);
+    cases.forEach(c => assert.strictEqual(c.status, 'uncertain'));
+  });
+  test('pass and fail answers are never touched; an existing P1-P3 priority is kept', () => {
+    const rs = [{ id: 'a', status: 'pass', condition: 'No issues found.' }, { id: 'b', status: 'fail', condition: 'No schedule found.' }, unc('No deferred tax line was found anywhere.', { priority: 'P2' })];
+    abs.applyAbsencePolicy(rs, { complete: true, ruleById: byId });
+    assert.strictEqual(rs[0].status, 'pass'); assert.strictEqual(rs[1].status, 'fail');
+    assert.strictEqual(rs[2].priority, 'P2');
+  });
+  test('validator-tier2.js applies the policy only when every batch saw one whole-workbook chunk', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'src', 'validator-tier2.js'), 'utf8');
+    assert.ok(/complete: _absEnforce && useFullParse && allDataSingleChunk/.test(src));
+    assert.strictEqual(scopeCfg.absencePolicy.enforce, true);
+    assert.ok(/if \(dataChunks\.length > 1\) allDataSingleChunk = false;/.test(src));
+  });
+
   console.log('Exclusion engine');
   const eng = applyRuleExclusions({
     checklist, t1Results: [{ id: 'T1-008', status: 'uncertain' }, { id: 'T1-012', status: 'uncertain' }], t2Results: [],

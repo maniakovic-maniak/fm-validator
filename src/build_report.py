@@ -1312,7 +1312,7 @@ def build_report(data_path, output_path):
         _ev_names = '; '.join(str(e.get('label') or e.get('id')).rstrip('.')[:80] for e in _scope_ev[:12])
         _exclusions.append((
             'Procedures needing source documents or live testing', 'Not performed',
-            f"{len(_scope_ev)} procedure(s) compare the model with records outside the workbook, or need the model changed and recalculated, so the Excel file alone cannot settle them. They are not counted in the completion figure: {_ev_names}.",
+            f"{len(_scope_ev)} procedure(s) compare the model with records outside the workbook, need cell formatting the review does not read (colour conventions), or need the model changed and recalculated, so the file as reviewed cannot settle them. They are not counted in the completion figure: {_ev_names}.",
             'Supply the source documents (audited accounts, ledgers, contracts, licence terms) or commission live testing of the model'))
     if _scope_disclose and _scope.get('extendedNotRun'):
         _exclusions.append((

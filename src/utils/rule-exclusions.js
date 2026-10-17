@@ -55,10 +55,16 @@ function loadExclusionConfig(log = console.log) {
 
 // One place decides which profile (if any) a run falls under, so the pre-run scope plan and the
 // post-run exclusion pass can never disagree about it.
+// A profile is chosen by what the model IS (its description), not by which domain skill the classifier happened
+// to load: the same electricity-transmission model is classed "infrastructure" on one run and "corporate" on the
+// next, and a scope decision about the model type must not depend on that. A profile sets
+// appliesToAnyDomainSkill to say its keywords are specific enough to stand alone; otherwise it still needs the
+// named domain skill as well.
 function matchProfile(cfg, domainFile, modelText) {
   const text = String(modelText || '').toLowerCase();
   return ((cfg && cfg.profiles) || []).find(p =>
-    p.appliesToDomainSkill === domainFile && (p.matchAny || []).some(k => text.includes(String(k).toLowerCase()))) || null;
+    (p.appliesToAnyDomainSkill === true || p.appliesToDomainSkill === domainFile) &&
+    (p.matchAny || []).some(k => text.includes(String(k).toLowerCase()))) || null;
 }
 
 // The explicit scope-decision tiers of a profile: tiers that name rule ids directly.
@@ -200,4 +206,4 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
   return { applied: true, profileId: record.profileId, excludedIds, isExcluded, record };
 }
 
-module.exports = { applyRuleExclusions, matchProfile, explicitScopeTiers, loadExclusionConfig };
+module.exports = { applyRuleExclusions, matchProfile, explicitScopeTiers, loadExclusionConfig, isAbsenceFinding };

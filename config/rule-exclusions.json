@@ -12,6 +12,7 @@
     {
       "id": "regulated_network_utility",
       "appliesToDomainSkill": "skill-infrastructure.md",
+      "appliesToAnyDomainSkill": true,
       "matchAny": ["riio", "system operator", "transmission system", "network licence", "price control", "regulated network", "electricity transmission", "gas transmission", "distribution network"],
       "tiers": {
         "R_scope_decision_regulated_network": {

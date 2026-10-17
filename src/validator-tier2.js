@@ -10,6 +10,7 @@ const { CHARS_PER_TOKEN: FORMULA_CHARS_PER_TOKEN } = require('./utils/formula-to
 const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-results');
 const { buildVisibilityRecord } = require('./utils/build-visibility-record');
 const { buildSheetFacts } = require('./utils/sheet-facts');
+const { applyAbsencePolicy } = require('./utils/absence-policy');
 
 const client = new Anthropic({
   // Explicit, not relying on SDK defaults — several frameworks have
@@ -804,6 +805,8 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   } : { note: 'VBA review did not complete for this run — treat macros_documented and any VBA-dependent test as manual_only.' };
 
   // Reusable batch runner with consistent error handling
+  // True while every batch has seen the whole workbook in a single data chunk; the absence policy needs that.
+  let allDataSingleChunk = true;
   async function runOneBatch(rules, data, label, errorIdPrefix) {
     if (rules.length === 0) return;
     // `data` can now be a single data object (the existing, default
@@ -813,6 +816,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // chunkRulesForOutputSafety's existing rule-count split, where every
     // chunk sees the same, full data and no reconciliation is needed).
     const dataChunks = Array.isArray(data) ? data : [data];
+    if (dataChunks.length > 1) allDataSingleChunk = false;
     try {
       const chunkResultArrays = [];
       let sawMeta = null;
@@ -955,6 +959,17 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       // Top-level meta fields (from overall assessment)
       _meta: topLevelMeta
     }));
+
+    // ABSENCE_POLICY (enforced): when the reviewer saw the whole workbook, a plain "not present" answer returned as
+    // uncertain is recorded as the finding it is. See utils/absence-policy.js for the exact conditions.
+    try {
+      const _ruleById = new Map([...(checklist.tier1 || []), ...(checklist.tier2 || [])].map(x => [x.id, x]));
+      const _absEnforce = (() => { try { return (JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'rule-scope.json'), 'utf8')).absencePolicy || {}).enforce !== false; } catch (_) { return true; } })();
+      const _abs = applyAbsencePolicy(normalised, { complete: _absEnforce && useFullParse && allDataSingleChunk, ruleById: _ruleById });
+      if (_abs.converted.length) {
+        console.log(`   ℹ️  Absence policy: ${_abs.converted.length} "uncertain" answer(s) were plain absences in a complete workbook and are recorded as "Not present in the workbook": ${_abs.converted.join(', ')}`);
+      }
+    } catch (e) { console.error('   ⚠️  Absence policy check failed (results left as returned):', e.message); }
 
     // R-8 verification: log a direct, objective count of how many
     // findings this run actually used the new formula-sample
