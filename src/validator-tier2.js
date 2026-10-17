@@ -11,6 +11,7 @@ const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-resul
 const { buildVisibilityRecord } = require('./utils/build-visibility-record');
 const { buildSheetFacts } = require('./utils/sheet-facts');
 const { applyAbsencePolicy } = require('./utils/absence-policy');
+const promptCache = require('./utils/prompt-cache');
 
 const client = new Anthropic({
   // Explicit, not relying on SDK defaults — several frameworks have
@@ -369,37 +370,79 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
   const estimatedTokens = Math.round(JSON.stringify(payload).length / (isFullParse ? FORMULA_CHARS_PER_TOKEN : 3));
   console.log(`   ${batchLabel}: ~${estimatedTokens} tokens input, ${batchRules.length} rules`);
 
-  let rawText = '';
-  const stream = await client.messages.stream({
-    model: 'claude-sonnet-5',
-    max_tokens: 128000,   // Sonnet 5 ceiling on the synchronous Messages API.
-                           // Was 64000, sized for the pre-Sonnet-5 tokenizer;
-                           // the new tokenizer produces ~30% more tokens for
-                           // the same output, which was silently truncating
-                           // dense/numeric batches like Accounting & Debt.
-    system: [
-      {
-        type: 'text',
-        text: systemPrompt.staticPrompt,
-        cache_control: { type: 'ephemeral' }
-      },
-      ...(systemPrompt.dynamicPrompt ? [{
-        type: 'text',
-        text: systemPrompt.dynamicPrompt
-      }] : []),
-    ],
-    messages: [{ role: 'user', content: JSON.stringify(payload) }]
-  });
+  const systemBlocks = [
+    {
+      type: 'text',
+      text: systemPrompt.staticPrompt,
+      cache_control: { type: 'ephemeral' }
+    },
+    ...(systemPrompt.dynamicPrompt ? [{
+      type: 'text',
+      text: systemPrompt.dynamicPrompt
+    }] : []),
+  ];
 
-  for await (const chunk of stream) {
-    if (chunk.type === 'content_block_delta' && chunk.delta && chunk.delta.type === 'text_delta') {
-      rawText += chunk.delta.text;
+  // One streamed call. onFirstEvent fires when the reply starts, which is when a cache entry written by this call
+  // becomes readable by the others.
+  async function streamOnce(userContent, onFirstEvent) {
+    let text = '';
+    let first = true;
+    const st = await client.messages.stream({
+      model: 'claude-sonnet-5',
+      max_tokens: 128000,   // Sonnet 5 ceiling on the synchronous Messages API.
+                             // Was 64000, sized for the pre-Sonnet-5 tokenizer;
+                             // the new tokenizer produces ~30% more tokens for
+                             // the same output, which was silently truncating
+                             // dense/numeric batches like Accounting & Debt.
+      system: systemBlocks,
+      messages: [{ role: 'user', content: userContent }]
+    });
+    for await (const chunk of st) {
+      // message_start can arrive before the prompt has been processed; the cache entry is readable once the model has
+      // started to write its answer, so the gate opens on the first content event, not the first event.
+      if (first && (chunk.type === 'content_block_start' || chunk.type === 'content_block_delta')) { first = false; if (onFirstEvent) onFirstEvent(); }
+      if (chunk.type === 'content_block_delta' && chunk.delta && chunk.delta.type === 'text_delta') {
+        text += chunk.delta.text;
+      }
     }
+    const fm = await st.finalMessage();
+    return { rawText: text, finalMessage: fm };
   }
 
-  const finalMessage = await stream.finalMessage();
+  // PROMPT_CACHING: in a full-parse review every batch carries the same workbook data, so it goes first as a cached
+  // block and the batch's own rules follow it. The first call goes alone; the rest wait until the cache is warm.
+  const costCfg = promptCache.loadCostConfig();
+  const gate = tier0Context.cacheGate || null;
+  const useCache = !!(isFullParse && gate && costCfg.promptCaching.enabled);
+  let rawText = '';
+  let finalMessage;
+  if (useCache) {
+    const isFirst = await gate.enter();
+    const { rules: _rules, ...shared } = payload;
+    const cachedContent = [
+      { type: 'text', text: 'WORKBOOK DATA (identical for every batch of this review; each field is described in your instructions):\n' + JSON.stringify(shared), cache_control: { type: 'ephemeral', ttl: costCfg.promptCaching.ttl } },
+      { type: 'text', text: 'RULES TO TEST IN THIS BATCH (test every one of them against the workbook data above):\n' + JSON.stringify({ rules: batchRules }) }
+    ];
+    try {
+      ({ rawText, finalMessage } = await streamOnce(cachedContent, isFirst ? () => gate.open() : null));
+    } catch (e) {
+      if (isFirst) gate.open();
+      if (!promptCache.isCacheRejection(e)) throw e;
+      console.log(`   \u26a0\ufe0f  ${batchLabel}: the API rejected the cache setting (${String(e.message).slice(0, 120)}) - repeating without caching`);
+      ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), null));
+    } finally {
+      if (isFirst) gate.open();   // never leave the other batches waiting on a call that has already finished
+    }
+  } else {
+    ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), null));
+  }
+
+  promptCache.addUsage(tier0Context.usage, finalMessage.usage);
   const stopReason = finalMessage.stop_reason;
   const outputTokens = finalMessage.usage ? finalMessage.usage.output_tokens : null;
+  if (useCache && finalMessage.usage) {
+    console.log(`   ${batchLabel}: cache wrote ${(finalMessage.usage.cache_creation_input_tokens || 0).toLocaleString()} / read ${(finalMessage.usage.cache_read_input_tokens || 0).toLocaleString()} input tokens`);
+  }
 
   console.log(`   ${batchLabel}: ${rawText.length} chars received` +
     (outputTokens ? ` (${outputTokens} output tokens, stop: ${stopReason})` : ''));
@@ -817,6 +860,10 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   // Reusable batch runner with consistent error handling
   // True while every batch has seen the whole workbook in a single data chunk; the absence policy needs that.
   let allDataSingleChunk = true;
+  // PROMPT_CACHING: one gate and one usage tally per review (see utils/prompt-cache.js)
+  const _costCfg = promptCache.loadCostConfig();
+  const _cacheGate = promptCache.createCacheGate(_costCfg.promptCaching.warmupWaitMs);
+  const _usage = promptCache.createUsage();
   async function runOneBatch(rules, data, label, errorIdPrefix) {
     if (rules.length === 0) return;
     // `data` can now be a single data object (the existing, default
@@ -834,7 +881,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
         const chunkLabel = dataChunks.length > 1 ? `${label} (data chunk ${i + 1}/${dataChunks.length})` : label;
         const { results, meta } = await runBatch(
           rules, dataChunks[i], parsed.sheetNames, systemPrompt, chunkLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt },
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt, cacheGate: _cacheGate, usage: _usage },
           useFullParse
         );
         chunkResultArrays.push(results);
@@ -849,7 +896,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
               const retryLabel = `${chunkLabel} [retry ${missingRules.length} missing]`;
               const retryOut = await runBatch(
           missingRules, dataChunks[i], parsed.sheetNames, systemPrompt, retryLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt },
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt, cacheGate: _cacheGate, usage: _usage },
           useFullParse
         );
               const wanted = new Set(missingRules.map(r => r.id));
@@ -1087,6 +1134,10 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       // everything, so there's no visibility gap to record there at all.
       const visibilityRecord = buildVisibilityRecord({ dataSubset, deepDataSubset });
       Object.defineProperty(normalised, '_visibilityRecord', { value: visibilityRecord, enumerable: false });
+    }
+
+    if (_usage.calls > 0) {
+      console.log(`   Tier 2 API usage: ${_usage.calls} call(s), ${_usage.input.toLocaleString()} input + ${_usage.cacheWrite.toLocaleString()} cache-write + ${_usage.cacheRead.toLocaleString()} cache-read + ${_usage.output.toLocaleString()} output tokens = about $${promptCache.estimateCost(_usage, _costCfg).toFixed(2)} (estimate at list prices; the classification, familiarisation and domain-drafting calls are extra)`);
     }
 
     if (batchFailures.length > 0) {

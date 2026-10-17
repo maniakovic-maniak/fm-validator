@@ -99,3 +99,22 @@ keeps learning which lower-severity procedures can conclude.
   Phase B prompt is changed to use them.
 - `index.js` is an older standalone pipeline without exclusions, the hold gate or this scope plan. Production runs
   `server.js`.
+
+## Cost: prompt caching and the per-run cost line
+
+All three Tier 2 batches send the same workbook payload (formulas, static text, named ranges). That shared block is now
+sent as a cached prefix, and each batch's own rules follow it. Settings live in `config/cost.json`:
+
+- `promptCaching.enabled` - master switch. If the API rejects the cache setting, the call is repeated once as a plain call.
+- `promptCaching.ttl` - `"5m"` (default; cache write costs 1.25x input) or `"1h"` (write costs 2x). Switch to `"1h"` only after
+  the log shows `cache read` on batches 2 and 3 and the review is slow enough to outlast five minutes between batches.
+- `promptCaching.warmupWaitMs` - the first batch goes alone; the others wait until it starts answering (the cache is only
+  readable then), or until this timeout.
+- `pricePerMillion` - used for the cost line only.
+
+Log lines to check after a run: per call `cache wrote X / read Y input tokens`, and at the end
+`Tier 2 API usage ... about $X`. Batches 2 and 3 (and the retry of missing rules) should show a large `read` figure.
+If `read` stays at 0, caching is not working and the run is billed as before (plus the 25% cache-write surcharge on one call).
+
+The ">50% excluded" warning counts only `not_applicable` and `evidence_required`; procedures held back by tiering
+(`extended_not_run`) are a cost decision and do not trigger it.

@@ -200,8 +200,12 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
   if (explicitFatal.length) log(`      Of which ${explicitFatal.length} fatal-gate rule(s) excluded by explicit scope decision: ${explicitFatal.map(e => e.id).join(', ')}`);
   const pr = record.protectedByReason;
   if (Object.keys(pr).length) log(`      Kept in scope despite matching a listed family: ${Object.entries(pr).map(([k, v]) => `${v} ${k}`).join(', ')}`);
-  if (share > (g.maxExcludedShare ?? 0.5)) {
-    log(`   \u26a0\ufe0f  ${Math.round(share * 100)}% of planned procedures excluded - above the ${Math.round((g.maxExcludedShare ?? 0.5) * 100)}% review threshold. Check data/rule-exclusions/ before relying on the completion figure.`);
+  // Only judgement-based exclusions count toward the threshold. Procedures held back by the tiering plan
+  // (extended_not_run) are a cost decision, not a statement that the model lacks the structure.
+  const judged = excluded.filter(e => e.category === 'not_applicable' || e.category === 'evidence_required').length;
+  const judgedShare = planned ? judged / planned : 0;
+  if (judgedShare > (g.maxExcludedShare ?? 0.5)) {
+    log(`   \u26a0\ufe0f  ${Math.round(judgedShare * 100)}% of planned procedures excluded as not applicable or needing evidence - above the ${Math.round((g.maxExcludedShare ?? 0.5) * 100)}% review threshold. Check data/rule-exclusions/ before relying on the completion figure.`);
   }
   return { applied: true, profileId: record.profileId, excludedIds, isExcluded, record };
 }

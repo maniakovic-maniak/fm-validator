@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "description": "Cost controls for the Tier 2 reviewer. promptCaching sends the workbook data as a cached prefix shared by every batch of one review (and by the one-off retry of rules a batch skipped), so batches 2 and 3 and any retry read it at a fraction of the input price instead of paying for the whole workbook again. Only used for full-parse runs, where every batch sees identical data. The default ttl is 5m (cache writes cost 1.25x the input price). Switch to 1h (writes cost 2x) only after a run's log shows 'cache read' tokens on batches 2 and 3, because 1h pays off only once caching is confirmed to work, and it keeps the cache alive for the retry of skipped rules. If the API rejects the cache setting, the call is repeated without it. pricePerMillion is used only for the cost estimate printed in the log.",
+  "promptCaching": {
+    "enabled": true,
+    "ttl": "5m",
+    "warmupWaitMs": 120000
+  },
+  "pricePerMillion": {
+    "input": 3,
+    "output": 15,
+    "cacheWrite5m": 3.75,
+    "cacheWrite1h": 6,
+    "cacheRead": 0.3
+  }
+}
