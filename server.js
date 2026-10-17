@@ -102,6 +102,8 @@ const { preValidate }                            = require('./src/pre-validator'
 const { runTier1 }                               = require('./src/validator-tier1');
 const { runTier0 }                               = require('./src/validator-tier0');
 const { shouldUseFullParseRoute }                = require('./src/utils/formula-token-estimator');
+const { buildScopePlan, summarizeScopeForReport, computeCompletion, plannedRules, recordRunInHistory } = require('./src/utils/rule-scope');
+const { checkDuplicateCalculationLogic: _checkDupLogicEarly } = require('./src/utils/duplicate-calculation-logic-check');
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { uploadBothFiles }                        = require('./src/writer');
@@ -957,7 +959,34 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       catch (e) { console.error('   \u26a0\ufe0f  Output-sheet scan failed (non-fatal):', e.message); return null; }
     })();
     if (outputOverwriteScan) console.log(`   Output-sheet scan: ${outputOverwriteScan.summaryLine}`);
-    const t2Results  = await runTier2(parsed, { domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, recalcCheckResult, outputOverwriteScan });
+    // SCOPE_PLAN: decide, before any reviewer call, which Tier 2 procedures are out of scope (not applicable to this
+    // model type, need evidence outside the workbook, or - in a standard review - have never reached a verdict for
+    // this model type). One record (data/rule-exclusions/<run>.json) carries that decision to every later layer.
+    // fullScope (request field or FM_FULL_SCOPE=1) turns the extended-tier skipping off for a full review.
+    const fullScope = String(req.body.fullScope || process.env.FM_FULL_SCOPE || '') === '1' || String(req.body.fullScope || '') === 'true';
+    const scopePlan = (() => {
+      try {
+        return buildScopePlan({
+          checklist: require('./config/checklist.json'),
+          domainFile: path.basename(String(domain.file || '')),
+          modelText: `${modelType} ${modelSummary.industry || ''} ${modelSummary.model_purpose || ''}`,
+          runKey: String(originalName || runId), fullScope
+        });
+      } catch (e) {
+        console.error('   \u26a0\ufe0f  Scope plan failed (every procedure will run):', e.message);
+        return { preExcluded: [], skipRuleIds: new Set(), counts: {}, fullScope, tiering: { applied: false } };
+      }
+    })();
+    // Tier 0 full-formula duplicate-logic scan, run before Tier 2 so the reviewer can use its result (T2-S1-004).
+    const duplicateLogicSummary = (() => {
+      try {
+        const c = _checkDupLogicEarly(parsed._raw);
+        if (!c || !c.applicable) return { checked: false, findingCount: 0, findings: [] };
+        return { checked: true, findingCount: c.findings.length,
+                 findings: c.findings.slice(0, 10).map(f => ({ fn: f.fnName, sheets: f.sheets, occurrences: (f.occurrences || []).slice(0, 6) })) };
+      } catch (e) { return { checked: false, findingCount: 0, findings: [] }; }
+    })();
+    const t2Results  = await runTier2(parsed, { skipRuleIds: scopePlan.skipRuleIds, duplicateLogicSummary, domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, recalcCheckResult, outputOverwriteScan });
     const t2FailuresRaw = t2Results.filter(r => r.status !== 'pass');
     // FIX (I-11): found via an independent review confirming at least
     // 3 Tier 2 findings explicitly self-identify as duplicates of
@@ -988,7 +1017,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
           t2Results,
           domainFile: path.basename(String(domain.file || '')),
           modelText: `${modelType} ${modelSummary.industry || ''} ${modelSummary.model_purpose || ''}`,
-          originalName
+          originalName,
+          preExcluded: scopePlan.preExcluded
         });
       } catch (e) {
         console.error('   \u26a0\ufe0f  Rule-scope exclusion failed (all rules counted):', e.message);
@@ -3186,10 +3216,16 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // Computing directly from ruleResults - the same real, objective
     // data the Validation Matrix tab itself displays - so this number
     // can never contradict what a reader sees when they open that tab.
-    const definitiveCount = ruleResults.filter(r => r.status === 'pass' || r.status === 'fail').length;
-    const auditCompletion = ruleResults.length > 0
-      ? Math.round((definitiveCount / ruleResults.length) * 100)
-      : (t2Meta.audit_completion_percent || Math.round(((_totalRuleCount - checklistFindingCount) / _totalRuleCount) * 100));
+    // ONE_COMPLETION: the same figure the report's tile, verdict sentence and Validation Matrix show -
+    // (Pass + Raised Issue) / planned procedures, where 'planned' = the domain's procedures minus everything
+    // scoped out. The report builder computes it with src/completion.py, the twin of this function
+    // (scripts/test-scope-sync.js keeps them identical). Previously this was passes over RETURNED rules only,
+    // which could not agree with the tile once any procedure went unreturned.
+    const completion = computeCompletion(
+      plannedRules(require('./config/checklist.json'), path.basename(String(domain.file || '')), ruleExclusions.excludedIds),
+      ruleResults
+    );
+    const auditCompletion = completion.counts.concludedPct;
     const auditCommentary = t2Meta.audit_completion_commentary || `The audit file has completed ${auditCompletion}% of the planned review procedures. Open items are listed by priority below.`;
     const overallAssessment = 'audit_complete';
     const igReadiness = auditCompletion;
@@ -3224,6 +3260,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       deepAccountingResolvedSheets,
       recalcCheckResult,
       excludedRuleIds: ruleExclusions.excludedIds,
+      scopeSummary: summarizeScopeForReport(ruleExclusions.record, scopePlan),
       ownerDecisionChecklist,
       batchFailures:     t2Results._batchFailures || []
     });
@@ -3313,6 +3350,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const { held, heldReason } = computeHoldStatus(ruleResults, require('./config/checklist.json'));
     if (held) console.log(`   \u26a0\ufe0f  Run held from auto-send: ${heldReason}`);
 
+    // Rule history: what each procedure actually reached in this run, so the next standard review of this model
+    // type can leave out procedures that have never concluded. Best-effort; never affects delivery.
+    recordRunInHistory({ domainFile: path.basename(String(domain.file || '')), statusById: completion.statusById });
+
     // Nurse pipeline, Gather step: runs once, right after the report is built, reading
     // the report's own Validation Matrix + Issue Log (never a second, parallel
     // representation). Must never break report delivery - any failure here is caught
@@ -3362,6 +3403,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       driveLink:  driveResult ? driveResult.webViewLink : null,
       runLogFilename: runLog.filename,
       reportName,
+      completion: completion.counts,
       held,
       heldReason,
       flagged: allFlagged.map(f => ({

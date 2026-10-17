@@ -9,6 +9,7 @@ const { normalizeFormula: normalizeFormulaShape, colToNum } = require('./utils/f
 const { CHARS_PER_TOKEN: FORMULA_CHARS_PER_TOKEN } = require('./utils/formula-token-estimator');
 const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-results');
 const { buildVisibilityRecord } = require('./utils/build-visibility-record');
+const { buildSheetFacts } = require('./utils/sheet-facts');
 
 const client = new Anthropic({
   // Explicit, not relying on SDK defaults — several frameworks have
@@ -352,7 +353,14 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     // full finding objects) to stay within the conciseness budget the
     // rest of this payload already follows.
     namedRangeSummary: tier0Context.namedRangeSummary || null,
-    vbaSummary: tier0Context.vbaSummary || null
+    vbaSummary: tier0Context.vbaSummary || null,
+    // ABSENCE_POLICY: tells the reviewer whether it is looking at the whole workbook ('complete_workbook') or
+    // only part of it ('partial_view'). skill.md uses it to decide whether "not present" is a finding or "uncertain".
+    dataCoverage: tier0Context.dataCoverage || 'partial_view',
+    // SHEET_FACTS: sheet visibility and protection, which cannot be seen from cell values
+    sheetFacts: tier0Context.sheetFacts || null,
+    // DUPLICATE_LOGIC: result of the Tier 0 full-formula scan (duplicate-calculation-logic-check.js)
+    duplicateLogicSummary: tier0Context.duplicateLogicSummary || null
   };
 
   const estimatedTokens = Math.round(JSON.stringify(payload).length / (isFullParse ? FORMULA_CHARS_PER_TOKEN : 3));
@@ -568,7 +576,7 @@ function resolveDeepAccountingSheets(sheetNames) {
   return { resolvedMap, unresolvedCategories };
 }
 
-async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null, outputOverwriteScan = null } = {}) {
+async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null, outputOverwriteScan = null, skipRuleIds = null, duplicateLogicSummary = null } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
   // itself failed to complete for this run. A flat, mining-style
@@ -750,7 +758,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     const sourceId = r.source_id || '';
     if (!DOMAIN_SPECIFIC_SOURCE_RE.test(sourceId)) return true; // generic provenance, always applies
     return sourceId === domainFile; // domain-specific — only if it's THIS run's actual domain
-  });
+  }).filter(r => !(skipRuleIds && skipRuleIds.has(r.id))); // SCOPE_PLAN: rules scoped out before the run (rule-scope.js) are never sent
   const { batch1, batch2, batch3 } = splitIntoBatches(applicableRules);
   // FIX: batch2's size varies by domain (38-557 rules seen in real runs) —
   // chunk it into output-safe sub-batches rather than risk the truncation
@@ -786,6 +794,9 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     unusedCount: (namedRangeAudit.unused || []).length,
   } : { note: 'Named range audit did not complete for this run — treat named_ranges_current as manual_only.' };
 
+  let sheetFactsForPrompt = null;
+  try { sheetFactsForPrompt = buildSheetFacts(parsed); } catch (_) { /* optional context only */ }
+
   const vbaSummaryForPrompt = (vbaReview && vbaReview.applicable) ? {
     hasVbaProject: vbaReview.hasVbaProject,
     moduleCount: vbaReview.moduleCount || 0,
@@ -809,7 +820,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
         const chunkLabel = dataChunks.length > 1 ? `${label} (data chunk ${i + 1}/${dataChunks.length})` : label;
         const { results, meta } = await runBatch(
           rules, dataChunks[i], parsed.sheetNames, systemPrompt, chunkLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt },
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view' },
           useFullParse
         );
         chunkResultArrays.push(results);
@@ -824,7 +835,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
               const retryLabel = `${chunkLabel} [retry ${missingRules.length} missing]`;
               const retryOut = await runBatch(
           missingRules, dataChunks[i], parsed.sheetNames, systemPrompt, retryLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt },
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view' },
           useFullParse
         );
               const wanted = new Set(missingRules.map(r => r.id));
