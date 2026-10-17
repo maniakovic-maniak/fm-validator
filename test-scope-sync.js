@@ -202,7 +202,8 @@ print(json.dumps([compute_completion(d['planned'], f)['counts'] for f in d['fixt
     const r = spawnSync('python3', [path.join(__dirname, 'src', 'build_report.py'), path.join(tmp, 'd.json'), path.join(tmp, 'o.xlsx')], { encoding: 'utf8' });
     assert.strictEqual(r.status, 0, r.stderr);
     const expected = scope.computeCompletion(planned, ruleResults).counts.concludedPct;
-    const chk = spawnSync('python3', ['-I', '-c', `
+    // no -I here: isolated mode ignores user site-packages, where openpyxl lives on the VPS
+    const chk = spawnSync('python3', ['-c', `
 import openpyxl, json
 wb = openpyxl.load_workbook(${JSON.stringify(path.join(tmp, 'o.xlsx'))}, read_only=True, data_only=True)
 tile = None; texts = []
