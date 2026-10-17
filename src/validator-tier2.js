@@ -813,6 +813,30 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
           useFullParse
         );
         chunkResultArrays.push(results);
+        // RETRY_MISSING_RULES: the reviewer sometimes ends its turn cleanly after skipping rules (seen: 21 of 48 in one
+        // batch). Ask once more for only those rules, with the same data and context, and keep whatever comes back.
+        if (dataChunks.length === 1) {
+          try {
+            const returnedIds = new Set((results || []).map(r => r && r.id));
+            const missingRules = rules.filter(r => !returnedIds.has(r.id));
+            if (missingRules.length > 0) {
+              console.log(`   \u26a0\ufe0f  ${chunkLabel}: ${missingRules.length} of ${rules.length} rule(s) not returned - retrying those once`);
+              const retryLabel = `${chunkLabel} [retry ${missingRules.length} missing]`;
+              const retryOut = await runBatch(
+          missingRules, dataChunks[i], parsed.sheetNames, systemPrompt, retryLabel,
+          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt },
+          useFullParse
+        );
+              const wanted = new Set(missingRules.map(r => r.id));
+              const seen = new Set();
+              const recovered = ((retryOut && retryOut.results) || []).filter(r => r && wanted.has(r.id) && !seen.has(r.id) && seen.add(r.id));
+              chunkResultArrays[chunkResultArrays.length - 1] = (results || []).concat(recovered);
+              console.log(`   \u2139\ufe0f  ${chunkLabel}: retry recovered ${recovered.length} of ${missingRules.length} missing rule(s)`);
+            }
+          } catch (retryErr) {
+            console.log(`   \u26a0\ufe0f  ${chunkLabel}: retry of missing rules failed (${retryErr.message}) - keeping first-pass results`);
+          }
+        }
         if (!sawMeta && meta && (meta.audit_completion_percent !== undefined || meta.open_p1_count !== undefined)) {
           sawMeta = meta;
         }
