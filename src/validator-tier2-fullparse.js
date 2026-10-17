@@ -70,7 +70,7 @@ function buildFullParseFormulaPayload(workbook) {
 // Both are objective, model-independent inputs, sent for every full-parse run. They are capped; if a cap bites, the
 // run is told it saw a partial view, so "not present" is never claimed from a workbook it could not fully read.
 // ══════════════════════════════════════════════════════════════════
-const TEXT_INDEX_MAX_CHARS = 100000;     // ~25-30k real tokens: text tokenizes ~3-4 chars/token, unlike formulas
+const TEXT_INDEX_MAX_CHARS = 160000;     // ~40-50k real tokens (about $0.4 across the three batches): text tokenizes ~3-4 chars/token, unlike formulas
 const TEXT_CELL_MAX_CHARS = 90;
 const NARROW_MAX_COL = 5;                // fallback mode: label columns A-E only
 const NAMED_RANGE_MAX = 600;
@@ -106,32 +106,70 @@ function sheetTextLines(ws, maxCol) {
   return lines;
 }
 
+// Drop rows whose text is identical to an earlier row of the same sheet (archive and scenario sheets repeat the same
+// headings thousands of times). Every distinct row is kept, so nothing a reviewer could look for is lost.
+function dedupeLines(lines) {
+  const seen = new Set();
+  const out = [];
+  for (const l of lines) {
+    const key = l.replace(/^R\d+: /, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(l);
+  }
+  return out;
+}
+
+// Share a character budget across sheets so a few huge sheets cannot starve the rest: small sheets keep everything,
+// large ones split what is left evenly. Cuts fall on row boundaries and keep the top of each sheet (headings first).
+function fairShare(built, maxChars) {
+  const sizeOf = b => b.lines.reduce((n, l) => n + l.length + 1, 0);
+  const order = built.map((b, i) => ({ i, size: sizeOf(b) })).sort((x, y) => x.size - y.size);
+  let remaining = maxChars;
+  const allow = new Array(built.length).fill(0);
+  order.forEach((o, k) => {
+    const share = Math.floor(remaining / (order.length - k));
+    allow[o.i] = Math.min(o.size, share);
+    remaining -= allow[o.i];
+  });
+  const truncatedSheets = [];
+  const out = built.map((b, i) => {
+    const kept = []; let used = 0;
+    for (const l of b.lines) { if (used + l.length + 1 > allow[i]) break; kept.push(l); used += l.length + 1; }
+    if (kept.length < b.lines.length) truncatedSheets.push(b.name);
+    return { name: b.name, lines: kept };
+  });
+  return { built: out, truncatedSheets };
+}
+
 /**
- * @returns {{ bySheet: Object<string,string>, mode: 'full'|'narrowed'|'truncated', chars: number, truncatedSheets: string[] }}
- * mode 'full'      - every static text cell of every sheet is included (the only mode that supports "complete")
- * mode 'narrowed'  - over budget, so only label columns A-E are included (sheets with no formulas stay whole)
- * mode 'truncated' - still over budget; later sheets are cut. Partial view.
+ * @returns {{ bySheet: Object<string,string>, mode: 'full'|'deduped'|'narrowed'|'truncated', chars: number, truncatedSheets: string[] }}
+ * mode 'full'      - every static text cell of every sheet is included.
+ * mode 'deduped'   - over budget; repeated identical rows were dropped. Every distinct row is still there, so a
+ *                    "not present" claim remains sound.
+ * mode 'narrowed'  - still over budget; only label columns A-E of sheets that have formulas (sheets with no formulas
+ *                    stay whole). Partial view.
+ * mode 'truncated' - still over budget; the budget is shared fairly across sheets and the rest is cut. Partial view.
  */
 function buildTextIndex(workbook, { maxChars = TEXT_INDEX_MAX_CHARS } = {}) {
   const sheets = [];
   workbook.eachSheet(ws => sheets.push(ws));
   const hasFormula = ws => { let f = false; ws.eachRow({ includeEmpty: false }, r => { if (f) return; r.eachCell({ includeEmpty: false }, c => { if (c.formula) f = true; }); }); return f; };
-  const build = narrow => sheets.map(ws => ({ name: ws.name, lines: sheetTextLines(ws, narrow && hasFormula(ws) ? NARROW_MAX_COL : 0) }));
   const size = built => built.reduce((n, b) => n + b.lines.reduce((m, l) => m + l.length + 1, 0), 0);
+  const build = (narrow, dedupe) => sheets.map(ws => {
+    const lines = sheetTextLines(ws, narrow && hasFormula(ws) ? NARROW_MAX_COL : 0);
+    return { name: ws.name, lines: dedupe ? dedupeLines(lines) : lines };
+  });
 
   let mode = 'full';
-  let built = build(false);
-  if (size(built) > maxChars) { mode = 'narrowed'; built = build(true); }
-  const truncatedSheets = [];
+  let built = build(false, false);
+  let truncatedSheets = [];
+  if (size(built) > maxChars) { mode = 'deduped'; built = build(false, true); }
+  if (size(built) > maxChars) { mode = 'narrowed'; built = build(true, true); }
   if (size(built) > maxChars) {
     mode = 'truncated';
-    let used = 0;
-    built = built.map(b => {
-      const kept = [];
-      for (const l of b.lines) { if (used + l.length + 1 > maxChars) break; kept.push(l); used += l.length + 1; }
-      if (kept.length < b.lines.length) truncatedSheets.push(b.name);
-      return { name: b.name, lines: kept };
-    });
+    const fs_ = fairShare(built, maxChars);
+    built = fs_.built; truncatedSheets = fs_.truncatedSheets;
   }
   const bySheet = {};
   for (const b of built) if (b.lines.length) bySheet[b.name] = b.lines.join('\n');
@@ -174,7 +212,7 @@ function buildFullParsePayloadWithText(workbook, opts = {}) {
 // "complete_workbook" means: every formula, every static text cell and every named range reached the reviewer.
 // Numeric constants and computed values are not part of it; absence rules never depend on them.
 function fullParseCoverage(textIndex, namedRanges) {
-  return textIndex && textIndex.mode === 'full' && !(namedRanges && namedRanges.truncated) ? 'complete_workbook' : 'partial_view';
+  return textIndex && (textIndex.mode === 'full' || textIndex.mode === 'deduped') && !(namedRanges && namedRanges.truncated) ? 'complete_workbook' : 'partial_view';
 }
 
 // ══════════════════════════════════════════════════════════════════

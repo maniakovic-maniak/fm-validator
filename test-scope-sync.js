@@ -225,6 +225,28 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
     assert.ok(b.textIndex.chars <= 60);
     assert.strictEqual(b.coverage, 'partial_view');
   });
+  test('over budget only because rows repeat: duplicates are dropped, every distinct row stays, still complete', () => {
+    const wb = mkWb();
+    const arc = wb.addWorksheet('Archive');
+    for (let r = 1; r <= 200; r++) { arc.getCell(`A${r}`).value = 'Scenario output'; arc.getCell(`B${r}`).value = 'Units'; }
+    const full = fp.buildTextIndex(wb);
+    const b = fp.buildFullParsePayloadWithText(wb, { maxChars: Math.floor(full.chars / 3) });
+    assert.strictEqual(b.textIndex.mode, 'deduped');
+    assert.ok(b.payload.Archive.includes('A=Scenario output | B=Units') && b.payload.Archive.split('\n').filter(l => l.includes('Scenario output')).length === 1);
+    assert.ok(b.payload.Calc.includes('A=Receivables') && b.payload.Cover.includes('Change log'));
+    assert.strictEqual(b.coverage, 'complete_workbook');
+  });
+  test('a huge sheet cannot starve the others: the budget is shared and the cut sheets are named', () => {
+    const wb = mkWb();
+    const big = wb.addWorksheet('Big');
+    for (let r = 1; r <= 2000; r++) big.getCell(`A${r}`).value = `Row label number ${r} with some descriptive wording`;
+    const b = fp.buildFullParsePayloadWithText(wb, { maxChars: 4000 });
+    assert.strictEqual(b.textIndex.mode, 'truncated');
+    assert.ok(b.payload.Cover.includes('Change log') && b.payload.Calc.includes('A=Receivables'), 'small sheets must survive');
+    assert.deepStrictEqual(b.textIndex.truncatedSheets, ['Big']);
+    assert.ok(b.textIndex.chars <= 4000);
+    assert.strictEqual(b.coverage, 'partial_view');
+  });
   test('a cut name list also means partial_view', () => {
     assert.strictEqual(fp.fullParseCoverage({ mode: 'full' }, { truncated: true }), 'partial_view');
     assert.strictEqual(fp.fullParseCoverage({ mode: 'full' }, { truncated: false }), 'complete_workbook');
