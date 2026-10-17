@@ -69,7 +69,13 @@ console.error(exportResult.stderr);
 
 // Step 2 - real report extraction, same pattern.
 logStep('Extracting the completed report');
-const reportResult = spawnSync('python3', [path.join(__dirname, 'extract_report_for_partner_review.py'), reportFilePath], { encoding: 'utf8', maxBuffer: LARGE_BUFFER });
+// The run's scope record (what was left out of the plan, and why) sits beside the report under the same base name;
+// pass it when it exists so Partner Review knows which procedures were deliberately outside this review.
+const scopeRecordPath = path.join(__dirname, '..', 'data', 'rule-exclusions',
+  `${path.basename(reportFilePath).replace(/_PROCESSED\.xlsx$/i, '').replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
+const extractArgs = [path.join(__dirname, 'extract_report_for_partner_review.py'), reportFilePath];
+if (fs.existsSync(scopeRecordPath)) extractArgs.push(scopeRecordPath);
+const reportResult = spawnSync('python3', extractArgs, { encoding: 'utf8', maxBuffer: LARGE_BUFFER });
 if (reportResult.status !== 0) failAndExit(`Report extraction failed: ${reportResult.error || reportResult.stderr}`);
 fs.writeFileSync(reportJsonPath, reportResult.stdout);
 console.error(reportResult.stderr);

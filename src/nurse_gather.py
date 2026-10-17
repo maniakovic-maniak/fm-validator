@@ -48,6 +48,26 @@ def is_absence_finding(text):
         return False
     return bool(ABSENCE_START_RE.search(t) or ABSENCE_EARLY_RE.search(t[:220]))
 
+NOT_APPLICABLE_RE = re.compile(r'^\s*not applicable to this model type', re.I)
+
+
+def completion_from_matrix(report_path):
+    """Completion figures read straight from the report's own Validation Matrix (the same rows the client sees),
+    so the Improvement Signals view can never disagree with the report. Status is column 6 (index 5)."""
+    wb = openpyxl.load_workbook(report_path, read_only=True, data_only=True)
+    counts = {'Pass': 0, 'Raised Issue': 0, 'Uncertain': 0, 'Not Performed': 0}
+    for r in wb['Validation Matrix'].iter_rows(values_only=True):
+        if r and r[1] and len(r) > 5 and r[5] in counts:
+            counts[r[5]] += 1
+    planned = sum(counts.values())
+    concluded = counts['Pass'] + counts['Raised Issue']
+    return {
+        'planned': planned, 'pass': counts['Pass'], 'issue': counts['Raised Issue'],
+        'uncertain': counts['Uncertain'], 'notRun': counts['Not Performed'],
+        'concludedPct': int((concluded / planned) * 100 + 0.5) if planned else 0,
+    }
+
+
 def categorize_uncertain(report_path):
     """Returns (list of {rule_id, category, sheet, cell, finding}, total_uncertain_count)."""
     wb = openpyxl.load_workbook(report_path, read_only=True, data_only=True)
@@ -82,6 +102,14 @@ def categorize_uncertain(report_path):
             cat = 'b1_strong'
         elif is_real_location(sheet) and not is_absence_finding(finding):
             cat = 'b1_weak'
+        elif NOT_APPLICABLE_RE.search(str(finding or '')):
+            # The reviewer itself said the procedure does not fit this kind of model. A recurring one is a
+            # candidate for the scope config (config/rule-exclusions.json), not a model defect.
+            cat = 'not_applicable_candidate'
+        elif is_absence_finding(finding):
+            # "Not present" left as Uncertain. With the absence policy in skill.md this should only happen
+            # when the reviewer saw part of the workbook, so a recurrence on a full-parse run is a signal.
+            cat = 'absence_uncertain'
         else:
             cat = 'uncategorized'
 
@@ -122,6 +150,7 @@ def gather(report_path, run_id, original_name, domain_file=None,
         'held': bool(held),
         'heldReason': held_reason,
         'uncertainTotal': total_uncertain,
+        'completion': completion_from_matrix(report_path),
         'uncertainByCategory': {},
         'uncertainFindings': findings,
         'ruleExclusions': rule_exclusion_record or None,

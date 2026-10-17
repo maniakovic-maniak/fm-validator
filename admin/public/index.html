@@ -279,7 +279,27 @@
   <div id="nurseWithinModelPager" style="display:none; margin-top: 12px;"></div>
   <div class="empty-state" id="nurseWithinModelEmpty" style="display:none">No within-model patterns yet.</div>
 
-  <p class="meta" style="margin-top:20px;">Only genuinely uncategorized-free findings are pattern-matched here (a_candidate, b1_strong, b1_weak) - the remainder of each run's uncertain items have no detector yet (a mix of B2/C1/C2/D) and aren't grouped until those exist.</p>
+  <h2 style="font-size:15px; margin:28px 0 8px;">Audit completion by run</h2>
+  <p class="meta" style="margin-bottom:8px;">Read from each report's own Validation Matrix, so it is the same figure the client sees. "Out of scope" shows what was left out of the planned set before the run, by reason.</p>
+  <table id="nurseCompletionTable" style="display:none">
+    <thead>
+      <tr><th>Run</th><th>Model</th><th>Planned</th><th>Completion</th><th>Pass</th><th>Issue</th><th>Uncertain</th><th>Not run</th><th>Out of scope</th></tr>
+    </thead>
+    <tbody id="nurseCompletionBody"></tbody>
+  </table>
+  <div class="empty-state" id="nurseCompletionEmpty" style="display:none">No completion figures recorded yet - they appear for runs made after this feature shipped.</div>
+
+  <h2 style="font-size:15px; margin:28px 0 8px;">Scope candidates (procedures the reviewer calls not applicable)</h2>
+  <p class="meta" style="margin-bottom:8px;">Same rule reported "not applicable to this model type" on more than one model. Candidates to add to the scope config; nothing is excluded automatically.</p>
+  <table id="nurseScopeCandidatesTable" style="display:none">
+    <thead>
+      <tr><th>Rule ID</th><th>Domain skill</th><th>Recurrence</th><th>Sample finding</th></tr>
+    </thead>
+    <tbody id="nurseScopeCandidatesBody"></tbody>
+  </table>
+  <div class="empty-state" id="nurseScopeCandidatesEmpty" style="display:none">No scope candidates yet.</div>
+
+  <p class="meta" style="margin-top:20px;">Only findings with a usable signal are pattern-matched here (a_candidate, b1_strong, b1_weak, not_applicable_candidate, absence_uncertain) - the remainder of each run's uncertain items have no detector yet (a mix of B2/C1/C2/D) and aren't grouped until those exist.</p>
 </div>
 
     <div class="page" id="page-review-queue" style="display:none">
@@ -792,6 +812,32 @@
         <td>${r.recurrenceCount}</td>
         <td>${r.runIds.length} run(s)</td>
         <td>${escapeHtml((r.categoriesSeen || []).join(', '))}</td>
+        <td style="max-width:360px;">${escapeHtml(r.sampleFinding)}</td>
+      </tr>
+    `).join('');
+
+    const compRows = report.completionByRun || [];
+    document.getElementById('nurseCompletionTable').style.display = compRows.length ? 'table' : 'none';
+    document.getElementById('nurseCompletionEmpty').style.display = compRows.length ? 'none' : 'block';
+    document.getElementById('nurseCompletionBody').innerHTML = compRows.slice().reverse().map(r => `
+      <tr>
+        <td>${escapeHtml(r.runId)}</td>
+        <td>${escapeHtml(r.originalName)}</td>
+        <td>${r.planned}</td>
+        <td><strong>${r.concludedPct}%</strong></td>
+        <td>${r.pass}</td><td>${r.issue}</td><td>${r.uncertain}</td><td>${r.notRun}</td>
+        <td>${escapeHtml(Object.entries(r.outOfScope || {}).map(([k, v]) => v + ' ' + k.replace(/_/g, ' ')).join(', ') || '-')}</td>
+      </tr>
+    `).join('');
+
+    const scRows = report.scopeCandidates || [];
+    document.getElementById('nurseScopeCandidatesTable').style.display = scRows.length ? 'table' : 'none';
+    document.getElementById('nurseScopeCandidatesEmpty').style.display = scRows.length ? 'none' : 'block';
+    document.getElementById('nurseScopeCandidatesBody').innerHTML = scRows.map(r => `
+      <tr>
+        <td>${escapeHtml(r.ruleId)}</td>
+        <td>${escapeHtml(r.domainFile)}</td>
+        <td>${r.recurrenceCount}</td>
         <td style="max-width:360px;">${escapeHtml(r.sampleFinding)}</td>
       </tr>
     `).join('');

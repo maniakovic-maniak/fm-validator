@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 # both dimensions below: it means no detector exists yet for whatever's in there
 # (a mix of B2/C1/C2/D), so grouping it would produce noise, not signal, until
 # those detectors exist. a_candidate and b1_* have real, specific meaning today.
-TRACKED_CATEGORIES = {'a_candidate', 'b1_strong', 'b1_weak'}
+TRACKED_CATEGORIES = {'a_candidate', 'b1_strong', 'b1_weak', 'not_applicable_candidate', 'absence_uncertain'}
 
 
 def load_all_logs(logs_dir):
@@ -109,6 +109,25 @@ def build_report(logs):
     held_runs = [{'runId': l.get('runId'), 'originalName': l.get('originalName'), 'heldReason': l.get('heldReason')}
                  for l in logs if l.get('held')]
 
+    # Completion per run, straight from each report's own Validation Matrix (see nurse_gather.completion_from_matrix),
+    # plus what was left out of scope and why, so the trend can be read next to the scope that produced it.
+    completion_by_run = []
+    for l in logs:
+        c = l.get('completion')
+        if not c:
+            continue
+        re_ = l.get('ruleExclusions') or {}
+        completion_by_run.append({
+            'runId': l.get('runId'), 'originalName': l.get('originalName'), 'generatedAt': l.get('generatedAt'),
+            'domainFile': l.get('domainFile'), 'planned': c.get('planned'), 'concludedPct': c.get('concludedPct'),
+            'pass': c.get('pass'), 'issue': c.get('issue'), 'uncertain': c.get('uncertain'), 'notRun': c.get('notRun'),
+            'outOfScope': re_.get('byCategory') or {},
+        })
+    completion_by_run.sort(key=lambda r: r.get('generatedAt') or '')
+
+    # Procedures the reviewer keeps calling not applicable: candidates for the scope config.
+    scope_candidates = [p for p in cross_model_out if 'not_applicable_candidate' in p.get('categoriesSeen', [])]
+
     return {
         'generatedAt': datetime.now(timezone.utc).isoformat(),
         'runsAnalyzed': len(logs),
@@ -116,6 +135,8 @@ def build_report(logs):
         'currentlyHeldRuns': held_runs,
         'crossModelPatterns': cross_model_out,
         'withinModelPatterns': within_model_out,
+        'completionByRun': completion_by_run,
+        'scopeCandidates': scope_candidates,
         'note': "'uncategorized' findings are excluded from pattern-grouping above - no detector exists yet for that bucket (a mix of B2/C1/C2/D)."
     }
 
