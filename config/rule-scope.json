@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "description": "Pre-run scope for the Tier 2 plan. Everything removed here is removed BEFORE the reviewer is called (saving its cost), is recorded once in data/rule-exclusions/<run>.json, leaves the planned set in every layer (report, Validation Matrix, completion, Improvement Signals, Partner Review export), and is disclosed in the report's Scope and Reliance tab by category and count. Rules are removed only for reasons knowable before the run and independent of its outcome; a rule that was run and could not conclude is never removed.",
+  "discloseInReport": true,
+  "categories": {
+    "not_applicable": "Procedure does not apply to this model type (decided per model type in config/rule-exclusions.json).",
+    "evidence_required": "Procedure needs source documents or records that cannot be held in the workbook itself, so it cannot be concluded from the file alone.",
+    "extended_not_run": "Lower-severity procedure that has not reached a verdict in earlier reviews of this model type; left out of a standard review and run in a full review."
+  },
+  "evidenceRequired": {
+    "enabled": true,
+    "allowFatal": false,
+    "reason": "These procedures compare the model with records outside the workbook (audited accounts, general ledger or trial balance, imported source data, contract and licence terms, market benchmarks, unit definitions) or need the model to be changed and recalculated (date and period edge cases). The Excel file alone cannot settle them, so they are scoped out of the completion figure and listed as work needing source documents or live testing.",
+    "ruleIds": ["T2-S10-002", "T2-S11-003", "T2-S11-007", "T2-S12-004", "T2-S3-003", "T2-S7-004", "T2-S4-004", "T2-S8-004"]
+  },
+  "limits": {
+    "maxSkipShareOfTier2": 0.85
+  }
+}

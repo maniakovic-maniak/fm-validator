@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "minRunsBeforeTiering": 2,
+  "alwaysCoreSeverities": ["fatal", "critical", "high"],
+  "explorationRate": 0.02
+}

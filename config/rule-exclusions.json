@@ -20,6 +20,12 @@
           "decision": "Scope decision recorded 2026-10-03 at Mik Riazanov's instruction, after reviewing Fm-00032 and Fm-00033: these generic project-finance gates test structures (equity ownership split, retained-earnings roll-forward, cash waterfall and cash balance, capitalised vs cash interest, distributions vs cash, actual/forecast period flags) that a regulated-network allowed-revenue model does not contain. Both runs reported them absent. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
           "ruleIds": ["T1-008", "T1-012", "T2-S5-003", "T2-S6-005", "T2-S6-008", "T2-S6-010", "T2-S6-011", "T2-S10-006", "T2-S10-008", "T2-S10-016"]
         },
+        "R2_scope_decision_regulated_network_commercial": {
+          "enabled": true,
+          "allowFatal": false,
+          "decision": "Scope decision recorded 2026-10-17 at Mik Riazanov's instruction, after the offline triage of the 48 core rules that never reached a verdict in Fm-00033 to Fm-00035: these generic procedures test commercial and project-finance mechanics (debt sweeps, reserve accounts, preferred returns, price x volume revenue, capacity limits, payroll build, bad debts, sub-annual conversion, GST/VAT, deferred revenue, IRR/NPV, no-debt and delayed-start stress tests) that a regulated-network allowed-revenue model does not contain. The fatal-gate members of this decision (cash waterfall, ownership split) are in the tier above.",
+          "ruleIds": ["T2-S6-006", "T2-S6-007", "T2-S6-009", "T2-S7-001", "T2-S7-002", "T2-S7-007", "T2-S7-008", "T2-S3-007", "T2-S3-009", "T2-S5-010", "T2-S10-010", "T2-S10-015", "T2-S4-008", "T2-S8-007", "T2-S8-008"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]

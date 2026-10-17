@@ -48,20 +48,42 @@ function noop(reason) {
   return { applied: false, reason, excludedIds: [], isExcluded: () => false, record: null };
 }
 
-function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile, modelText, originalName, log = console.log, config = null }) {
+function loadExclusionConfig(log = console.log) {
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')); }
+  catch (e) { log(`   \u26a0\ufe0f  Rule-scope exclusions unavailable (${e.message}) - all rules counted`); return null; }
+}
+
+// One place decides which profile (if any) a run falls under, so the pre-run scope plan and the
+// post-run exclusion pass can never disagree about it.
+function matchProfile(cfg, domainFile, modelText) {
+  const text = String(modelText || '').toLowerCase();
+  return ((cfg && cfg.profiles) || []).find(p =>
+    p.appliesToDomainSkill === domainFile && (p.matchAny || []).some(k => text.includes(String(k).toLowerCase()))) || null;
+}
+
+// The explicit scope-decision tiers of a profile: tiers that name rule ids directly.
+function explicitScopeTiers(profile) {
+  return Object.entries((profile && profile.tiers) || {})
+    .filter(([, t]) => t && t.enabled && Array.isArray(t.ruleIds) && t.ruleIds.length > 0)
+    .map(([tierName, t]) => ({ tierName, ruleIds: t.ruleIds, allowFatal: t.allowFatal === true, decision: t.decision || null }));
+}
+
+// preExcluded: rules removed from scope BEFORE the run (not applicable to the model type, needs evidence
+// the workbook cannot hold, or deliberately left out of a standard run). They never reach the reviewer, so
+// they have no result to protect; they simply leave the planned set, and are recorded here with the
+// category they were removed under so every downstream layer reads one record.
+function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile, modelText, originalName, log = console.log, config = null, preExcluded = [] }) {
   let cfg = config;
   if (!cfg) {
-    try { cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')); }
-    catch (e) { log(`   \u26a0\ufe0f  Rule-scope exclusions unavailable (${e.message}) - all rules counted`); return noop('config_unreadable'); }
+    cfg = loadExclusionConfig(log);
+    if (!cfg) { if (!preExcluded.length) return noop('config_unreadable'); cfg = { guardrails: {}, profiles: [] }; }
   }
-  const text = String(modelText || '').toLowerCase();
-  const profile = (cfg.profiles || []).find(p =>
-    p.appliesToDomainSkill === domainFile && (p.matchAny || []).some(k => text.includes(String(k).toLowerCase())));
-  if (!profile) return noop('no_profile_matched');
+  const profile = matchProfile(cfg, domainFile, modelText);
+  if (!profile && !preExcluded.length) return noop('no_profile_matched');
 
   const g = cfg.guardrails || {};
   const active = [];
-  for (const [tierName, t] of Object.entries(profile.tiers || {})) {
+  for (const [tierName, t] of Object.entries((profile && profile.tiers) || {})) {
     if (t && t.enabled) active.push({
       tierName, families: t.families || [],
       // explicitScope: a tier that names rule ids directly (a human scope decision) instead of
@@ -70,7 +92,8 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
       allowFatal: t.allowFatal === true, decision: t.decision || null
     });
   }
-  if (!active.length) return noop('no_tier_enabled');
+  if (!active.length && !preExcluded.length) return noop('no_tier_enabled');
+  const preSet = new Set(preExcluded.map(p => p.id));
 
   const applies = r => {
     const src = r.source_id || '';
@@ -81,7 +104,8 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
   const excluded = [];
   const protectedRules = [];
   for (const rule of checklist.tier2) {
-    if (rule.source_id !== profile.appliesToDomainSkill) continue;
+    if (!profile || rule.source_id !== profile.appliesToDomainSkill) continue;
+    if (preSet.has(rule.id)) continue;
     const hit = active.find(a => familyMatches(rule.test, a.families));
     if (!hit) continue;
     const res = resultsForRule(rule.id, t2Results);
@@ -104,7 +128,7 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
   const alreadyExcluded = new Set(excluded.map(e => e.id));
   for (const a of active.filter(x => x.explicitScope)) {
     for (const rid of a.ruleIds) {
-      if (alreadyExcluded.has(rid)) continue;
+      if (alreadyExcluded.has(rid) || preSet.has(rid)) continue;
       const rule = checklistById.get(rid);
       const prot = reason => protectedRules.push({ id: rid, test: rule ? (rule.test || rule.label || null) : null, tier: a.tierName, reason });
       if (!rule) { prot('unknown_rule_id'); continue; }
@@ -123,6 +147,20 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
     }
   }
 
+  for (const p of preExcluded) {
+    if (alreadyExcluded.has(p.id)) continue;
+    const rule = checklistById.get(p.id);
+    if (!rule) { protectedRules.push({ id: p.id, test: null, tier: p.tier, reason: 'unknown_rule_id' }); continue; }
+    excluded.push({
+      id: p.id, test: rule.test || null, label: rule.label || null, tier: p.tier, category: p.category,
+      severity: rule.severity || null, decision: p.reason || null, confidence: null, finding: '', preRun: true
+    });
+    alreadyExcluded.add(p.id);
+  }
+  // Rules removed after the run (family tiers, explicit scope decisions on rules that did return) are
+  // 'not_applicable' unless they carry their own category.
+  for (const e of excluded) if (!e.category) e.category = 'not_applicable';
+
   const excludedIds = excluded.map(e => e.id);
   const set = new Set(excludedIds);
   const isExcluded = id => {
@@ -136,8 +174,9 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
   const record = {
     generatedAt: new Date().toISOString(),
     originalName: originalName || null,
-    domainFile, profileId: profile.id,
+    domainFile, profileId: profile ? profile.id : 'global_scope',
     tiersEnabled: active.map(a => a.tierName),
+    byCategory: excluded.reduce((a, e) => (a[e.category] = (a[e.category] || 0) + 1, a), {}),
     plannedBefore: planned, excludedCount: excluded.length, plannedAfter: planned - excluded.length,
     excludedShare: Math.round(share * 1000) / 1000,
     protectedByReason: protectedRules.reduce((a, p) => (a[p.reason] = (a[p.reason] || 0) + 1, a), {}),
@@ -150,7 +189,7 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
     fs.writeFileSync(path.join(RECORD_DIR, `${base}.json`), JSON.stringify(record, null, 2));
   } catch (e) { log(`   \u26a0\ufe0f  Could not store rule-exclusion record: ${e.message}`); }
 
-  log(`   \u2139\ufe0f  Rule scope (${profile.id}): ${excluded.length} of ${planned} planned procedures excluded as not applicable to this model type (server log and stored record only) - ${planned - excluded.length} remain`);
+  log(`   \u2139\ufe0f  Rule scope (${record.profileId}): ${excluded.length} of ${planned} planned procedures out of scope (${Object.entries(record.byCategory).map(([k, v]) => `${v} ${k}`).join(', ')}) - ${planned - excluded.length} remain`);
   const explicitFatal = excluded.filter(e => e.decision && e.severity === 'fatal');
   if (explicitFatal.length) log(`      Of which ${explicitFatal.length} fatal-gate rule(s) excluded by explicit scope decision: ${explicitFatal.map(e => e.id).join(', ')}`);
   const pr = record.protectedByReason;
@@ -158,7 +197,7 @@ function applyRuleExclusions({ checklist, t1Results = [], t2Results, domainFile,
   if (share > (g.maxExcludedShare ?? 0.5)) {
     log(`   \u26a0\ufe0f  ${Math.round(share * 100)}% of planned procedures excluded - above the ${Math.round((g.maxExcludedShare ?? 0.5) * 100)}% review threshold. Check data/rule-exclusions/ before relying on the completion figure.`);
   }
-  return { applied: true, profileId: profile.id, excludedIds, isExcluded, record };
+  return { applied: true, profileId: record.profileId, excludedIds, isExcluded, record };
 }
 
-module.exports = { applyRuleExclusions };
+module.exports = { applyRuleExclusions, matchProfile, explicitScopeTiers, loadExclusionConfig };
