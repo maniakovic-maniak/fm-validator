@@ -129,6 +129,18 @@ const SYSTEM_NAME_RE = /^_xlnm\./i;   // Excel-managed (Print_Area etc.) — not
 // rather than asserted broken: fm-validator cannot reliably validate
 // a dynamic OFFSET-based reference this way, and staying silent on
 // what it can't verify is safer than a confident false accusation.
+// Names that Excel or the user keeps for printing/filtering, or that point into
+// another workbook, are housekeeping metadata: a dead print area is not a
+// broken calculation reference. Independent review of a licence model:
+// Print_Area_MI -> [1]Monthly actuals!BN1:CA52 was reported as a critical
+// broken-name finding, but nothing in the workbook calculates from it.
+const METADATA_NAME_RE = /(^|_)(print_?area|print_?titles?|_?filterdatabase|criteria|extract|database)(_|$|\d)/i;
+const EXTERNAL_REF_RE = /^\[\d+\]/;
+
+function isExternalWorkbookRange(ranges) {
+  return Array.isArray(ranges) && ranges.length > 0 && ranges.every(r => typeof r === 'string' && (EXTERNAL_REF_RE.test(r) || /^'\[[^\]]+\]/.test(r)));
+}
+
 const FUNCTION_CALL_SHEET_RE = /^[A-Z][A-Z0-9._]*\(/i;
 
 function rangeToSheets(ranges) {
@@ -199,13 +211,20 @@ function detectNamedRangeIssues(workbook, filePath) {
   });
   const combinedFormulaText = allFormulas.join('\n');
 
-  const unused = [], poorlyNamed = [], broken = [];
+  const unused = [], poorlyNamed = [], broken = [], metadataOrExternal = [];
   for (const dn of definedNames) {
     const name = dn.name;
     if (!name || SYSTEM_NAME_RE.test(name)) continue;
 
     const sheets = rangeToSheets(dn.ranges);
     const target = dn.ranges && dn.ranges[0] ? dn.ranges[0] : '(no target)';
+
+    // External-workbook names and print/filter metadata are reported
+    // separately (low severity), not as broken calculation references.
+    if (isExternalWorkbookRange(dn.ranges) || (METADATA_NAME_RE.test(name) && isBrokenRange(workbook, dn.ranges))) {
+      metadataOrExternal.push({ name, target, issue: isExternalWorkbookRange(dn.ranges) ? 'Points into another workbook (external link), not a sheet in this one.' : 'Print/filter housekeeping name whose target no longer resolves.' });
+      continue;
+    }
 
     if (isBrokenRange(workbook, dn.ranges)) {
       broken.push({ name, target, issue: 'Reference does not resolve — points at a deleted sheet or invalid range.' });
@@ -222,13 +241,32 @@ function detectNamedRangeIssues(workbook, filePath) {
   return {
     applicable: true,
     totalNamedRanges: definedNames.filter(dn => dn.name && !SYSTEM_NAME_RE.test(dn.name)).length,
-    unused, poorlyNamed, broken,
+    unused, poorlyNamed, broken, metadataOrExternal,
     note: 'Static analysis — "unused" means no formula text anywhere references the name; a name used only via a UDF, VBA macro, or chart data range would not be detected as used. Treat as review candidates.'
   };
 }
 
 function emptyResult(note) {
-  return { applicable: false, totalNamedRanges: 0, unused: [], poorlyNamed: [], broken: [], note };
+  return { applicable: false, totalNamedRanges: 0, unused: [], poorlyNamed: [], broken: [], metadataOrExternal: [], note };
 }
 
-module.exports = { detectNamedRangeIssues };
+// Move names that the macro source references out of the "unused" list. A name
+// used only by VBA (e.g. Range("AllOutputData")) has no formula reference but
+// is live. modules = the VBA review's extracted modules ({sourceCode}).
+// Independent review of a licence model: VBA used AllOutputData,
+// OutputSummaryTable and LiveResults, which were reported as never referenced.
+function applyVbaNameUsage(audit, modules) {
+  if (!audit || !audit.applicable || !Array.isArray(audit.unused) || !Array.isArray(modules) || modules.length === 0) return audit;
+  const src = modules.map(m => (m && m.sourceCode) || '').join('\n');
+  if (!src) return audit;
+  const used = [], stillUnused = [];
+  for (const u of audit.unused) {
+    const re = new RegExp('(?<![A-Za-z0-9_.])' + u.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9_])', 'i');
+    (re.test(src) ? used : stillUnused).push(u);
+  }
+  audit.unused = stillUnused;
+  audit.usedByVba = used;
+  return audit;
+}
+
+module.exports = { detectNamedRangeIssues, applyVbaNameUsage, METADATA_NAME_RE };

@@ -68,6 +68,35 @@ function findEmbeddedActualForecastFlagRow(parsed) {
   return null;
 }
 
+// A model can carry its actual/forecast switch as a pair of numeric flag rows labelled by period type
+// ("Historical period flag" 1/0 and "Forecast period flag" 0/1) instead of a row of "Actual"/"Forecast"
+// words. Independent review of a licence model: SystemOperator rows 266 and 267 did exactly this and T1-009
+// was reported as a P1 failure. A row counts when its label names a historical/actual or forecast period
+// together with flag/switch/indicator wording (or the label is just "Actual"/"Forecast"/"Historic"), and it
+// holds at least three 0/1 or TRUE/FALSE values. Bounded: first 5000 rows and 150 columns per sheet.
+function findLabelledPeriodFlagRow(parsed) {
+  if (!(parsed && parsed._raw && parsed._type === 'exceljs')) return null;
+  const LABEL_RE = /\b(histor\w*|actual\w*|forecast\w*|projected|projection)\b.{0,40}\b(flag|switch|indicator|period|timing)\b|\b(flag|switch|indicator)\b.{0,40}\b(histor\w*|actual\w*|forecast\w*|projected)\b|^\s*(histor\w*|actuals?|forecast|projected)\s*\??\s*$/i;
+  let found = null;
+  parsed._raw.eachSheet(ws => {
+    if (found) return;
+    const maxRow = Math.min(ws.rowCount || 0, 5000);
+    for (let r = 1; r <= maxRow && !found; r++) {
+      const row = ws.getRow(r);
+      let label = null, flagCells = 0;
+      row.eachCell({ includeEmpty: false }, (cell, col) => {
+        if (col > 150) return;
+        const v = cell.value;
+        const raw = (v && typeof v === 'object' && 'result' in v) ? v.result : v;
+        if (label === null && typeof raw === 'string' && col <= 8) label = raw;
+        else if (raw === 0 || raw === 1 || raw === true || raw === false) flagCells++;
+      });
+      if (label && flagCells >= 3 && LABEL_RE.test(label)) found = { sheetName: ws.name, rowNum: r };
+    }
+  });
+  return found;
+}
+
 // Re-locates and scans the actual/forecast flag row's own individual
 // cells for a genuine mutual-exclusivity violation - a single cell
 // whose value mentions both "actual" and "forecast" at once. Reused by
@@ -173,7 +202,7 @@ function runTier1(parsed, opts = {}) {
       // confirmed directly on a real file (Underwriting!L4:EN4).
       // Check for this before concluding failure.
       if (!passed && rule.id === 'T1-009') {
-        const embedded = findEmbeddedActualForecastFlagRow(parsed);
+        const embedded = findEmbeddedActualForecastFlagRow(parsed) || findLabelledPeriodFlagRow(parsed);
         if (embedded) {
           passed = true;
           reason = null;
@@ -639,4 +668,4 @@ function runTier1(parsed, opts = {}) {
   return results;
 }
 
-module.exports = { runTier1, sheetNameMatchesKeyword };
+module.exports = { runTier1, sheetNameMatchesKeyword, findLabelledPeriodFlagRow };

@@ -136,6 +136,10 @@ function checkWorksheetNamesDescriptive(workbook, rule) {
   workbook.eachSheet((worksheet) => {
     const name = worksheet.name;
     for (const pattern of rejectPatterns) {
+      // A hyphen in a name that also contains a space ("RIIO-1 revenue and charges") adds no ambiguity: a name with a
+      // space must be quoted in every reference anyway, so the hyphen cannot be read as a minus. Independent review of
+      // a licence model reported this as a false positive.
+      if (pattern.source === '\\-' && /\s/.test(name)) continue;
       if (pattern.test(name)) {
         findings.push({
           sheet: name,

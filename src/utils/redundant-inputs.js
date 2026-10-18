@@ -374,6 +374,26 @@ function detectRedundantInputs(workbook) {
       }
     }
   }
+  // Numbered section headings: 1, 2, 3, 4 down a column with other rows between
+  // them are section numbers, not assumptions. The run test above needs adjacent
+  // rows; this one accepts gaps but needs three or more integers that count up by
+  // exactly one from 1. Independent review of a licence model: RatingSimulator
+  // E42/E52/E75/E94 (1, 2, 3, 4 beside headings) were reported as unused inputs.
+  let excludedHeadingCount = 0;
+  for (const items of byColumn.values()) {
+    const sorted = [...items].sort((a, b) => a._row - b._row).filter(it => Number.isInteger(it.value) && it.value >= 1 && it.value <= 40);
+    if (sorted.length < 3) continue;
+    let chain = [];
+    for (const it of sorted) {
+      if (chain.length === 0) { if (it.value === 1) chain = [it]; }
+      else if (it.value === chain[chain.length - 1].value + 1) chain.push(it);
+      else if (it.value === 1) chain = [it];
+    }
+    if (chain.length >= 3) {
+      chain.forEach(it => indexItemKeys.add(itemKey(it)));
+      excludedHeadingCount += chain.length;
+    }
+  }
   const excludedAsIndex = redundant.filter(item => indexItemKeys.has(itemKey(item))).length;
   const filtered = redundant.filter(item => !indexItemKeys.has(itemKey(item)));
   filtered.forEach(item => { delete item._col; delete item._row; });
@@ -388,6 +408,7 @@ function detectRedundantInputs(workbook) {
     redundant: filtered,
     offsetIndirectFormulas: offsetIndirect,
     excludedIndexRuns: excludedRunCount,
+    excludedNumberedHeadings: excludedHeadingCount,
     note: [
       offsetIndirect > 0
         ? `Static reference analysis — ${offsetIndirect.toLocaleString()} OFFSET/INDIRECT formulas exist in this model; inputs consumed only through dynamic windows may appear here despite being used. Treat listed cells as review candidates.`

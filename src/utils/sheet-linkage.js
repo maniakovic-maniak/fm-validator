@@ -58,6 +58,15 @@ function isFinStatementSheet(name) {
   });
 }
 
+// Sheets whose job is to REPORT or STORE model results: they read from the
+// model and feed nothing, by design. Names alone decide this, because a
+// static graph cannot see a macro that copies a results sheet into a store.
+const OUTPUT_SHEET_RE = /(summary|output|result|dashboard|report|ratio|chart|graph|print|store|saved|live|snapshot|export|scorecard|simulat|sensitiv|compare|comparison|table)/i;
+
+function isOutputLikeSheet(name) {
+  return OUTPUT_SHEET_RE.test(name);
+}
+
 function isExcludedSheet(name) {
   const lower = name.toLowerCase();
   return EXCLUDE_KEYWORDS.some(kw => lower.includes(kw));
@@ -73,7 +82,7 @@ function isExcludedSheet(name) {
  *   "orphan calculation sheet" framing since an unused input sheet is a
  *   distinct finding type already covered elsewhere.
  */
-function detectOrphanSheets(dependencyMap, allSheetNames, inputSheetNames = []) {
+function detectOrphanSheets(dependencyMap, allSheetNames, inputSheetNames = [], sheetStats = null) {
   const finStatementSheets = allSheetNames.filter(isFinStatementSheet);
 
   if (finStatementSheets.length === 0) {
@@ -132,15 +141,33 @@ function detectOrphanSheets(dependencyMap, allSheetNames, inputSheetNames = []) 
   }
 
   const inputSet = new Set(inputSheetNames);
-  const orphanSheets = allSheetNames.filter(name =>
+  const candidates = allSheetNames.filter(name =>
     !reachable.has(name) && !isExcludedSheet(name) && !inputSet.has(name)
   );
+
+  // A candidate that has no formulas at all is a values-only sheet (a store,
+  // a data paste), not a calculation sheet that fails to feed forward.
+  const hasFormulas = name => !sheetStats || !sheetStats[name] || sheetStats[name].formulaCount > 0;
+  const valueOnlySheets = candidates.filter(n => !hasFormulas(n));
+
+  // A candidate that READS from a sheet that is part of the model (it has
+  // direct formula references to a reachable sheet) is a consumer: it reports
+  // or stores model results. That is not an orphan. Independent review of a
+  // licence model: LiveResults had 130 direct links to SystemOperator and was
+  // reported as having no path to the statements.
+  const consumesModel = name => Object.keys(dependencyMap[name] || {}).some(p => p !== '[EXTERNAL]' && reachable.has(p));
+  const terminalConsumers = candidates.filter(n => hasFormulas(n) && consumesModel(n));
+  const reviewConsumers = terminalConsumers.filter(n => !isOutputLikeSheet(n));
+  const orphanSheets = candidates.filter(n => hasFormulas(n) && !consumesModel(n));
 
   return {
     applicable: true,
     financialStatementSheets: finStatementSheets,
     reachableSheets: [...reachable],
     orphanSheets,
+    terminalConsumers,
+    reviewConsumers,
+    valueOnlySheets,
     totalSheets: allSheetNames.length,
     note: orphanSheets.length > 0
       ? 'Static reachability analysis — a sheet listed here has no traceable formula path (direct or indirect, including named ranges) either feeding INTO or being fed BY any detected financial-statement sheet. Dynamic references built via OFFSET/INDIRECT cannot be traced statically; treat listed sheets as review candidates, not a final verdict.'
@@ -148,7 +175,7 @@ function detectOrphanSheets(dependencyMap, allSheetNames, inputSheetNames = []) 
   };
 }
 
-module.exports = { detectOrphanSheets, isFinStatementSheet, FIN_STATEMENT_KEYWORDS, detectDuplicateSheets };
+module.exports = { detectOrphanSheets, isOutputLikeSheet, isFinStatementSheet, FIN_STATEMENT_KEYWORDS, detectDuplicateSheets };
 
 // ── Duplicate/backup sheet detection — a model CONTROL risk, distinct
 //    from linkage. A backup sheet is a problem whether or not it's

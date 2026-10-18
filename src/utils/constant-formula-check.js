@@ -43,6 +43,18 @@ function stripStringLiterals(formula) {
   return formula.replace(/"[^"]*"/g, m => ' '.repeat(m.length));
 }
 
+// Formulas that read the workbook's own metadata or coordinates (file name,
+// row/column position) or a defined name are not hiding an input, even though
+// they hold no A1-style reference. Found via an independent review of a
+// licence model: CELL("filename")/SEARCH/MID text extraction and
+// COLUMN(AllOutputData_Start) were flagged as literal-only formulas.
+const METADATA_FN_RE = /\b(CELL|INFO|ROW|ROWS|COLUMN|COLUMNS|SHEET|SHEETS|NOW|TODAY|RAND|RANDBETWEEN)\s*\(/i;
+function referencesDefinedName(formula) {
+  const noStrings = formula.replace(/"[^"]*"/g, '""');
+  const tokens = noStrings.match(/[A-Za-z_][\w.]*(?!\w)(?!\s*\()/g) || [];
+  return tokens.some(t => !/^(TRUE|FALSE)$/i.test(t) && !/^[A-Z]{1,3}\d+$/i.test(t) && !/^R\d*C\d*$/i.test(t));
+}
+
 function hasAnyCellReference(formula) {
   ANY_CELL_REF_RE.lastIndex = 0;
   WHOLE_ROW_OR_COL_RE.lastIndex = 0;
@@ -68,6 +80,7 @@ function checkConstantFormulaCells(workbook) {
         if (!formula) return;
         const cleanFormula = stripStringLiterals(formula);
 
+        if (METADATA_FN_RE.test(cleanFormula) || referencesDefinedName(cleanFormula)) return;
         if (hasAnyCellReference(cleanFormula)) return; // genuinely references something — not this check's concern
         if (!hasNumericLiteral(cleanFormula)) return;   // no buried number (e.g. bare =TODAY()) — nothing hidden to surface
         if (!hasOperation(cleanFormula)) return;         // a bare literal like =0 — not combining/deriving anything, functionally identical to a plain input cell already

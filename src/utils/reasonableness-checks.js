@@ -253,6 +253,17 @@ function checkRevenuePerUnitMetric(workbook) {
       };
     }
   }
+  // A per-unit metric only makes sense where revenue is built from a physical or commercial volume. A revenue
+  // line that is set by a regulator or a tariff has no volume to divide by (independent review of a licence model:
+  // this was raised as a Critical Query on an allowed-revenue model). With no volume driver anywhere in the
+  // workbook the check does not apply.
+  const VOLUME_DRIVER_TERMS = ['volume', 'tonnes', 'throughput', 'attendance', 'occupancy', 'patron', 'visitors', 'ticket', 'passengers', 'traffic'];
+  if (findLabeledValues(workbook, VOLUME_DRIVER_TERMS).length === 0) {
+    return {
+      applicable: false, found: null,
+      note: 'No volume driver (volume, tonnes, throughput, attendance, occupancy, patrons, visitors, tickets, passengers, traffic) was found, so revenue is not built as price x volume and a per-unit revenue metric does not apply.'
+    };
+  }
   return {
     applicable: true, found: false,
     note: 'No revenue-per-unit reasonableness metric (e.g. revenue per event-night, per patron, per capacity unit, per tonne) was found anywhere in this workbook. This is not a numeric threshold check — there is no universal benchmark for what such a figure should be, and the tool has no live comparable-business data feed. The gap is that the revenue build appears to have no benchmarkable per-unit figure at all for a reviewer to sanity-check against market or comparable-operator evidence.',

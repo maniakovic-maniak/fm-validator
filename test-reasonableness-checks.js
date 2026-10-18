@@ -102,8 +102,18 @@ async function main() {
     const ws2 = wb2.addWorksheet('P&L');
     ws2.getCell('A1').value = 'Total Revenue';
     ws2.getCell('B1').value = 20000000;
+    ws2.getCell('A2').value = 'Annual Attendance';          // a volume driver: revenue is built as price x volume
+    ws2.getCell('B2').value = 250000;
     const r2 = checkRevenuePerUnitMetric(wb2);
-    check('Revenue-per-unit: a workbook with only a bare "Total Revenue" label and no per-unit metric is correctly flagged as not found', r2.applicable && r2.found === false);
+    check('Revenue-per-unit: a volume-driven workbook with no per-unit metric is correctly flagged as not found', r2.applicable && r2.found === false);
+
+    // A revenue line with no volume driver anywhere (allowed revenue set by a regulator) has nothing to divide by.
+    const wb3 = new ExcelJS.Workbook();
+    const ws3 = wb3.addWorksheet('P&L');
+    ws3.getCell('A1').value = 'Total Revenue';
+    ws3.getCell('B1').value = 20000000;
+    const r3 = checkRevenuePerUnitMetric(wb3);
+    check('Revenue-per-unit: with no volume driver anywhere the check does not apply (no finding)', r3.applicable === false);
   }
 
   // ══════════════════════════════════════════════════════════════════

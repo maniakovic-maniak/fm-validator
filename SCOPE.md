@@ -162,3 +162,25 @@ Such a model is now reviewed in **data chunks** (`src/utils/data-chunker.js`, `c
   Carlsberg gives two chunks) and put it back to null afterwards.
 
 `test-data-chunker.js` covers the chunker; `test-chunked-fullparse.js` runs the whole path against a stand-in SDK.
+
+## Deterministic false-positive fixes from the ESO independent review (2026-10-19)
+
+An independent reviewer checked the ESO licence-model report line by line. These deterministic checks were changed because the review showed they raised findings that the model itself contradicts. All are free to run; none lowers the depth of the Tier 2 review.
+
+| Check | Was | Now |
+|---|---|---|
+| T0-LINK-001 (orphan sheets) | A sheet that reads the model but feeds nothing, or a values-only store, counted as an orphan (P1) | Only a sheet with formulas and no link to or from the model is an orphan. Sheets that read the model are terminal consumers; those not named like an output or store get a low-severity T0-LINK-002 review item |
+| T0-NR-001 (broken names) | A print area pointing into another workbook was a critical broken name | Print/filter names and names that point into another workbook are T0-NR-003 (low). Only a name whose internal sheet is gone stays T0-NR-001 |
+| T0-NR-002 (unused names) | Only formula text was searched | Names used in macro source are live. Severity high to medium |
+| T0-LOOKUPMATCH-001 | `MATCH(...,1)` and `VLOOKUP(...,TRUE)` were flagged as missing an exact-match argument | A written-out approximate match is deliberate and counted, not flagged. An omitted argument is still flagged |
+| T0-CONSTFORMULA-001 | `CELL("filename")` text extraction and `COLUMN(name)` counted as literal-only formulas | Metadata, coordinate and defined-name formulas are skipped |
+| T0-OVERFLOW-001 | A number format that spells words, e.g. `[=1]"Company proposal"`, made the integer code look like a 1900 date | Only a format with a date/time code outside quotes and brackets is a date format |
+| T0-RI-001 | Section numbers 1, 2, 3, 4 beside headings were unused assumptions; the locator named the wrong sheet | Integer chains counting 1, 2, 3 ... (gaps allowed) are excluded; the locator uses the first flagged cell's own sheet |
+| T0-CIRC-002 | `ROW(E368)` in E368 was a cycle | ROW() and COLUMN() read position, not value, and add no edge |
+| T0-VBA-002/003/005 | ActiveX handlers with empty bodies were "auto-run"; `Run`, `Open`, `Output` in code, comments and messages, and base64 heuristics were "system calls"; any calculation-mode change was high severity | Only real open-time triggers with a body; keywords must occur in code, file words need an `Open ... For` statement, `Run` needs Shell/CreateObject; calculation findings are high only for an iterative solver |
+| T1-009 | Only a row of the words Actual/Forecast near the top of a sheet passed | A labelled 0/1 historical/forecast period-flag row anywhere in the first 5000 rows also passes |
+| T1-015 | A hyphen in "RIIO-1 revenue and charges" failed | A hyphen in a name that already has a space is accepted |
+| T0-RSN-004 | Raised a critical query on any model with no per-unit revenue metric | Does not apply when there is no volume driver (regulated or tariff revenue) |
+| T0-FMLPATTERN / COLPATTERN / NESTEDIF / HIDDEN-001 | Severity medium / medium / medium / high | Screening items are low; hidden live logic is medium |
+
+Scope: tier R5 in `config/rule-exclusions.json` takes ten conditional project-finance procedures out of the plan for a regulated network model before the run, and T2-S6-003 (DSCR structure) joins the statutory-gates tier R4. Procedures the reviewer judged useful (for example T2-S5-008, T2-S6-002, T2-S10-336) stay in scope. Regression tests: `test-eso-review-fixes.js`.

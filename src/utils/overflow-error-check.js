@@ -29,8 +29,28 @@
 const PLAUSIBLE_MIN_YEAR = 1980;
 const PLAUSIBLE_MAX_YEAR = 2200;
 
+// A number format is a real date format only if, once quoted text, escaped
+// characters, bracketed sections ([Red], [=1], [$-409]) and literals are
+// removed, it still contains a date/time code (d m y h s). A custom format
+// that displays words for codes, e.g. [=1]"Company proposal";[=2]"Ofgem DD",
+// contains the letters d/m/y inside the quoted text only; a naive date test
+// treats the cell as a date and reports the small integer code (1, 2) as a
+// 1900 date. Found via an independent review of a licence model (109 flagged
+// cells that displayed scenario names).
+function isRealDateFormat(numFmt) {
+  if (!numFmt || typeof numFmt !== 'string') return true;   // unknown: keep the old behaviour
+  const stripped = numFmt
+    .replace(/"[^"]*"/g, '')
+    .replace(/\\./g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/_./g, '')
+    .replace(/\*./g, '');
+  return /[dmyhs]/i.test(stripped);
+}
+
 function checkOverflowError(workbook) {
   const findings = [];
+  let textResultUnderDateFormat = 0;
 
   workbook.eachSheet(ws => {
     ws.eachRow({ includeEmpty: false }, (row) => {
@@ -40,25 +60,20 @@ function checkOverflowError(workbook) {
         const v = cell.value;
         const result = v && typeof v === 'object' && 'result' in v ? v.result : null;
         if (!(result instanceof Date)) return;
+        let _fmt = null;
+        try { _fmt = cell.numFmt || (cell.style && cell.style.numFmt) || null; } catch (_) { _fmt = null; }
+        if (!isRealDateFormat(_fmt)) return;
 
         const shortFormula = formula.length > 100 ? formula.slice(0, 100) + '…' : formula;
         const truncatedFormula = formula.length > 150 ? formula.slice(0, 150) + '…' : formula;
 
-        // FIX: found via a real crash during real-file testing — the
-        // cached result can be a Date object that is itself invalid
-        // (e.g. constructed from NaN), and .toISOString() throws on
-        // that rather than returning anything. An invalid date result
-        // is itself a genuinely meaningful finding — arguably a more
-        // serious one than an implausible-but-valid date — so it's
-        // handled explicitly here, not just guarded against crashing.
+        // An Invalid Date result means the cached value was not a number at all: the cell has a date number format
+        // but holds TEXT (a scenario or period name), and the parser turned that text into an invalid Date. It is not a
+        // date overflow. Found by running the licence-model twin of an independent review's file: all 359 'Invalid
+        // Date' hits were scenario-name cells such as 'Company proposal' under a "dd mmm yyyy" format. (An earlier
+        // version of this check reported them as 'actually invalid date values'.)
         if (isNaN(result.getTime())) {
-          findings.push({
-            sheet: ws.name,
-            cell: cell.address,
-            formula: truncatedFormula,
-            resultDate: 'Invalid Date',
-            note: `${ws.name}!${cell.address} ("${shortFormula}") evaluates to an actually invalid date value (not just an implausible one) — the underlying serial number is not a valid date at all. This is a stronger signal than a merely implausible date: the date arithmetic here has produced something Excel and this cell's formatting cannot represent as a real date at all, though it may still display without a visible #VALUE!/#NUM! error depending on context. Confirm the intended calculation.`,
-          });
+          textResultUnderDateFormat++;
           return;
         }
 
@@ -79,9 +94,10 @@ function checkOverflowError(workbook) {
   return {
     applicable: true,
     flaggedCount: findings.length,
+    textResultUnderDateFormat,
     findings,
-    note: `Flags a formula cell whose cached result is a date falling outside ${PLAUSIBLE_MIN_YEAR}-${PLAUSIBLE_MAX_YEAR}, or is an actually invalid date value. Confirmed via real-file testing to have two distinct real causes: genuine date-arithmetic overflow (dates subtracted in the wrong order, a sign error), or a stale/incorrect date-style number format applied to a cell whose actual value is something else entirely (e.g. a dashboard cell pulling a dollar figure through a bare reference, still carrying a leftover date format). Both produce the same visible symptom on screen — a nonsensical date with no visible error — so both are flagged; the bound is deliberately wide to avoid false positives on genuinely long-dated infrastructure/project-finance models.`,
+    note: `Flags a formula cell whose cached result is a date falling outside ${PLAUSIBLE_MIN_YEAR}-${PLAUSIBLE_MAX_YEAR}, (a text result under a date format is not a date and is not flagged). Confirmed via real-file testing to have two distinct real causes: genuine date-arithmetic overflow (dates subtracted in the wrong order, a sign error), or a stale/incorrect date-style number format applied to a cell whose actual value is something else entirely (e.g. a dashboard cell pulling a dollar figure through a bare reference, still carrying a leftover date format). Both produce the same visible symptom on screen — a nonsensical date with no visible error — so both are flagged; the bound is deliberately wide to avoid false positives on genuinely long-dated infrastructure/project-finance models.`,
   };
 }
 
-module.exports = { checkOverflowError };
+module.exports = { checkOverflowError, isRealDateFormat };

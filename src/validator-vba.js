@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const path = require('path');
+const { refineModuleFindings, hasIterativeSolverPattern } = require('./utils/vba-refine');
 
 // Path to the Python extraction script. Deployed alongside the other
 // pipeline scripts in src/ — same directory convention as build_report.py.
@@ -125,6 +126,16 @@ async function runVbaReview(filePath) {
       findings: [],
     };
   }
+
+  // Trim scanner false positives (empty ActiveX handlers, keywords that only
+  // occur in comments/strings, base64 heuristics) before any finding is built.
+  const refinementDropped = [];
+  for (const mod of extraction.modules) {
+    const r = refineModuleFindings(mod);
+    mod.findings = r.findings;
+    r.dropped.forEach(d => refinementDropped.push({ module: mod.name, ...d }));
+  }
+  const solverPattern = extraction.modules.some(m => hasIterativeSolverPattern(m.sourceCode));
 
   const findings = [];
   const moduleNames = extraction.modules.map(m => m.name).join(', ');
@@ -259,7 +270,9 @@ async function runVbaReview(filePath) {
     findings.push({
       id: 'T0-VBA-005',
       label: "Macro source manipulates or substitutes for Excel's own calculation engine",
-      severity: 'high',
+      // High only for an iterative solver (recalculation in a loop, or Iteration switched on). Saving and restoring
+      // the calculation mode around a paste-as-values is routine macro behaviour and gets a medium review item.
+      severity: solverPattern ? 'high' : 'medium',
       status: 'fail',
       sheet: 'N/A',
       cell: 'A1',
@@ -271,7 +284,7 @@ async function runVbaReview(filePath) {
       model_risk: "A model whose real calculation depends on a macro, not just its formulas, can look complete and consistent while actually depending on manual, macro-driven steps a reader can't see just by opening the file — anyone who opens it without running the macro may be looking at stale or partially-calculated results.",
       key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
       root_cause: 'Macro-driven calculation control or manual iterative solving present',
-      escalation_flag: true, urgency: 'Before next reliance', confidence: 90
+      escalation_flag: solverPattern, urgency: 'Before next reliance', confidence: solverPattern ? 90 : 70
     });
   }
 
@@ -283,6 +296,7 @@ async function runVbaReview(filePath) {
       ? `VBA project reviewed — ${extraction.moduleCount} module(s) recovered before an extraction error, ${findings.length} finding(s). Error: ${extraction.error}`
       : `VBA project reviewed — ${extraction.moduleCount} module(s), ${findings.length} finding(s).`,
     findings,
+    refinementDropped,
     // Needed for the VBA-to-broken-named-range cross-reference check in
     // server.js, which runs after this and doesn't have its own access
     // to the raw extraction - reusing what's already been extracted

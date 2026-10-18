@@ -3,7 +3,7 @@ const { execFile } = require('child_process');
 const { fetchAndParse, scanFormulaErrors }                            = require('./src/parser');
 const { detectRedundantInputs } = require('./src/utils/redundant-inputs');
 const { detectOrphanSheets } = require('./src/utils/sheet-linkage');
-const { detectNamedRangeIssues } = require('./src/utils/named-range-audit');
+const { detectNamedRangeIssues, applyVbaNameUsage } = require('./src/utils/named-range-audit');
 const { checkTotalRanges } = require('./src/utils/total-range-check');
 const { checkSignConventions } = require('./src/utils/sign-convention-check');
 const { checkNpvPeriodZeroRisk, checkIrrNegativeCashFlowRisk, checkIrrMultipleSignChangeRisk } = require('./src/utils/formula-logic-checks');
@@ -226,8 +226,8 @@ async function run() {
     : { applicable:false, note:'Not requested for this run.', reviewed:0, findings:[] };
   const errorScan = (() => { try { return scanFormulaErrors(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Error scan failed:', e.message); return []; } })();
   const redundantInputs = (() => { try { return detectRedundantInputs(parsed._raw); } catch (e) { console.error('   \u26a0\ufe0f  Redundant-input scan failed:', e.message); return { applicable:false, note:e.message, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] }; } })();
-  const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || []); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
-  const namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw, parsed._filePath); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
+  const orphanSheets = (() => { try { return detectOrphanSheets(tier0.dependencyMap, parsed.sheetNames, redundantInputs.inputSheets || [], tier0.sheetStats); } catch (e) { console.error('   \u26a0\ufe0f  Orphan-sheet scan failed:', e.message); return { applicable:false, note:e.message, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 }; } })();
+  let namedRangeAudit = (() => { try { return detectNamedRangeIssues(parsed._raw, parsed._filePath); } catch (e) { console.error('   \u26a0\ufe0f  Named-range audit failed:', e.message); return { applicable:false, note:e.message, unused:[], poorlyNamed:[], broken:[], totalNamedRanges:0 }; } })();
   // FIX (MR-005/P3): a whole-workbook "no Excel errors" control whose
   // own tested range/sheet coverage doesn't cover the actual model.
   const errorScanCoverage = (() => { try { return checkErrorScanCoverage(parsed._raw); }
@@ -250,6 +250,8 @@ async function run() {
   // pattern the checks above use.
   const vbaReview = await (async () => { try { return await runVbaReview(parsed._filePath); }
     catch (e) { console.error('   \u26a0\ufe0f  VBA/macro review failed:', e.message); return { applicable:false, note:e.message, hasVbaProject:false, findings:[] }; } })();
+  // Names the macro source uses are live even with no formula reference.
+  try { namedRangeAudit = applyVbaNameUsage(namedRangeAudit, vbaReview.modules); } catch (e) { console.error('   \u26a0\ufe0f  VBA name-usage cross-check failed:', e.message); }
 
   // Encrypted workbook — stop here rather than continue into Familiarise/
   // Tier 1/Tier 2 against a file we've already confirmed we can't fully
@@ -367,7 +369,7 @@ async function run() {
       label: `${redundantInputs.redundantCount} input-sheet constant(s) not referenced by any formula`,
       severity: _ratio > 0.2 ? 'high' : 'medium',
       status: 'fail',
-      sheet: redundantInputs.inputSheets[0],
+      sheet: (redundantInputs.redundant[0] || {}).sheet || redundantInputs.inputSheets[0],
       cell: (redundantInputs.redundant[0] || {}).cell || 'A1',
       condition: `${redundantInputs.redundantCount} of ${redundantInputs.totalInputs} numeric constants on ${redundantInputs.inputSheets.join(', ')} are not referenced by any static formula reference (including ranges, whole columns/rows and defined names): ${_locs}${_more}. ${redundantInputs.note}`,
       reason: `${redundantInputs.redundantCount} of ${redundantInputs.totalInputs} input constants unreferenced — examples: ${_locs}${_more}`,
@@ -401,6 +403,25 @@ async function run() {
       urgency: 'Before next reliance', confidence: 90
     });
   }
+  // Sheets that read from the model but feed nothing and are not named like an output or store. This is a
+  // review prompt, not a defect: reporting and macro-store sheets look exactly like this in a static graph.
+  if (orphanSheets.applicable && (orphanSheets.reviewConsumers || []).length > 0) {
+    const _rc = orphanSheets.reviewConsumers.join(', ');
+    allFlagged.push({
+      id: 'T0-LINK-002',
+      label: `${orphanSheets.reviewConsumers.length} sheet(s) read from the model but feed no financial statement`,
+      severity: 'low', status: 'fail',
+      sheet: orphanSheets.reviewConsumers[0], cell: 'A1',
+      condition: `These sheet(s) have formulas that read from sheets in the model, but nothing downstream reads them back: ${_rc}. That is normal for a report, results store or print sheet. It is worth a look only if one of them holds a calculation that should reach the statements.`,
+      reason: `${orphanSheets.reviewConsumers.length} terminal consumer sheet(s): ${_rc}`,
+      corrective_action: 'Confirm each sheet is an output, report or store. If any holds a calculation that should affect the statements, link it in.',
+      workstream: 'Structure', category: 'Linkage', issue_type: 'Terminal consumer sheet',
+      model_risk: 'A calculation held on a sheet that nothing reads can change without any effect on the reported outputs.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Sheet reads from the model and feeds nothing', escalation_flag: false,
+      urgency: 'Next review cycle', confidence: 60
+    });
+  }
   // Named-range findings — unused (P2, may include legitimate benign
   // cases) and broken (P1, unambiguously wrong) get separate findings so
   // severity isn't diluted by mixing them.
@@ -421,14 +442,33 @@ async function run() {
       urgency: 'Before next reliance', confidence: 95
     });
   }
+  // Print/filter housekeeping names and names that point into another workbook. Not a broken calculation
+  // reference: nothing in the model has to resolve them to calculate.
+  if (namedRangeAudit.applicable && (namedRangeAudit.metadataOrExternal || []).length > 0) {
+    const _mn = namedRangeAudit.metadataOrExternal.slice(0, 8).map(b => `${b.name} -> ${b.target}`).join('; ');
+    allFlagged.push({
+      id: 'T0-NR-003',
+      label: `${namedRangeAudit.metadataOrExternal.length} print/filter or external-workbook name(s) point outside this workbook`,
+      severity: 'low', status: 'fail',
+      sheet: '', cell: 'A1', category: 'Linkage',
+      condition: `${_mn}${namedRangeAudit.metadataOrExternal.length > 8 ? ' and others' : ''}. These are print areas, filter ranges or links into another workbook. A dead print area does not affect any calculation; an external link is worth knowing about.`,
+      reason: `${namedRangeAudit.metadataOrExternal.length} print/filter or external-link name(s)`,
+      corrective_action: 'Remove or repair after checking nothing else (a chart, a macro, another workbook) uses them.',
+      workstream: 'Structure', category: 'Linkage', issue_type: 'Housekeeping or external name',
+      model_risk: 'Low. A leftover external name can prompt an update-links message and hide a dependency on another file.',
+      key_output_impact: 'No', method: 'automated', needs_retest: false,
+      root_cause: 'Leftover print/filter or external-link name', escalation_flag: false,
+      urgency: 'Next review cycle', confidence: 85
+    });
+  }
   if (namedRangeAudit.applicable && namedRangeAudit.unused.length > 0) {
     const names = namedRangeAudit.unused.slice(0, 8).map(u => u.name).join(', ');
     allFlagged.push({
       id: 'T0-NR-002',
       label: `${namedRangeAudit.unused.length} named range(s) are defined but never referenced by any formula`,
-      severity: 'high', status: 'fail',
+      severity: 'medium', status: 'fail',
       sheet: '', cell: 'A1', category: 'Linkage',
-      condition: `The following named range(s) exist but no formula anywhere references them, by name or by the cell address they point to: ${names}${namedRangeAudit.unused.length > 8 ? ' and others' : ''}. A name whose wording suggests a key output (total, capex, revenue, debt) deserves particular attention.`,
+      condition: `The following named range(s) exist but no formula anywhere references them, by name or by the cell address they point to, and no macro source names them: ${names}${namedRangeAudit.unused.length > 8 ? ' and others' : ''}. A name whose wording suggests a key output (total, capex, revenue, debt) deserves particular attention.`,
       reason: `${namedRangeAudit.unused.length} unused named range(s)`,
       corrective_action: 'For each: confirm whether it should be linked into the model, or remove it if genuinely no longer needed.',
       workstream: 'Structure', category: 'Linkage', issue_type: 'Unused named range',
@@ -703,7 +743,7 @@ async function run() {
     allFlagged.push({
       id: 'T0-FMLPATTERN-001',
       label: `${formulaPatternCheck.findings.length} formula cell(s) differ from their row's dominant pattern`,
-      severity: 'medium', status: 'fail',
+      severity: 'low', status: 'fail',
       sheet: '', cell: 'A1', category: 'Structure',
       condition: `${formulaPatternCheck.findings.length} formula cell(s) have a different structure than the majority pattern used by the rest of their row, including: ${sample}${formulaPatternCheck.findings.length > 8 ? ' and others' : ''}. This is the same signal Excel's own "inconsistent formula" warning uses, but cannot be permanently dismissed the way that warning can via "Ignore Error".`,
       reason: `${formulaPatternCheck.findings.length} formula cell(s) show a row-pattern inconsistency`,
@@ -739,7 +779,7 @@ async function run() {
     allFlagged.push({
       id: 'T0-COLPATTERN-001',
       label: `${columnPatternCheck.findings.length} formula cell(s) differ from their column's dominant pattern`,
-      severity: 'medium', status: 'fail',
+      severity: 'low', status: 'fail',
       sheet: '', cell: 'A1', category: 'Structure',
       condition: `${columnPatternCheck.findings.length} formula cell(s) have a different structure than the majority pattern used by the rest of their column, including: ${sample}${columnPatternCheck.findings.length > 8 ? ' and others' : ''}.`,
       reason: `${columnPatternCheck.findings.length} formula cell(s) show a column-pattern inconsistency`,
@@ -1805,7 +1845,7 @@ async function run() {
     allFlagged.push({
       id: 'T0-NESTEDIF-001',
       label: `${nestedIfCheck.findings.length} formula cell(s) contain nested IF statements`,
-      severity: 'medium', status: 'fail',
+      severity: 'low', status: 'fail',
       sheet: '', cell: 'A1', category: 'Structure',
       condition: `${nestedIfCheck.findings.length} formula cell(s) contain a nested IF (an IF statement inside another IF's own arguments), concentrated in: ${sheetSummary}. Examples: ${sample}. Nested IFs are a named FAST Standard anti-pattern (FAST 3.03-07) — they take materially longer to decode correctly and are prone to untested combinations of logical states.`,
       reason: `${nestedIfCheck.findings.length} cell(s) contain nested IF logic`,
@@ -1860,7 +1900,7 @@ async function run() {
       allFlagged.push({
         id: 'T0-HIDDEN-001',
         label: `${withLogic.length} sheet(s) contain hidden rows or columns with live formula logic`,
-        severity: 'high', status: 'fail',
+        severity: 'medium', status: 'fail',
         sheet: '', cell: 'A1', category: 'Structure',
         condition: `Hidden rows and/or columns containing at least one formula cell found on: ${sheetSummary}${withLogic.length > 8 ? ' and others' : ''}. This is distinct from the separate check for entirely hidden sheets — these are hidden ranges within otherwise-visible sheets, and unlike a purely presentational hidden range, these specifically contain live calculation logic a normal review would never see. The FAST Standard names this explicitly (FAST 2.01-08): hidden ranges can conceal stale, overridden, or manipulated values from a reviewer who is only looking at what's visible.`,
         reason: `Hidden rows/columns containing live formula logic found on ${withLogic.length} sheet(s)`,

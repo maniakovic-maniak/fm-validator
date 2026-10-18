@@ -51,8 +51,21 @@ function isExactMatchArg(fnName, arg) {
   return v === 'FALSE' || v === '0'; // VLOOKUP/HLOOKUP
 }
 
+// An approximate match that is WRITTEN OUT (VLOOKUP/HLOOKUP range_lookup
+// TRUE or 1, MATCH match_type 1 or -1) is a deliberate choice, e.g. a rating
+// band or tax-threshold lookup. Only an OMITTED argument is the silent-default
+// trap this check exists for. Found via an independent review of a licence
+// model: ten MATCH(...,1) rating-band lookups were reported as "missing an
+// exact-match parameter".
+function isDeliberateApproximateArg(fnName, arg) {
+  const v = (arg || '').trim().toUpperCase().replace(/\(\)$/, '');
+  if (fnName === 'MATCH') return v === '1' || v === '-1';
+  return v === 'TRUE' || v === '1';
+}
+
 function checkLookupExactMatch(workbook) {
   const findings = [];
+  let deliberateApproximate = 0;
 
   workbook.eachSheet(ws => {
     ws.eachRow({ includeEmpty: false }, (row) => {
@@ -71,6 +84,10 @@ function checkLookupExactMatch(workbook) {
           const requiredArgIndex = fnName === 'MATCH' ? 2 : 3; // 0-indexed: 3rd or 4th argument
           const hasArg = args.length > requiredArgIndex;
           const exact = hasArg && isExactMatchArg(fnName, args[requiredArgIndex]);
+          if (!exact && hasArg && isDeliberateApproximateArg(fnName, args[requiredArgIndex])) {
+            deliberateApproximate++;
+            continue;
+          }
           if (!exact) {
             findings.push({
               sheet: ws.name,
@@ -88,8 +105,9 @@ function checkLookupExactMatch(workbook) {
   return {
     applicable: true,
     flaggedCount: findings.length,
+    deliberateApproximate,
     findings,
-    note: 'Flags VLOOKUP()/HLOOKUP() calls without an explicit FALSE/0 range_lookup argument, and MATCH() calls without an explicit 0 match_type argument — both silently default to approximate matching, a common, well-known source of silent lookup errors.',
+    note: 'Flags VLOOKUP()/HLOOKUP() calls without an explicit FALSE/0 range_lookup argument, and MATCH() calls without an explicit 0 match_type argument — both silently default to approximate matching, a common, well-known source of silent lookup errors. An approximate match that is written out (TRUE/1, or MATCH type 1/-1) is a deliberate choice and is not flagged.',
   };
 }
 

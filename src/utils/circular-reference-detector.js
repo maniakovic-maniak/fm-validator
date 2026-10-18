@@ -17,6 +17,9 @@ const { extractCellReferences } = require('./cell-dependency-tracer');
 
 const DIVIDEND_LABEL_RE = /\b(dividend|distribution|shareholder return|equity distribution|equity payout|cash sweep|distributable cash|equity top[\s-]?up|minimum[\s-]?cash|funding gap|equity injection|capital call)\b/i;
 
+// ROW(ref) and COLUMN(ref) return a cell's POSITION, never its value, so
+// ROW(E368)-ROW($E$368) in E368 is not a circular dependency (found in an
+// independent review of a licence model: 72 'cycles' were coordinate-only).
 // COLUMNS(...) and ROWS(...) calls are a standard Excel technique for a
 // growing-range counter (COLUMNS($H21:H21) = 1, becomes
 // COLUMNS($H21:I21) = 2 when copied across a row) — they depend on a
@@ -28,7 +31,7 @@ const DIVIDEND_LABEL_RE = /\b(dividend|distribution|shareholder return|equity di
 // regex) so a nested call inside the argument doesn't break the span.
 function stripStructuralFunctionArgs(formula) {
   if (!formula) return formula;
-  const fnRe = /\b(COLUMNS|ROWS)\s*\(/gi;
+  const fnRe = /\b(COLUMNS|ROWS|COLUMN|ROW)\s*\(/gi;
   const spans = []; // {openParenIdx, closeParenIdx} to strip, found in ONE pass over the original string
   let m;
   while ((m = fnRe.exec(formula)) !== null) {
