@@ -112,6 +112,10 @@ sent as a cached prefix, and each batch's own rules follow it. Settings live in 
   readable then), or until this timeout.
 - `pricePerMillion` - used for the cost line only.
 
+The system prompt (SOUL + skill + domain skill) is about 270k tokens for the infrastructure domain and is sent with every
+call on every route, so the first-call-alone stagger applies to the curated route too, not only full-parse (Fm-00041,
+curated route: three parallel calls wrote it three times, 801k tokens, and read none).
+
 Log lines to check after a run: per call `cache wrote X / read Y input tokens`, and at the end
 `Tier 2 API usage ... about $X`. Batches 2 and 3 (and the retry of missing rules) should show a large `read` figure.
 If `read` stays at 0, caching is not working and the run is billed as before (plus the 25% cache-write surcharge on one call).

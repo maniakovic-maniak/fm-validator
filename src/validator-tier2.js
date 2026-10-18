@@ -409,27 +409,40 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     return { rawText: text, finalMessage: fm };
   }
 
-  // PROMPT_CACHING: in a full-parse review every batch carries the same workbook data, so it goes first as a cached
-  // block and the batch's own rules follow it. The first call goes alone; the rest wait until the cache is warm.
+  // PROMPT_CACHING. Two layers are shared between batches:
+  //   - the system prompt (SOUL + skill + domain skill; ~270k tokens for the infrastructure domain), identical in every
+  //     batch of every route, already marked cacheable above;
+  //   - on the full-parse route, the workbook data too, which goes first in the user message as a cached block with the
+  //     batch's own rules after it.
+  // A cache entry is readable only once the call that writes it has started to answer, so the first call goes alone and the
+  // others wait for it. Without that, three batches started together each write the same system prompt (Fm-00041: 801k
+  // tokens written, none read, at a 25% premium). This applies to every route, not only full-parse.
   const costCfg = promptCache.loadCostConfig();
   const gate = tier0Context.cacheGate || null;
-  const useCache = !!(isFullParse && gate && costCfg.promptCaching.enabled);
+  const stagger = !!(gate && costCfg.promptCaching.enabled);
+  const useCache = !!(isFullParse && stagger);
   let rawText = '';
   let finalMessage;
-  if (useCache) {
+  if (stagger) {
     const isFirst = await gate.enter();
-    const { rules: _rules, ...shared } = payload;
-    const cachedContent = [
-      { type: 'text', text: 'WORKBOOK DATA (identical for every batch of this review; each field is described in your instructions):\n' + JSON.stringify(shared), cache_control: { type: 'ephemeral', ttl: costCfg.promptCaching.ttl } },
-      { type: 'text', text: 'RULES TO TEST IN THIS BATCH (test every one of them against the workbook data above):\n' + JSON.stringify({ rules: batchRules }) }
-    ];
     try {
-      ({ rawText, finalMessage } = await streamOnce(cachedContent, isFirst ? () => gate.open() : null));
-    } catch (e) {
-      if (isFirst) gate.open();
-      if (!promptCache.isCacheRejection(e)) throw e;
-      console.log(`   \u26a0\ufe0f  ${batchLabel}: the API rejected the cache setting (${String(e.message).slice(0, 120)}) - repeating without caching`);
-      ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), null));
+      if (useCache) {
+        const { rules: _rules, ...shared } = payload;
+        const cachedContent = [
+          { type: 'text', text: 'WORKBOOK DATA (identical for every batch of this review; each field is described in your instructions):\n' + JSON.stringify(shared), cache_control: { type: 'ephemeral', ttl: costCfg.promptCaching.ttl } },
+          { type: 'text', text: 'RULES TO TEST IN THIS BATCH (test every one of them against the workbook data above):\n' + JSON.stringify({ rules: batchRules }) }
+        ];
+        try {
+          ({ rawText, finalMessage } = await streamOnce(cachedContent, isFirst ? () => gate.open() : null));
+        } catch (e) {
+          if (isFirst) gate.open();
+          if (!promptCache.isCacheRejection(e)) throw e;
+          console.log(`   \u26a0\ufe0f  ${batchLabel}: the API rejected the cache setting (${String(e.message).slice(0, 120)}) - repeating without caching`);
+          ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), null));
+        }
+      } else {
+        ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), isFirst ? () => gate.open() : null));
+      }
     } finally {
       if (isFirst) gate.open();   // never leave the other batches waiting on a call that has already finished
     }
@@ -440,7 +453,7 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
   promptCache.addUsage(tier0Context.usage, finalMessage.usage);
   const stopReason = finalMessage.stop_reason;
   const outputTokens = finalMessage.usage ? finalMessage.usage.output_tokens : null;
-  if (useCache && finalMessage.usage) {
+  if (stagger && finalMessage.usage) {
     console.log(`   ${batchLabel}: cache wrote ${(finalMessage.usage.cache_creation_input_tokens || 0).toLocaleString()} / read ${(finalMessage.usage.cache_read_input_tokens || 0).toLocaleString()} input tokens`);
   }
 

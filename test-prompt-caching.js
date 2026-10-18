@@ -68,11 +68,11 @@ function parsedFrom(wb) {
   const sheets = {}; wb.eachSheet(ws => { sheets[ws.name] = []; });
   return { sheetNames: wb.worksheets.map(w => w.name), sheets, _raw: wb, fileName: 'x.xlsx' };
 }
-async function review() {
+async function review(useFullParse = true) {
   calls.length = 0;
   const logs = []; const origLog = console.log; console.log = (...a) => logs.push(a.join(' '));
   try {
-    const res = await runTier2(parsedFrom(workbook()), { useFullParse: true, domain: '', domainFile: 'skill-generic.md', tier0Stats: {}, tier0Risks: {} });
+    const res = await runTier2(parsedFrom(workbook()), { useFullParse, domain: '', domainFile: 'skill-generic.md', tier0Stats: {}, tier0Risks: {} });
     return { res, logs };
   } finally { console.log = origLoad === null ? origLog : origLog; }
 }
@@ -98,6 +98,16 @@ async function review() {
   });
   await test('the cache setting is 5m by default', () => {
     assert.strictEqual(calls[0].params.messages[0].content[0].cache_control.ttl, '5m');
+  });
+  await test('curated route (not full-parse): the first call still goes alone, so the shared system prompt is written once and read by the others', async () => {
+    const r = await review(false);
+    assert.ok(calls.length >= 3, `expected 3+ calls, got ${calls.length}`);
+    const sorted = [...calls].sort((a, b) => a.startedAt - b.startedAt);
+    assert.ok(sorted[0].firstEventAt, 'first call never produced content');
+    for (const c of sorted.slice(1)) assert.ok(c.startedAt >= sorted[0].firstEventAt, 'a later call started before the first one began answering');
+    assert.ok(calls.every(c => typeof c.params.messages[0].content === 'string'), 'curated route keeps the plain user message');
+    assert.ok(calls.every(c => Array.isArray(c.params.system) && c.params.system[0].cache_control), 'system prompt carries the cache marker');
+    assert.ok(r.logs.some(l => /cache wrote/.test(l)), 'cache usage is logged on this route too');
   });
   await test('a cache setting the API rejects is repeated as one plain call and the review still completes', async () => {
     mode = 'reject-cache';
