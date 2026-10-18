@@ -36,8 +36,14 @@
         "R4_scope_decision_regulated_network_statutory_gates": {
           "enabled": true,
           "allowFatal": true,
-          "decision": "Scope decision recorded 2026-10-17 on Mik Riazanov's go-ahead to build the proposed scope changes after the offline pass over Fm-00036. These three are fatal-gate tests and are kept in their own tier so they can be switched back on alone (set enabled to false): a notional-financing regulated network model does not produce a statutory balance sheet, a classified cash flow statement or a facility debt schedule (the reviewer reported exactly this for T2-S5-001, T2-S5-002 and T2-S6-001), so the generic gate has nothing to test.",
-          "ruleIds": ["T2-S5-001", "T2-S5-002", "T2-S6-001"]
+          "decision": "Scope decision recorded 2026-10-17 on Mik Riazanov's go-ahead to build the proposed scope changes after the offline pass over Fm-00036. These are fatal-gate tests and are kept in their own tier so they can be switched back on alone (set enabled to false): a notional-financing regulated network model does not produce a statutory balance sheet, a classified cash flow statement or a facility debt schedule (the reviewer reported exactly this for T2-S5-001, T2-S5-002 and T2-S6-001), so the generic gate has nothing to test.",
+          "ruleIds": ["T2-S5-001", "T2-S5-002", "T2-S6-001", "T2-S6-003"]
+        },
+        "R5_scope_decision_regulated_network_conditional": {
+          "enabled": true,
+          "allowFatal": false,
+          "decision": "Scope decision recorded 2026-10-19 on Mik Riazanov's go-ahead after an independent review of the ESO licence model report (Fm-00036 era). The reviewer classed these procedures as not applicable to a regulated licence model: conditional project-finance or merchant-asset procedures (digital wholesale contracts, PPP contractor step-in, concession shareholder distress, index-linked debt instruments, ESCO ancillary benefits, generation outage and dispatch, fixed/variable cost split against a volume driver, construction WIP, statutory working-capital days) that the earlier reports answered with 'none present, no action required'. T2-S6-003 (DSCR structure) was added to the statutory-gates tier above for the same reason. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
+          "ruleIds": ["T2-S10-343", "T2-S10-405", "T2-S10-553", "T2-S10-584", "T2-S10-688", "T2-S10-695", "T2-S7-003", "T2-S10-012", "T2-S5-005", "T2-S10-009"]
         },
         "A_physical_sector_mismatch": {
           "enabled": true,
