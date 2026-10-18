@@ -384,9 +384,11 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
 
   // One streamed call. onFirstEvent fires when the reply starts, which is when a cache entry written by this call
   // becomes readable by the others.
+  let lastBlocks = null;
   async function streamOnce(userContent, onFirstEvent) {
     let text = '';
     let first = true;
+    const blocks = { types: [], thinkingChars: 0 };   // DIAGNOSTIC: what the reply was made of (see logOutputMix)
     const st = await client.messages.stream({
       model: 'claude-sonnet-5',
       max_tokens: 128000,   // Sonnet 5 ceiling on the synchronous Messages API.
@@ -401,11 +403,16 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
       // message_start can arrive before the prompt has been processed; the cache entry is readable once the model has
       // started to write its answer, so the gate opens on the first content event, not the first event.
       if (first && (chunk.type === 'content_block_start' || chunk.type === 'content_block_delta')) { first = false; if (onFirstEvent) onFirstEvent(); }
+      if (chunk.type === 'content_block_start' && chunk.content_block) blocks.types.push(chunk.content_block.type);
+      if (chunk.type === 'content_block_delta' && chunk.delta && chunk.delta.type === 'thinking_delta') {
+        blocks.thinkingChars += String(chunk.delta.thinking || '').length;
+      }
       if (chunk.type === 'content_block_delta' && chunk.delta && chunk.delta.type === 'text_delta') {
         text += chunk.delta.text;
       }
     }
     const fm = await st.finalMessage();
+    lastBlocks = blocks;
     return { rawText: text, finalMessage: fm };
   }
 
@@ -459,6 +466,7 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
 
   console.log(`   ${batchLabel}: ${rawText.length} chars received` +
     (outputTokens ? ` (${outputTokens} output tokens, stop: ${stopReason})` : ''));
+  logOutputMix(batchLabel, rawText, finalMessage.usage, lastBlocks);
 
   if (stopReason === 'max_tokens') {
     console.log(`   \u26a0\ufe0f  ${batchLabel} hit the max_tokens ceiling \u2014 response was truncated, not malformed. Split the batch or raise max_tokens further.`);
@@ -473,6 +481,31 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     }
     throw err;
   }
+}
+
+// DIAGNOSTIC (Fm-00039: 183,959 characters of visible answer text but 181,847 output tokens billed - about 3x what the
+// text alone explains). The API reports output tokens as one number, so this works out how much of it the visible answer
+// can account for, lists the kinds of content block the reply carried (a 'thinking' block means hidden reasoning), and
+// prints any usage field this code does not already know, so a per-type token count is picked up if the API provides one.
+// Estimates use ~3 characters per token for dense JSON and are labelled as estimates.
+const KNOWN_USAGE_KEYS = new Set(['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']);
+function describeOutputMix(rawText, usage, blocks) {
+  const outputTokens = usage && usage.output_tokens ? usage.output_tokens : 0;
+  const visibleEst = Math.round(String(rawText || '').length / 3);
+  const hiddenEst = Math.max(0, outputTokens - visibleEst);
+  const types = {};
+  for (const t of (blocks && blocks.types) || []) types[t] = (types[t] || 0) + 1;
+  const extra = {};
+  for (const [k, v] of Object.entries(usage || {})) if (!KNOWN_USAGE_KEYS.has(k) && v !== null && v !== undefined) extra[k] = v;
+  return { outputTokens, visibleEst, hiddenEst, hiddenShare: outputTokens ? hiddenEst / outputTokens : 0, types, thinkingChars: (blocks && blocks.thinkingChars) || 0, extra };
+}
+function logOutputMix(label, rawText, usage, blocks) {
+  if (!usage || !usage.output_tokens) return;
+  const m = describeOutputMix(rawText, usage, blocks);
+  const typeList = Object.keys(m.types).length ? Object.entries(m.types).map(([k, v]) => `${k} x${v}`).join(', ') : 'none reported';
+  console.log(`   ${label}: output mix - about ${m.visibleEst.toLocaleString()} tokens of visible answer, about ${m.hiddenEst.toLocaleString()} (${Math.round(m.hiddenShare * 100)}%) not explained by it (estimate); content blocks: ${typeList}` +
+    (m.thinkingChars ? `; reasoning text streamed: ${m.thinkingChars.toLocaleString()} chars` : ''));
+  if (Object.keys(m.extra).length) console.log(`   ${label}: other usage fields: ${JSON.stringify(m.extra)}`);
 }
 
 // Split tier2 rules into batches by section
@@ -1176,4 +1209,4 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   }
 }
 
-module.exports = { runTier2, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows, extractCellReferenceFromText };
+module.exports = { runTier2, describeOutputMix, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows, extractCellReferenceFromText };

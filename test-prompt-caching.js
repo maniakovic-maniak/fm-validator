@@ -16,6 +16,7 @@ async function test(name, fn) {
 // ---- stand-in SDK ---------------------------------------------------------------------------------------------
 const calls = [];
 let mode = 'normal';           // 'normal' | 'reject-cache'
+let emitThinking = false;      // when true the stand-in reply starts with a reasoning block
 const FAKE_RESULT = rules => JSON.stringify({ results: rules.map(r => ({ id: r.id, status: 'pass', confidence: 90, priority: 'P3', sheet: 'Calc', cell: 'C2', condition: 'ok' })) });
 class FakeAnthropic {
   constructor() {
@@ -33,7 +34,10 @@ class FakeAnthropic {
           ? (idx === 1 ? { input_tokens: 40, output_tokens: 1000, cache_creation_input_tokens: 300000, cache_read_input_tokens: 0 }
                        : { input_tokens: 40, output_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 300000 })
           : { input_tokens: 300040, output_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
-        const events = [{ type: 'message_start' }, { type: 'content_block_start' },
+        const events = [{ type: 'message_start' },
+          ...(emitThinking ? [{ type: 'content_block_start', content_block: { type: 'thinking' } },
+                              { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'x'.repeat(500) } }] : []),
+          { type: 'content_block_start', content_block: { type: 'text' } },
           { type: 'content_block_delta', delta: { type: 'text_delta', text: FAKE_RESULT(ruleIds) } }];
         return {
           async *[Symbol.asyncIterator]() {
@@ -54,7 +58,7 @@ Module._load = function (request, ...rest) { return request === '@anthropic-ai/s
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-key';
 
 const ExcelJS = require('exceljs');
-const { runTier2 } = require('./src/validator-tier2');
+const { runTier2, describeOutputMix } = require('./src/validator-tier2');
 const pc = require('./src/utils/prompt-cache');
 
 function workbook() {
@@ -127,6 +131,26 @@ async function review(useFullParse = true) {
     pc.addUsage(cached, { input_tokens: 40, output_tokens: 50000, cache_creation_input_tokens: 385000 });
     for (let i = 0; i < 3; i++) pc.addUsage(cached, { input_tokens: 40, output_tokens: 50000, cache_read_input_tokens: 385000 });
     assert.ok(pc.estimateCost(cached, cfg) < pc.estimateCost(plain, cfg) - 1, `${pc.estimateCost(cached, cfg)} vs ${pc.estimateCost(plain, cfg)}`);
+  });
+  await test('output mix: each call logs how much of the billed output the visible answer explains, and the block types', () => {
+    const line = out.logs.find(l => l.includes('output mix'));
+    assert.ok(line && /visible answer/.test(line) && /content blocks: text x1/.test(line), line);
+  });
+  await test('output mix: reasoning blocks are reported, with the characters streamed', async () => {
+    emitThinking = true;
+    try {
+      const withThinking = await review();
+      const line = withThinking.logs.find(l => l.includes('output mix'));
+      assert.ok(line && /thinking x1/.test(line) && /reasoning text streamed: 500 chars/.test(line), line);
+    } finally { emitThinking = false; }
+  });
+  await test('output mix arithmetic: the unexplained share is output tokens minus the visible text at ~3 chars per token', () => {
+    const m = describeOutputMix('a'.repeat(30000), { output_tokens: 40000, service_tier: 'standard', reasoning_tokens: 25000 }, { types: ['thinking', 'text'], thinkingChars: 0 });
+    assert.strictEqual(m.visibleEst, 10000);
+    assert.strictEqual(m.hiddenEst, 30000);
+    assert.ok(Math.abs(m.hiddenShare - 0.75) < 1e-9);
+    assert.deepStrictEqual(m.extra, { service_tier: 'standard', reasoning_tokens: 25000 });   // unknown usage fields are surfaced
+    assert.strictEqual(describeOutputMix('a'.repeat(90000), { output_tokens: 20000 }, null).hiddenEst, 0);   // never negative
   });
   await test('gate: second caller waits for open(), a timeout also releases it, a failed first call does not hang it', async () => {
     const g = pc.createCacheGate(60000);
