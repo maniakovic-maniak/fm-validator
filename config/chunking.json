@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "description": "Chunked full-parse: a model whose formulas do not fit one request (more than the full-parse threshold) is reviewed in several data chunks instead of falling back to the curated route. Each chunk holds whole sheets (grouped so sheets that reference each other stay together; a sheet too big for one chunk is cut at row boundaries) and is reviewed with every rule; the answers are then merged (a raised issue beats a pass, a pass beats uncertain). Chunks run one after another, with the batches of one chunk in parallel. The size of a chunk is what is left of the context window after the system prompt, the reserved output and the request overhead. maxEstimatedCostUsd stops a run whose estimated cost is above it from starting: the model is then reviewed on the curated route as before. Set enabled to false to turn the whole route off. capacityOverrideTokens exists for tests.",
+  "enabled": true,
+  "maxChunks": 4,
+  "contextWindowTokens": 1000000,
+  "outputReserveTokens": 128000,
+  "requestOverheadTokens": 70000,
+  "safetyMargin": 0.05,
+  "systemCharsPerToken": 2.9,
+  "formulaCharsPerToken": 1.15,
+  "textCharsPerToken": 2.4,
+  "systemCacheTtl": "1h",
+  "skipRulesAlreadyRaised": true,
+  "maxEstimatedCostUsd": 25,
+  "outputTokensPerRule": 1550,
+  "capacityOverrideTokens": null
+}

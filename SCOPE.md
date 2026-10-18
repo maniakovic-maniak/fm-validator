@@ -137,3 +137,28 @@ new rule, add it with its trigger facts; the test checks that the rule's instruc
 
 Measured on the real files: ESO has 354 OFFSET formulas, so both procedures stay. Carlsberg has no OFFSET but its macros
 trip T0-VBA-005, so T2-S10-788 stays and only T2-S10-789 leaves.
+
+## Large models: chunked full-parse
+
+A model whose formulas and wording do not fit one request next to the system prompt used to fall back to the curated route
+(extracted values, no text index, no absence policy). GT1 scored 50% there against 77% for models that fit (Fm-00041).
+Such a model is now reviewed in **data chunks** (`src/utils/data-chunker.js`, `config/chunking.json`):
+
+- **Room for a chunk** = context window - reserved output - request overhead - the system prompt, less a safety margin.
+  About 500k tokens for the infrastructure prompt (267k tokens), about 700k for corporate (60k). The same check catches a
+  model the router sent to the single-request route that would overflow the window next to a large system prompt.
+- **A chunk holds whole sheets**, grouped so sheets that reference each other travel together. A sheet too big for a chunk is
+  cut at row boundaries (formula lines and their labels together); one row of thousands of cells is cut by cells.
+- **Chunks run one after another**, the batches of one chunk in parallel. The system prompt is cached for 1h and written once;
+  each chunk's data is written once by that chunk's first call and read by its other calls.
+- **Every chunk is asked every rule**, except rules an earlier chunk already raised (`skipRulesAlreadyRaised`). Answers merge per
+  rule: an issue beats a pass, a pass beats uncertain (`reconcile-sub-batch-results.js`). The reviewer is told to pass only when
+  its own chunk holds all the evidence, and to say "not visible in this chunk", never "not present in the workbook".
+- **The absence policy stays off** for a chunked review (no chunk sees the whole workbook), so "No ... exists" answers stay Uncertain.
+- **Cost is multiplied by the number of chunks** (output above all). The plan prints an estimate before the run
+  (`Chunked full-parse plan: N data chunks ...; estimated cost about $X (limit $Y)`) and a plan above `maxEstimatedCostUsd`, or
+  needing more than `maxChunks`, is not used: the model is reviewed on the curated route as before.
+- To switch it off set `enabled` to false. To exercise it on a cheap model set `capacityOverrideTokens` (for example 100000 on
+  Carlsberg gives two chunks) and put it back to null afterwards.
+
+`test-data-chunker.js` covers the chunker; `test-chunked-fullparse.js` runs the whole path against a stand-in SDK.

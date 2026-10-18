@@ -12,6 +12,7 @@ const { buildVisibilityRecord } = require('./utils/build-visibility-record');
 const { buildSheetFacts } = require('./utils/sheet-facts');
 const { applyAbsencePolicy } = require('./utils/absence-policy');
 const promptCache = require('./utils/prompt-cache');
+const dataChunker = require('./utils/data-chunker');
 
 const client = new Anthropic({
   // Explicit, not relying on SDK defaults — several frameworks have
@@ -364,7 +365,9 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     // SHEET_FACTS: sheet visibility and protection, which cannot be seen from cell values
     sheetFacts: tier0Context.sheetFacts || null,
     // DUPLICATE_LOGIC: result of the Tier 0 full-formula scan (duplicate-calculation-logic-check.js)
-    duplicateLogicSummary: tier0Context.duplicateLogicSummary || null
+    duplicateLogicSummary: tier0Context.duplicateLogicSummary || null,
+    // CHUNKED_FULL_PARSE: which part of a workbook that is reviewed in several data chunks this call holds (absent otherwise)
+    ...(tier0Context.dataChunk ? { dataChunk: tier0Context.dataChunk } : {})
   };
 
   const estimatedTokens = Math.round(JSON.stringify(payload).length / (isFullParse ? FORMULA_CHARS_PER_TOKEN : 3));
@@ -374,7 +377,10 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
     {
       type: 'text',
       text: systemPrompt.staticPrompt,
-      cache_control: { type: 'ephemeral' }
+      // A review in several data chunks lasts longer than the default 5 minutes, so its system prompt is kept for longer
+      // and written once instead of once per chunk.
+      cache_control: (tier0Context.systemCacheTtl && !(tier0Context.cacheState && tier0Context.cacheState.systemTtlRejected))
+        ? { type: 'ephemeral', ttl: tier0Context.systemCacheTtl } : { type: 'ephemeral' }
     },
     ...(systemPrompt.dynamicPrompt ? [{
       type: 'text',
@@ -386,6 +392,8 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
   // becomes readable by the others.
   let lastBlocks = null;
   async function streamOnce(userContent, onFirstEvent) {
+    // a call that waited behind another one starts with whatever lifetime the API has been found to accept
+    if (tier0Context.cacheState && tier0Context.cacheState.systemTtlRejected && systemBlocks[0].cache_control.ttl) systemBlocks[0].cache_control = { type: 'ephemeral' };
     let text = '';
     let first = true;
     const blocks = { types: [], thinkingChars: 0 };   // DIAGNOSTIC: what the reply was made of (see logOutputMix)
@@ -442,10 +450,23 @@ async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchL
         try {
           ({ rawText, finalMessage } = await streamOnce(cachedContent, isFirst ? () => gate.open() : null));
         } catch (e) {
-          if (isFirst) gate.open();
-          if (!promptCache.isCacheRejection(e)) throw e;
-          console.log(`   \u26a0\ufe0f  ${batchLabel}: the API rejected the cache setting (${String(e.message).slice(0, 120)}) - repeating without caching`);
-          ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), null));
+          if (!promptCache.isCacheRejection(e)) { if (isFirst) gate.open(); throw e; }
+          let recovered = false;
+          if (systemBlocks[0].cache_control.ttl) {
+            // the longer system-prompt lifetime may be what the API rejected: use the default and keep the data cached.
+            // The flag is set before the gate opens, so the calls waiting behind this one start with the default.
+            console.log(`   \u26a0\ufe0f  ${batchLabel}: the API rejected the longer cache lifetime (${String(e.message).slice(0, 120)}) - repeating with the default`);
+            systemBlocks[0].cache_control = { type: 'ephemeral' };
+            if (tier0Context.cacheState) tier0Context.cacheState.systemTtlRejected = true;
+            try { ({ rawText, finalMessage } = await streamOnce(cachedContent, isFirst ? () => gate.open() : null)); recovered = true; }
+            catch (e2) { if (!promptCache.isCacheRejection(e2)) { if (isFirst) gate.open(); throw e2; } e = e2; }
+          }
+          if (!recovered) {
+            if (isFirst) gate.open();
+            console.log(`   \u26a0\ufe0f  ${batchLabel}: the API rejected the cache setting (${String(e.message).slice(0, 120)}) - repeating without caching`);
+            systemBlocks[0].cache_control = { type: 'ephemeral' };
+            ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), null));
+          }
         }
       } else {
         ({ rawText, finalMessage } = await streamOnce(JSON.stringify(payload), isFirst ? () => gate.open() : null));
@@ -668,7 +689,7 @@ function resolveDeepAccountingSheets(sheetNames) {
   return { resolvedMap, unresolvedCategories };
 }
 
-async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null, outputOverwriteScan = null, skipRuleIds = null, duplicateLogicSummary = null } = {}) {
+async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '', keySheets = null, tier0Stats = null, tier0Risks = null, namedRangeAudit = null, vbaReview = null, useFullParse = false, recalcCheckResult = null, outputOverwriteScan = null, skipRuleIds = null, duplicateLogicSummary = null, routeEstimateTokens = null, chunkingOverride = null } = {}) {
   // Fallback key-sheet categories used when the caller doesn't supply
   // keySheets (normally Familiarisation-derived) — e.g. when Familiarisation
   // itself failed to complete for this run. A flat, mining-style
@@ -826,6 +847,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   // every named range is 'complete_workbook'; anything cut to fit makes it 'partial_view'.
   let fullParseCoverage = 'partial_view';
   let namedRangeMapForPrompt = null;
+  let builtFullParse = null;
   if (useFullParse) {
     const { buildFullParsePayloadWithText, FULL_PARSE_PROMPT_ADDENDUM } = require('./validator-tier2-fullparse');
     const built = buildFullParsePayloadWithText(parsed._raw);
@@ -836,7 +858,8 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     console.log(`   Full-parse payload: ~${fullParseTokens.toLocaleString()} tokens across ${Object.keys(fullParsePayload).length} sheets (all 3 batches)`);
     console.log(`   Static text index: ${built.textIndex.mode} (${built.textIndex.chars.toLocaleString()} chars, ${Object.keys(built.textIndex.bySheet).length} sheets); named ranges: ${built.namedRanges.names.length}${built.namedRanges.truncated ? ` of ${built.namedRanges.total} (cut)` : ''}; coverage: ${fullParseCoverage}${built.textIndex.truncatedSheets.length ? ' - text cut in: ' + built.textIndex.truncatedSheets.join(', ') : ''}`);
     batch1Data = batch2Data = batch3Data = fullParsePayload;
-    systemPrompt.staticPrompt = systemPrompt.staticPrompt + '\n\n---\n\n' + FULL_PARSE_PROMPT_ADDENDUM;
+    builtFullParse = built;
+    // the full-parse guidance is added to the system prompt after the chunking decision below
   }
 
   // FIX: found via a real production run (Carlsberg, a generic corporate
@@ -870,6 +893,63 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   // failure. Only genuinely small batches (Structure, Governance, and any
   // future domain under 100 S10-tagged rules) stay as a single batch.
   const batch2Chunks = chunkRulesForOutputSafety(batch2, 'Batch 2 — Accounting & Debt (S5-S7,S10)');
+
+  // CHUNKED_FULL_PARSE. One request holds the system prompt (267k tokens for the infrastructure domain), the reserved
+  // output and the workbook. A model whose formulas and wording do not fit next to them used to fall back to the curated
+  // route (weaker: GT1 scored 50% against 77% for models that fit). It is now reviewed in several data chunks instead,
+  // and the answers are merged. See utils/data-chunker.js and config/chunking.json. Also catches a model the router
+  // sent to the single-request route that would overflow the window next to a large system prompt.
+  let chunkPlan = null;
+  const chunkCfg = { ...dataChunker.loadChunkingConfig(), ...(chunkingOverride || {}) };
+  const _fpMod = require('./validator-tier2-fullparse');
+  const _wasFullParse = useFullParse;
+  if (chunkCfg.enabled && parsed._raw) {
+    let needsChunking = false;
+    try {
+      const addendaChars = _fpMod.CHUNK_PROMPT_ADDENDUM.length + _fpMod.FULL_PARSE_PROMPT_ADDENDUM.length + 16;
+      const systemChars = systemPrompt.staticPrompt.length + (systemPrompt.dynamicPrompt || '').length + addendaChars;
+      const systemTokens = Math.ceil(systemChars / chunkCfg.systemCharsPerToken);
+      const capacity = dataChunker.chunkCapacityTokens(chunkCfg, systemChars);
+      if (useFullParse && builtFullParse) {
+        const total = Object.values(builtFullParse.payload).reduce((n, t) => n + dataChunker.sheetTokens(t, chunkCfg), 0);
+        needsChunking = capacity > 0 && total > capacity;
+        if (needsChunking) console.log(`   Chunked full-parse: the full-parse payload (~${total.toLocaleString()} tokens) does not fit one request next to the ~${systemTokens.toLocaleString()}-token system prompt (room for ~${capacity.toLocaleString()})`);
+      } else if (!useFullParse) {
+        const est = routeEstimateTokens != null ? routeEstimateTokens : require('./utils/formula-token-estimator').estimateRawFormulaListTokens(parsed._raw).estimatedTokens;
+        // only a model that does not fit one request needs chunks; a small model on the curated route stays there
+        needsChunking = capacity > 0 && est > capacity && est <= capacity * chunkCfg.maxChunks * 0.9;
+        if (!needsChunking && est > capacity) console.log(`   Chunked full-parse: not used (~${est.toLocaleString()} formula tokens against at most ${chunkCfg.maxChunks} chunks of ~${capacity.toLocaleString()})`);
+      }
+      if (needsChunking) {
+        const built2 = _fpMod.buildFullParsePayloadWithText(parsed._raw, { maxChars: _fpMod.TEXT_INDEX_MAX_CHARS_CEILING });
+        const plan = dataChunker.planDataChunks(built2.payload, capacity, chunkCfg);
+        const ruleCount = batch1.length + batch2.length + batch3.length;
+        const callsPerChunk = [batch1, ...batch2Chunks.map(c => c.rules), batch3].filter(r => r.length > 0).length;
+        const cost = dataChunker.estimateChunkedCost(plan, { systemTokens, ruleCount, callsPerChunk }, chunkCfg, promptCache.loadCostConfig().pricePerMillion);
+        console.log(`   Chunked full-parse plan: ${plan.chunks.length} data chunk(s) of at most ~${capacity.toLocaleString()} tokens (${plan.chunks.map(c => c.tokens.toLocaleString()).join(' / ')}); ${callsPerChunk} call(s) per chunk; estimated cost about $${cost.usd.toFixed(2)} (limit $${chunkCfg.maxEstimatedCostUsd})`);
+        if (plan.chunks.length > chunkCfg.maxChunks) console.log(`   Chunked full-parse: not used - ${plan.chunks.length} chunks is more than the limit of ${chunkCfg.maxChunks}`);
+        else if (cost.usd > chunkCfg.maxEstimatedCostUsd) console.log(`   Chunked full-parse: not used - the estimated cost is above the limit`);
+        else chunkPlan = { ...plan, built: built2, systemTokens, estimatedCostUsd: cost.usd };
+      }
+    } catch (e) {
+      console.log(`   Chunked full-parse: planning failed (${e.message})`);
+      chunkPlan = null;
+    }
+    if (_wasFullParse && needsChunking && !chunkPlan) {
+      // the single request would overflow the window, so use the curated route rather than send it
+      console.log('   Chunked full-parse is not available for this model: reviewing it on the curated route instead');
+      useFullParse = false; builtFullParse = null; namedRangeMapForPrompt = null;
+      batch1Data = dataSubset; batch2Data = deepDataSubset; batch3Data = dataSubset;
+    }
+  }
+  if (chunkPlan) {
+    useFullParse = true;
+    fullParseCoverage = 'partial_view';
+    namedRangeMapForPrompt = chunkPlan.built.namedRanges;
+    systemPrompt.staticPrompt += '\n\n---\n\n' + _fpMod.FULL_PARSE_PROMPT_ADDENDUM + '\n\n---\n\n' + _fpMod.CHUNK_PROMPT_ADDENDUM;
+  } else if (useFullParse) {
+    systemPrompt.staticPrompt += '\n\n---\n\n' + _fpMod.FULL_PARSE_PROMPT_ADDENDUM;
+  }
   const allResults = [];
   // FIX: found via a real, direct transparency gap in a production
   // report - when a batch genuinely fails (e.g. Anthropic credits ran
@@ -910,7 +990,16 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   const _costCfg = promptCache.loadCostConfig();
   const _cacheGate = promptCache.createCacheGate(_costCfg.promptCaching.warmupWaitMs);
   const _usage = promptCache.createUsage();
-  async function runOneBatch(rules, data, label, errorIdPrefix) {
+  const _cacheState = {};   // shared by the calls of one review: set when the API refuses the longer system-prompt cache lifetime
+  // What every call is told besides its rules and data. opts (chunked review only): gate, dataChunk, systemCacheTtl.
+  const ctxFor = (nChunks, o = {}) => ({
+    stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt,
+    sheetFacts: sheetFactsForPrompt, duplicateLogicSummary,
+    dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && nChunks === 1) ? 'complete_workbook' : 'partial_view',
+    namedRangeMap: namedRangeMapForPrompt, cacheGate: o.gate || _cacheGate, usage: _usage, cacheState: _cacheState,
+    dataChunk: o.dataChunk || null, systemCacheTtl: o.systemCacheTtl || null
+  });
+  async function runOneBatch(rules, data, label, errorIdPrefix, opts = {}) {
     if (rules.length === 0) return;
     // `data` can now be a single data object (the existing, default
     // behavior - fully unchanged) OR an array of data chunks, when the
@@ -927,7 +1016,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
         const chunkLabel = dataChunks.length > 1 ? `${label} (data chunk ${i + 1}/${dataChunks.length})` : label;
         const { results, meta } = await runBatch(
           rules, dataChunks[i], parsed.sheetNames, systemPrompt, chunkLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt, cacheGate: _cacheGate, usage: _usage },
+          ctxFor(dataChunks.length, opts),
           useFullParse
         );
         chunkResultArrays.push(results);
@@ -942,7 +1031,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
               const retryLabel = `${chunkLabel} [retry ${missingRules.length} missing]`;
               const retryOut = await runBatch(
           missingRules, dataChunks[i], parsed.sheetNames, systemPrompt, retryLabel,
-          { stats: tier0Stats, risks: tier0Risks, namedRangeSummary: namedRangeSummaryForPrompt, vbaSummary: vbaSummaryForPrompt, sheetFacts: sheetFactsForPrompt, duplicateLogicSummary, dataCoverage: (useFullParse && fullParseCoverage === 'complete_workbook' && dataChunks.length === 1) ? 'complete_workbook' : 'partial_view', namedRangeMap: namedRangeMapForPrompt, cacheGate: _cacheGate, usage: _usage },
+          ctxFor(dataChunks.length, opts),
           useFullParse
         );
               const wanted = new Set(missingRules.map(r => r.id));
@@ -966,14 +1055,14 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       const reconciled = dataChunks.length > 1
         ? reconcileDataSplitResults(chunkResultArrays)
         : chunkResultArrays[0];
-      allResults.push(...reconciled);
+      (opts.sink || allResults).push(...reconciled);
       if (sawMeta && topLevelMeta.audit_completion_percent === undefined) {
         topLevelMeta = sawMeta;
       }
     } catch (e) {
       console.error(`   ❌ ${label} error:`, e.message);
       batchFailures.push({ ruleIds: rules.map(r => r.id), label, error: e.message });
-      allResults.push({
+      (opts.sink || allResults).push({
         id: `${errorIdPrefix}-ERROR`, status: 'uncertain', confidence: 0,
         priority: 'P2',
         category: 'Governance', method: 'automated',
@@ -1004,6 +1093,40 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // wall-clock time when a domain needs the split; it adds token cost
     // (more system-prompt repeats) but that's the correct tradeoff against
     // the alternative, which is Batch 2 failing outright.
+    if (chunkPlan) {
+      // CHUNKED_FULL_PARSE: chunks one after another, the batches of one chunk in parallel. Every chunk is asked every rule
+      // (minus rules an earlier chunk already raised, when that is switched on); the answers are merged per rule.
+      allDataSingleChunk = false;
+      const specs = [
+        { rules: batch1, label: 'Batch 1 — Structure (S1-S4)', prefix: 'T2-BATCH1' },
+        ...batch2Chunks.map(c => ({ rules: c.rules, label: c.label, prefix: 'T2-BATCH2' })),
+        { rules: batch3, label: 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', prefix: 'T2-BATCH3' },
+      ];
+      const K = chunkPlan.chunks.length;
+      console.log(`   Reviewing in ${K} data chunks, one after another (system prompt cached for ${chunkCfg.systemCacheTtl || 'the default time'}; each chunk's data cached for its own batches)`);
+      const perChunk = [];
+      const raised = new Set();
+      for (const chunk of chunkPlan.chunks) {
+        const gate = chunk.index === 1 ? _cacheGate : promptCache.createCacheGate(_costCfg.promptCaching.warmupWaitMs);
+        const sink = [];
+        const dataChunk = dataChunker.describeChunk(chunkPlan, chunk.index);
+        console.log(`   Data chunk ${chunk.index}/${K}: ${chunk.sheets.length} sheet(s), ~${chunk.tokens.toLocaleString()} tokens`);
+        await Promise.all(specs.map(spec => {
+          const rules = chunkCfg.skipRulesAlreadyRaised ? spec.rules.filter(r => !raised.has(r.id)) : spec.rules;
+          if (rules.length === 0) return null;
+          return runOneBatch(rules, chunk.payload, `${spec.label} [data ${chunk.index}/${K}]`, spec.prefix, { gate, sink, dataChunk, systemCacheTtl: chunkCfg.systemCacheTtl });
+        }));
+        for (const r of sink) if (r && r.status !== 'pass' && r.status !== 'uncertain' && !/-ERROR$/.test(String(r.id))) raised.add(r.id);
+        perChunk.push(sink);
+        if (chunk.index < K) console.log(`   Data chunk ${chunk.index}/${K} done: ${raised.size} rule(s) raised so far`);
+      }
+      const merged = reconcileDataSplitResults(perChunk);
+      allResults.push(...merged);
+      // a rule one chunk could not review but another did is not a failed rule
+      const have = new Set(merged.map(r => r.id));
+      for (const f of batchFailures) f.ruleIds = f.ruleIds.filter(id => !have.has(id));
+      for (let k = batchFailures.length - 1; k >= 0; k--) if (batchFailures[k].ruleIds.length === 0) batchFailures.splice(k, 1);
+    } else {
     await Promise.all([
       // ── Batch 1: Structure, Inputs, Formula mechanics (S1-S4) ──────────
       runOneBatch(batch1, batch1Data, 'Batch 1 — Structure (S1-S4)', 'T2-BATCH1'),
@@ -1019,6 +1142,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       // ── Batch 3: Scenarios, Audit, Actuals, Commercial, Governance ──────
       runOneBatch(batch3, batch3Data, 'Batch 3 — Scenarios & Governance (S8-S9,S11-S13)', 'T2-BATCH3'),
     ]);
+    }
 
     // Normalise all results — ensure required fields exist
     const normalised = allResults.map(r => ({

@@ -310,7 +310,8 @@ async function run() {
     tier0Risks:  tier0.riskIndicators,
     namedRangeAudit,
     vbaReview,
-    useFullParse: funnelDecision.useFullParse
+    useFullParse: funnelDecision.useFullParse,
+    routeEstimateTokens: funnelDecision.estimate.estimatedTokens
   });
   const t2Pass         = t2Results.filter(r => r.status === 'pass').length;
   const t2FailuresRaw  = t2Results.filter(r => r.status !== 'pass');

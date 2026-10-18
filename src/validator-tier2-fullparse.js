@@ -267,4 +267,30 @@ a formula or text cell that is absent from a sheet's list is genuinely not there
 text section or the name list was cut to fit; say what you could not see rather than treating it as absent.
 `.trim();
 
-module.exports = { buildSheetFormulaList, buildFullParseFormulaPayload, buildFullParsePayloadWithText, textBudgetChars, buildTextIndex, buildNamedRangeMap, fullParseCoverage, FULL_PARSE_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS };
+// ══════════════════════════════════════════════════════════════════
+// Added to the system prompt when a model is too big for one request and is reviewed in data chunks (see
+// utils/data-chunker.js). The same rules are asked of every chunk and the answers are merged afterwards, so the
+// reviewer must say only what its own chunk supports.
+// ══════════════════════════════════════════════════════════════════
+const CHUNK_PROMPT_ADDENDUM = `
+CHUNKED REVIEW — YOU HOLD ONE PART OF THE WORKBOOK:
+
+(This replaces the statement above that the whole workbook fits in this run: it does not.)
+This workbook is too large for one request, so its sheets are split into data chunks and you are reviewing one of them.
+The payload's "dataChunk" field says which chunk this is, which sheets you hold, and which sheets are in the other
+chunks. A name ending "[part 2/3]" is one slice of a larger sheet; its other slices are in other chunks. dataCoverage is
+"partial_view" for this reason. Formulas that point at a sheet in another chunk are shown as normal formulas; follow
+them by sheet name but you cannot see that sheet's contents.
+
+The same rules are put to every chunk and the answers are merged: an issue raised on any chunk is kept; a pass is kept
+only if no chunk raised an issue; an uncertain answer is dropped if any chunk gave a definite one. So:
+  1. Raise an issue whenever the sheets you hold show it, even if sheets you cannot see might add to it.
+  2. Answer pass only when everything the test needs is in your chunk. If a pass would depend on a sheet you do not
+     hold, answer uncertain instead.
+  3. When a test depends on sheets you do not hold, answer uncertain in one or two sentences naming those sheets
+     ("needs <sheet names>, held in another chunk"). Do not write long explanations for uncertain answers.
+  4. Never say something is "not present in the workbook". You hold part of it: say "not visible in this chunk".
+Keep review_mode as "llm_full_parse".
+`.trim();
+
+module.exports = { CHUNK_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS_CEILING, buildSheetFormulaList, buildFullParseFormulaPayload, buildFullParsePayloadWithText, textBudgetChars, buildTextIndex, buildNamedRangeMap, fullParseCoverage, FULL_PARSE_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS };

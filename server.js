@@ -994,7 +994,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
                  findings: c.findings.slice(0, 10).map(f => ({ fn: f.fnName, sheets: f.sheets, occurrences: (f.occurrences || []).slice(0, 6) })) };
       } catch (e) { return { checked: false, findingCount: 0, findings: [] }; }
     })();
-    const t2Results  = await runTier2(parsed, { skipRuleIds: scopePlan.skipRuleIds, duplicateLogicSummary, domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, recalcCheckResult, outputOverwriteScan });
+    const t2Results  = await runTier2(parsed, { skipRuleIds: scopePlan.skipRuleIds, duplicateLogicSummary, domain: domain.content, domainFile: domain.file, modelContext, keySheets: modelSummary.key_sheets, tier0Stats: tier0.stats, tier0Risks: tier0.riskIndicators, namedRangeAudit, vbaReview, useFullParse: funnelDecision.useFullParse, routeEstimateTokens: funnelDecision.estimate.estimatedTokens, recalcCheckResult, outputOverwriteScan });
     const t2FailuresRaw = t2Results.filter(r => r.status !== 'pass');
     // FIX (I-11): found via an independent review confirming at least
     // 3 Tier 2 findings explicitly self-identify as duplicates of

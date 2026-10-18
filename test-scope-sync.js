@@ -305,7 +305,7 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
     const t2 = fs.readFileSync(path.join(__dirname, 'src', 'validator-tier2.js'), 'utf8');
     assert.ok(/namedRangeMap: tier0Context\.namedRangeMap/.test(t2));
     assert.ok(fp.FULL_PARSE_PROMPT_ADDENDUM.includes('# STATIC TEXT CELLS') && fp.FULL_PARSE_PROMPT_ADDENDUM.includes('namedRangeMap'));
-    assert.ok(/fullParseCoverage === 'complete_workbook' && dataChunks\.length === 1/.test(t2));
+    assert.ok(/fullParseCoverage === 'complete_workbook' && nChunks === 1/.test(t2));   // one data chunk only: a chunked review is always a partial view
   });
 
   console.log('Exclusion engine');
