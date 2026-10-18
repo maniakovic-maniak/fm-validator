@@ -73,8 +73,8 @@ keeps learning which lower-severity procedures can conclude.
   the scope candidates in Improvement Signals). The server log lists every conversion. `absencePolicy.enforce` in `config/rule-scope.json` switches the code check off.
 - **What "complete_workbook" means.** The full-parse payload used to hold only formula cells, so the reviewer could
   not see a single row label, the cover note or a change log, and could not resolve a named range. It now also gets
-  every static text cell (a "# STATIC TEXT CELLS" section per sheet, capped at `TEXT_INDEX_MAX_CHARS`, 160,000 chars, about
-  40-50k real tokens) and `namedRangeMap`. `dataCoverage` is `complete_workbook` only when all of that arrived uncut and in one
+  every static text cell (a "# STATIC TEXT CELLS" section per sheet, capped by `textBudgetChars()`: 160,000 chars at least, up to 500,000 when the formulas leave room inside an 850k-token
+  request budget - the ESO model needs 441k; Fm-00038 narrowed at the old fixed 160k cap) and `namedRangeMap`. `dataCoverage` is `complete_workbook` only when all of that arrived uncut and in one
   data chunk. Over budget, the index first drops repeated identical rows (`deduped`, still complete), then keeps only
   label columns A-E (`narrowed`), then shares the budget fairly across sheets (`truncated`). The last two, or a cut name
   list, make it `partial_view` and the absence policy stays off. The server log prints

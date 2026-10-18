@@ -252,6 +252,19 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
     assert.strictEqual(fp.fullParseCoverage({ mode: 'full' }, { truncated: false }), 'complete_workbook');
     assert.strictEqual(fp.fullParseCoverage(null, null), 'partial_view');
   });
+  test('the text budget grows when the formulas leave room, and shrinks back to the base cap when they do not', () => {
+    assert.strictEqual(fp.textBudgetChars(381000), 500000);                       // ESO-sized formulas (Fm-00038): room for 441k chars of text
+    assert.strictEqual(fp.textBudgetChars(900000), fp.TEXT_INDEX_MAX_CHARS);      // very large formula list: never below the base cap
+    assert.ok(fp.textBudgetChars(500000) >= fp.TEXT_INDEX_MAX_CHARS && fp.textBudgetChars(500000) <= 500000);
+  });
+  test('payload builder uses that budget: text that exceeds the base cap but fits the room stays complete', () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Calc');
+    for (let r = 1; r <= 2500; r++) { ws.getCell(r, 1).value = `Row label number ${r} with a reasonably long description of the line`; ws.getCell(r, 2).value = `Note for line ${r} explaining the basis of the calculation`; ws.getCell(r, 3).value = { formula: `A${r}&"x"` }; }
+    const b = fp.buildFullParsePayloadWithText(wb);
+    assert.ok(b.textIndex.chars > fp.TEXT_INDEX_MAX_CHARS, `expected text above the base cap, got ${b.textIndex.chars}`);
+    assert.ok(b.textIndex.mode === 'full' && b.coverage === 'complete_workbook');
+  });
   test('the reviewer payload includes namedRangeMap and the prompt describes the static text section', () => {
     const t2 = fs.readFileSync(path.join(__dirname, 'src', 'validator-tier2.js'), 'utf8');
     assert.ok(/namedRangeMap: tier0Context\.namedRangeMap/.test(t2));

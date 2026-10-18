@@ -71,6 +71,10 @@ function buildFullParseFormulaPayload(workbook) {
 // run is told it saw a partial view, so "not present" is never claimed from a workbook it could not fully read.
 // ══════════════════════════════════════════════════════════════════
 const TEXT_INDEX_MAX_CHARS = 160000;     // ~40-50k real tokens (about $0.4 across the three batches): text tokenizes ~3-4 chars/token, unlike formulas
+const TEXT_INDEX_MAX_CHARS_CEILING = 500000;   // most the text index may reach when the formulas leave room (~130-170k real tokens)
+const CONTEXT_BUDGET_TOKENS = 850000;    // keep the whole request well inside a 1M-token window
+const REAL_TO_ESTIMATED_TOKENS = 1.55;   // Fm-00038: 533k real input tokens against a 352k estimate (estimator is formula-tuned)
+const TEXT_CHARS_PER_TOKEN = 2.5;        // deliberately pessimistic for text
 const TEXT_CELL_MAX_CHARS = 90;
 const NARROW_MAX_COL = 5;                // fallback mode: label columns A-E only
 const NAMED_RANGE_MAX = 600;
@@ -193,9 +197,21 @@ function buildNamedRangeMap(workbook) {
  * honestly how much of the workbook the reviewer was given.
  * @returns {{ payload: Object, textIndex: Object, namedRanges: Object, coverage: 'complete_workbook'|'partial_view' }}
  */
+/**
+ * How many characters of static text the request can carry. The text index is what lets the reviewer say a schedule
+ * or register is genuinely missing, so it is given as much room as the formulas leave - up to a ceiling - instead of
+ * a fixed small cap that forced label-columns-only on the ESO model (Fm-00038: 441k chars needed, 160k allowed).
+ */
+function textBudgetChars(formulaChars, estimatedCharsPerToken = 1.15) {
+  const formulaTokensReal = (formulaChars / estimatedCharsPerToken) * REAL_TO_ESTIMATED_TOKENS;
+  const room = CONTEXT_BUDGET_TOKENS - formulaTokensReal;
+  return Math.max(TEXT_INDEX_MAX_CHARS, Math.min(TEXT_INDEX_MAX_CHARS_CEILING, Math.floor(room * TEXT_CHARS_PER_TOKEN)));
+}
+
 function buildFullParsePayloadWithText(workbook, opts = {}) {
   const formulas = buildFullParseFormulaPayload(workbook);
-  const textIndex = buildTextIndex(workbook, opts);
+  const formulaChars = Object.values(formulas).reduce((n, v) => n + String(v).length, 0);
+  const textIndex = buildTextIndex(workbook, { maxChars: textBudgetChars(formulaChars), ...opts });
   const namedRanges = buildNamedRangeMap(workbook);
   const payload = {};
   const names = new Set([...Object.keys(formulas), ...Object.keys(textIndex.bySheet)]);
@@ -251,4 +267,4 @@ a formula or text cell that is absent from a sheet's list is genuinely not there
 text section or the name list was cut to fit; say what you could not see rather than treating it as absent.
 `.trim();
 
-module.exports = { buildSheetFormulaList, buildFullParseFormulaPayload, buildFullParsePayloadWithText, buildTextIndex, buildNamedRangeMap, fullParseCoverage, FULL_PARSE_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS };
+module.exports = { buildSheetFormulaList, buildFullParseFormulaPayload, buildFullParsePayloadWithText, textBudgetChars, buildTextIndex, buildNamedRangeMap, fullParseCoverage, FULL_PARSE_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS };
