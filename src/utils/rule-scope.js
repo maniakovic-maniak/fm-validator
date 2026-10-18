@@ -71,7 +71,32 @@ function saveHistory(key, history, dirs = DEFAULT_DIRS) {
   fs.renameSync(tmp, target);          // atomic: a crash never leaves a half-written history
 }
 
-function buildScopePlan({ checklist, domainFile, modelText = '', runKey = '', fullScope = false, log = console.log, configs = {}, dirs = DEFAULT_DIRS }) {
+/**
+ * Procedures whose own instruction starts "Trigger: ..." apply only when that pattern is in the workbook.
+ * config/rule-scope.json lists, per procedure, the facts any one of which keeps it in scope. Facts come from the
+ * file (sheet names, Tier 0 OFFSET count, the VBA scan) - never from a run's outcome. No facts, or an unknown
+ * fact type, keeps the procedure in scope.
+ * @returns {Array<{id:string, reason:string}>}
+ */
+function evaluatePreconditions(cfg, facts) {
+  if (!cfg || cfg.enabled === false || !facts) return [];
+  const holds = c => {
+    switch (c && c.fact) {
+      case 'sheetNameMatches': { try { const re = new RegExp(c.pattern, 'i'); return (facts.sheetNames || []).some(n => re.test(String(n))); } catch (_) { return true; } }
+      case 'offsetCountAtLeast': return typeof facts.offsetCount === 'number' ? facts.offsetCount >= (c.value || 1) : true;
+      case 'vbaManipulatesCalculation': return typeof facts.vbaManipulatesCalculation === 'boolean' ? facts.vbaManipulatesCalculation : true;
+      default: return true;                         // unknown condition: do not remove anything
+    }
+  };
+  const out = [];
+  for (const r of cfg.rules || []) {
+    if ((r.requiresAny || []).some(holds)) continue;
+    for (const id of r.ruleIds || []) out.push({ id, reason: r.reason || 'Trigger not present in this workbook.' });
+  }
+  return out;
+}
+
+function buildScopePlan({ checklist, domainFile, modelText = '', runKey = '', fullScope = false, log = console.log, configs = {}, dirs = DEFAULT_DIRS, facts = null }) {
   const t2 = applicableTier2(checklist, domainFile);
   const t2Ids = new Set(t2.map(r => r.id));
   const sev = Object.fromEntries(t2.map(r => [r.id, r.severity]));
@@ -91,8 +116,16 @@ function buildScopePlan({ checklist, domainFile, modelText = '', runKey = '', fu
     }
   }
 
-  // 2. Needs evidence outside the workbook: domain-independent list.
   const scopeCfg = configs.scope || readJson(dirs.scopeConfig) || {};
+
+  // 1b. Trigger not present in this workbook (the procedure's own precondition), independent of domain.
+  for (const p of evaluatePreconditions(scopeCfg.preconditions, facts)) {
+    if (!t2Ids.has(p.id)) continue;
+    if (sev[p.id] === 'fatal' && !(scopeCfg.preconditions || {}).allowFatal) continue;
+    take(p.id, 'not_applicable', 'P_precondition_absent', p.reason);
+  }
+
+  // 2. Needs evidence outside the workbook: domain-independent list.
   const ev = scopeCfg.evidenceRequired;
   if (ev && ev.enabled) {
     for (const id of ev.ruleIds || []) {
@@ -197,6 +230,6 @@ function recordRunInHistory({ domainFile, statusById, log = console.log, dirs = 
 }
 
 module.exports = {
-  buildScopePlan, summarizeScopeForReport, computeCompletion, ruleStatus, plannedRules, applicableTier2,
+  buildScopePlan, evaluatePreconditions, summarizeScopeForReport, computeCompletion, ruleStatus, plannedRules, applicableTier2,
   recordRunInHistory, loadHistory, saveHistory, domainKey, DEFAULT_DIRS
 };

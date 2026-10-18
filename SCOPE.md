@@ -118,3 +118,18 @@ If `read` stays at 0, caching is not working and the run is billed as before (pl
 
 The ">50% excluded" warning counts only `not_applicable` and `evidence_required`; procedures held back by tiering
 (`extended_not_run`) are a cost decision and do not trigger it.
+
+## Trigger preconditions
+
+A few procedures start their instruction with "Trigger: ..." (T2-S10-788, T2-S10-789 from the RIIO partner review): they
+only apply when that pattern exists in the workbook. `preconditions` in `config/rule-scope.json` lists, per procedure,
+the facts of which any one keeps it in scope: `sheetNameMatches` (regex on sheet names), `offsetCountAtLeast` (Tier 0
+count) and `vbaManipulatesCalculation` (the VBA scan's T0-VBA-005 finding). When none holds, the procedure leaves the
+plan before the run as `not_applicable`, tier `P_precondition_absent`, and the reason is stored in
+`data/rule-exclusions/<run>.json`. The facts are read from the file, never from a run's result. If a fact could not be
+read (VBA scan failed, Tier 0 stats missing) the procedure stays in scope. Fatal rules are not removed unless
+`preconditions.allowFatal` is set. Set `preconditions.enabled` to false to switch the whole mechanism off. To cover a
+new rule, add it with its trigger facts; the test checks that the rule's instruction really starts with "Trigger:".
+
+Measured on the real files: ESO has 354 OFFSET formulas, so both procedures stay. Carlsberg has no OFFSET but its macros
+trip T0-VBA-005, so T2-S10-788 stays and only T2-S10-789 leaves.

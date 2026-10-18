@@ -970,7 +970,15 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
           checklist: require('./config/checklist.json'),
           domainFile: path.basename(String(domain.file || '')),
           modelText: `${modelType} ${modelSummary.industry || ''} ${modelSummary.model_purpose || ''}`,
-          runKey: String(originalName || runId), fullScope
+          runKey: String(originalName || runId), fullScope,
+          // Facts read from the file itself; they decide whether a procedure's own "Trigger:" precondition holds.
+          facts: {
+            sheetNames: parsed.sheetNames || [],
+            offsetCount: tier0 && tier0.stats && typeof tier0.stats.totalOffsetCount === 'number' ? tier0.stats.totalOffsetCount : undefined,
+            vbaManipulatesCalculation: vbaReview && vbaReview.applicable === true && vbaReview.encrypted !== true
+              ? (vbaReview.hasVbaProject ? (vbaReview.findings || []).some(f => f && f.id === 'T0-VBA-005') : false)
+              : undefined
+          }
         });
       } catch (e) {
         console.error('   \u26a0\ufe0f  Scope plan failed (every procedure will run):', e.message);

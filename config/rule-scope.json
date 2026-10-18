@@ -7,6 +7,26 @@
     "evidence_required": "Procedure needs source documents or records that cannot be held in the workbook itself, so it cannot be concluded from the file alone.",
     "extended_not_run": "Lower-severity procedure that has not reached a verdict in earlier reviews of this model type; left out of a standard review and run in a full review."
   },
+  "preconditions": {
+    "enabled": true,
+    "note": "A procedure whose own instruction begins 'Trigger: ...' only applies when that pattern exists in the workbook. If none of the listed facts holds, the procedure is not applicable and leaves the plan before the run. The facts are read from the file (sheet names, Tier 0 counts, the VBA scan), never from a run's outcome. If a fact is unavailable the procedure stays in scope.",
+    "rules": [
+      {
+        "ruleIds": ["T2-S10-788"],
+        "requiresAny": [
+          { "fact": "sheetNameMatches", "pattern": "saved ?results|live ?results" },
+          { "fact": "offsetCountAtLeast", "value": 1 },
+          { "fact": "vbaManipulatesCalculation" }
+        ],
+        "reason": "Trigger not present: the workbook has no SavedResults/LiveResults sheet, no OFFSET formulas and no macro that manipulates calculation or writes values, so there is no stored-state recall mechanism to test."
+      },
+      {
+        "ruleIds": ["T2-S10-789"],
+        "requiresAny": [ { "fact": "offsetCountAtLeast", "value": 1 } ],
+        "reason": "Trigger not present: the workbook contains no OFFSET formulas, so there is no year-difference-as-width pattern to test."
+      }
+    ]
+  },
   "evidenceRequired": {
     "enabled": true,
     "allowFatal": false,

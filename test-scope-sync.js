@@ -128,6 +128,42 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
     assert.ok(require('./src/utils/rule-exclusions').matchProfile(cfg, 'skill-mining.md', 'a quarry'));
   });
 
+  console.log("Trigger preconditions (a procedure whose own instruction starts 'Trigger:')");
+  const GENERIC = 'skill-generic.md';
+  const pre = (facts, extra = {}) => plan(Object.assign({ domainFile: GENERIC, modelText: 'corporate valuation', facts }, extra));
+  const preIds = p => p.preExcluded.filter(x => x.tier === 'P_precondition_absent').map(x => x.id).sort();
+  test('config names only Tier 2 rules that exist, each with a trigger in its own instruction', () => {
+    for (const r of scopeCfg.preconditions.rules) for (const id of r.ruleIds) {
+      assert.ok(byId.has(id), `unknown rule ${id}`);
+      assert.ok(/^\s*Trigger:/i.test(byId.get(id).fix_instruction || ''), `${id} has no Trigger: in its instruction`);
+    }
+  });
+  test('no SavedResults sheet, no OFFSET, no calculation-manipulating macro: both RIIO procedures leave the plan', () => {
+    const p = pre({ sheetNames: ['Valuation', 'Assumptions'], offsetCount: 0, vbaManipulatesCalculation: false });
+    assert.deepStrictEqual(preIds(p), ['T2-S10-788', 'T2-S10-789']);
+    assert.ok(p.skipRuleIds.has('T2-S10-788') && p.skipRuleIds.has('T2-S10-789'));
+    assert.ok(p.preExcluded.filter(x => x.tier === 'P_precondition_absent').every(x => x.category === 'not_applicable' && x.reason));
+  });
+  test('OFFSET formulas keep both procedures; a SavedResults sheet or a calc-manipulating macro keeps 788 only', () => {
+    assert.deepStrictEqual(preIds(pre({ sheetNames: ['A'], offsetCount: 354, vbaManipulatesCalculation: false })), []);
+    assert.deepStrictEqual(preIds(pre({ sheetNames: ['A', 'SavedResults'], offsetCount: 0, vbaManipulatesCalculation: false })), ['T2-S10-789']);
+    assert.deepStrictEqual(preIds(pre({ sheetNames: ['A'], offsetCount: 0, vbaManipulatesCalculation: true })), ['T2-S10-789']);
+  });
+  test('facts that could not be read keep the procedures in scope', () => {
+    assert.deepStrictEqual(preIds(pre(null)), []);
+    assert.deepStrictEqual(preIds(pre({ sheetNames: ['A'] })), []);          // offsetCount and vba unknown
+  });
+  test('the precondition applies to every domain and can be switched off', () => {
+    const facts = { sheetNames: ['A'], offsetCount: 0, vbaManipulatesCalculation: false };
+    assert.deepStrictEqual(preIds(plan({ facts })), ['T2-S10-788', 'T2-S10-789']);   // ESO-type domain too
+    const off = Object.assign({}, scopeCfg, { preconditions: Object.assign({}, scopeCfg.preconditions, { enabled: false }) });
+    assert.deepStrictEqual(preIds(plan({ facts, configs: { exclusions: exclCfg, scope: off, tiering: tieringCfg, history: seedHistory } })), []);
+  });
+  test('server.js passes facts read from the file (sheet names, Tier 0 OFFSET count, VBA scan)', () => {
+    const srv = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    assert.ok(/facts: \{[\s\S]*sheetNames: parsed\.sheetNames[\s\S]*totalOffsetCount[\s\S]*T0-VBA-005/.test(srv));
+  });
+
   console.log('Absence policy');
   const abs = require('./src/utils/absence-policy');
   const unc = (condition, extra = {}) => Object.assign({ id: 'T2-S5-005', status: 'uncertain', confidence: 0.55, condition, priority: 'Query' }, extra);
