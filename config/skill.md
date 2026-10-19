@@ -136,6 +136,21 @@ missing model-wide.
 
 ---
 
+## Step 5c: Check every claim and every proposed fix against the values you were given
+
+An independent review of a licence-model report found the reviewer's own findings wrong in five repeatable ways. Apply these before you write a finding.
+
+1. Test a proposed formula change on a real value before you propose it. Take one cell from the payload, put its stored inputs into your replacement formula and state the result in the finding ("with AP43 = -184.94 and AP44 = 294.33 the replacement returns -62.8%, the current formula returns +62.8%"). If the replacement changes a result that is already correct, or flips a sign, do not propose it. If you cannot test it from the payload, say "unverified" and describe the test the owner should run instead of writing the edit. Never propose ABS(), a sign flip, a rounding change or an error guard as a fix without this test.
+2. Read signs from the stored values. A balance held as a negative number under a liability convention (net debt of -184.9) is correctly turned into a positive ratio by a negation. A negation on such a cell is a convention to document, not an error, unless a stored value shows the ratio taking the wrong sign in some period or scenario.
+3. Do not write "no computed values are available" when the payload contains stored values. Name the cells and values you checked. If you checked only a sample, say which cells and keep the status uncertain; do not generalise from the sample to the whole workbook.
+4. "Deliberate", "intentional" and "appears to be by design" need evidence: a label, a note, a documentation cell, a repeated pattern that reconciles. When a SUM total covers another SUM cell and also the cells that SUM adds up, work out the total with and without the repeat and compare it with the figure it should equal (a statement line, a check cell). If the with-repeat figure is wrong, report a double count with both numbers. Do not call it deliberate overlap on the strength of its shape.
+5. Read what a function does before you call a use of it a defect. OFFSET's third argument is a column displacement, not a width; zero and negative displacements are valid. MATCH with an explicit type of 1 or -1, and VLOOKUP with TRUE, are deliberate banding lookups. A ROUND to five decimals on an allowed rate may be the published precision. Report these only when a stored value or a label shows a wrong outcome.
+6. Describe a cell by its own label. Read the label in the row or column header before saying what a cell is (an "Allowed return on equity" is not "interest"). If you cannot see a label, say so.
+
+If a finding on a cell, range or row you have already reported repeats the same cells, refer to the earlier finding ("same cells as T2-S4-006") instead of raising it again.
+
+---
+
 ## Step 5b: Absence policy — "not present" versus "not visible"
 
 This applies to every test below. Read `dataCoverage` in the payload first.
@@ -755,6 +770,33 @@ just mentioned in narrative text with no corresponding model linkage.
   no risks exist
 
 ---
+
+### test: sum_range_integrity
+For each SUM or SUMIFS total you can see, compare its range with the
+other totals in the same column or row.
+- A total whose range contains another SUM cell AND the cells that SUM
+  adds up counts those cells twice. Work out the total with and without
+  the repeat and compare with the figure it should equal (a statement
+  line, a check cell, the same total on another sheet). If the figure
+  without the repeat is the one that reconciles → fail, name both cells,
+  both numbers and every period it repeats in. Treat it as one finding.
+- A total that stops short of the last row or period, or skips a row
+  inserted inside the block → fail with the exact cells missed.
+- Do not call overlapping ranges "deliberate" without text evidence
+  (Step 5c, rule 4).
+- If you were shown only part of the workbook's totals → uncertain, and
+  name the totals you did check.
+
+### test: iferror_not_masking
+For each IFERROR, IFNA or ISERROR wrapper you can see:
+- If the wrapped reference is an error, a #REF! literal, or the cached
+  value of an input cell is an error → fail. The defect is the error
+  underneath, not the wrapper: name the cell holding the error and every
+  cell that reads it, and say what the wrapper turns it into (usually
+  zero or blank).
+- If the wrapper only guards a divide-by-zero or a lookup that can
+  legitimately miss, and the fallback is labelled or tested → pass.
+- Group all wrappers over the same error as one finding.
 
 ## Step 7: Handling manual_only rules
 
@@ -1722,16 +1764,29 @@ explicit warning at the point of use.
 
 ### test: no_hardcoded_sign_in_denominator
 Check whether a ratio or similar formula hardcodes a negation (e.g.
-"-AH12") on an input cell, assuming a fixed sign convention, rather than
-deriving the correct sign structurally.
-- If the formula derives sign structurally (e.g. ABS(), or genuinely
-  guaranteed by upstream logic) → pass, confidence 80+
-- If a bare hardcoded negation exists on an assumed-sign cell → fail,
-  even if the current cached value produces a plausible-looking ratio.
-  A plausible result does not confirm the sign logic is safe.
+"-AH12") on a cell whose sign could change, rather than deriving the
+correct sign structurally.
+Read the stored values first (Step 5c, rule 2).
+- If the negated cell is a balance held under a stated sign convention
+  (net debt stored negative, outflows negative) and every stored period
+  and scenario you can see gives the ratio the sign its label implies
+  → pass, confidence 80+. Say in one line which cells and values you
+  checked, and that the convention is the reason. Do not raise it.
+- If a stored value shows the ratio with the wrong sign in some period
+  or scenario (for example a net cash position making a leverage ratio
+  negative), or the negated cell can plausibly change sign (net cash vs
+  net debt, a cash-flow item that can be an inflow or an outflow) → fail,
+  naming the cell, the period and the value. The remedy is a sign-aware
+  formula (IF/MAX/MIN on the position, or a documented convention with a
+  check cell). Do NOT recommend a bare ABS() on a signed balance: it
+  returns the wrong sign in the very case where the balance is stored
+  negative. State the result of your replacement on a stored value
+  before you propose it.
+- If you cannot see enough stored values to tell → uncertain, and name
+  the cells you could not read.
 - Do not mark a workbook-wide "sign convention consistent" claim as pass
-  purely on a spot-check of one or two cells — confirm the underlying
-  formulas do not hardcode sign assumptions.
+  purely on a spot-check of one or two cells; say which cells you
+  checked.
 
 ### test: single_authoritative_metric_definition
 Check whether a key metric (net debt, RAV, revenue, or similar) is

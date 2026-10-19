@@ -10162,7 +10162,7 @@
       "severity": "high",
       "manual_only": false,
       "fixable": false,
-      "fix_instruction": "Confirmed pattern: a ratio or similar formula hardcodes a negation (e.g. \"-AH12\") on an input cell, assuming that cell will always carry a specific sign, rather than deriving the correct sign structurally (e.g. ABS() or a sign-aware formula). This is a real risk even when the current sign convention holds, since nothing in the formula itself would catch a future change upstream. Flag even when the current cached value produces a plausible-looking ratio - a plausible-looking result does not confirm the sign logic is safe. Do not mark a workbook-wide \"sign convention consistent\" test as Pass on the strength of a spot-check; confirm the underlying formulas do not hardcode sign assumptions."
+      "fix_instruction": "Confirmed pattern: a ratio or similar formula hardcodes a negation (e.g. \"-AH12\") on an input cell, assuming that cell will always carry a specific sign, rather than deriving the correct sign structurally. Read the stored values first: a negation on a balance held under a stated sign convention (for example net debt stored negative) that gives the ratio the right sign in every period and scenario you can see is a documented convention, not a defect. Flag it where a stored value shows the wrong sign, or where the cell can plausibly change sign (net cash vs net debt, a cash-flow item). Never recommend a bare ABS() on a signed balance, and test any replacement formula on a stored value before proposing it. Do not mark a workbook-wide \"sign convention consistent\" test as Pass on the strength of a spot-check; name the cells you checked."
     },
     {
       "id": "T2-S5-012",

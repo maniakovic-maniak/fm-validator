@@ -184,3 +184,15 @@ An independent reviewer checked the ESO licence-model report line by line. These
 | T0-FMLPATTERN / COLPATTERN / NESTEDIF / HIDDEN-001 | Severity medium / medium / medium / high | Screening items are low; hidden live logic is medium |
 
 Scope: tier R5 in `config/rule-exclusions.json` takes ten conditional project-finance procedures out of the plan for a regulated network model before the run, and T2-S6-003 (DSCR structure) joins the statutory-gates tier R4. Procedures the reviewer judged useful (for example T2-S5-008, T2-S6-002, T2-S10-336) stay in scope. Regression tests: `test-eso-review-fixes.js`.
+
+## Patch 2 from the ESO independent review (2026-10-19)
+
+| Addition | What it does |
+|---|---|
+| T0-NESTEDSUM-001 | Plain SUM total whose range contains another SUM cell and the cells that SUM adds up (double count); reports value with and without the repeat |
+| T0-PLACEHOLDER-001 | "To be provided / TBC / TBD" text sitting in a numeric row of a calculation sheet |
+| Screening record types | Deterministic and screening findings classed before P-ranking, so they do not claim P1-P3 |
+| Related findings | Findings sharing cells get a common RC- group id and a note: one repair and one retest cover them |
+| Tier 2 prompt (Step 5c) | Fixes tested on a stored value, signs read from values, no stale "no computed values" claims, "deliberate" needs evidence, function semantics, label before description; new sum_range_integrity and iferror_not_masking tests; ABS() no longer recommended on signed balances |
+
+Hidden Gem (38,798 sums): 12 s, 0 findings from the new checks.
