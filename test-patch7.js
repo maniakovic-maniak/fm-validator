@@ -35,6 +35,12 @@ test('a medium severity finding that points at a real cell is still escalated wh
   const f = absence({ cell: 'AP94', condition: 'FinancialRatios!AP94 deferred tax balance is hardcoded.' });
   assert.strictEqual(classifyRecordType(f), 'Critical Query');
 });
+test('an absence the reviewer anchored to a nearby cell (Fm-00046: SystemOperator!AP658) is a Query too', () => {
+  assert.strictEqual(classifyRecordType(absence({ cell: 'AP658', sheet: 'SystemOperator' })), 'Query');
+});
+test('a non-absence medium finding below 60% that touches a key output area stays a Critical Query', () => {
+  assert.strictEqual(classifyRecordType(absence({ cell: 'AP573', condition: 'AP561-573 models a notional equity issuance triggered by a gearing threshold.' })), 'Critical Query');
+});
 test('an absence at 60%+ confidence is unchanged (Confirmed Finding)', () => {
   assert.strictEqual(classifyRecordType(absence({ confidence: 70 })), 'Confirmed Finding');
 });
@@ -63,6 +69,16 @@ test('every id exists in checklist.json and none is fatal or critical', () => {
   const byId = {};
   (function walk(o) { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') { if (o.id) byId[o.id] = o; Object.values(o).forEach(walk); } })(all);
   for (const id of NA7) { assert.ok(byId[id], id); assert.ok(!['fatal', 'critical'].includes(byId[id].severity), id); }
+});
+
+const NA6 = ['T2-S7-005', 'T2-S10-353', 'T2-S10-425', 'T2-S10-451', 'T2-S10-493', 'T2-S10-709'];
+test('the six no-such-structure procedures are in tier R7, enabled, not fatal-gate, none fatal or critical', () => {
+  const t = tiers.R7_scope_decision_regulated_network_no_such_structure;
+  assert.ok(t && t.enabled === true && t.allowFatal === false);
+  assert.deepStrictEqual(t.ruleIds.slice().sort(), NA6.slice().sort());
+  const byId = {};
+  (function walk(o) { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') { if (o.id) byId[o.id] = o; Object.values(o).forEach(walk); } })(JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'checklist.json'), 'utf8')));
+  for (const id of NA6) assert.ok(byId[id] && !['fatal', 'critical'].includes(byId[id].severity), id);
 });
 
 console.log('Regulated return parameters');

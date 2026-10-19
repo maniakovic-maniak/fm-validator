@@ -215,3 +215,11 @@ Hidden Gem (38,798 sums): 12 s, 0 findings from the new checks.
 | Scope tier R6 (regulated-network profile) | Seven procedures the reviewer answered "Not applicable to this model type" are scoped out: T2-S10-354, 381, 429, 453, 461, 503, 720. Each ended Uncertain, which does not count towards completion. Expected effect on the same answers: 98 of 118 planned, 83.1% (was 98 of 125, 78.4%). |
 | Regulated return parameters | New Reasonableness Review section and Tier 0 check T0-RSN-010: vanilla WACC (0.5%-10%), cost of equity (3%-15%), notional gearing (30%-80%). Reads the first number on a labelled row up to 60 columns right. Disclosed rule-of-thumb ranges, flagged as a Query. ESO: 3.31%, 7.57%, 55.0%, all in range, 0.2 s. |
 | N/A explanation | Reasonableness Review states that N/A means the model has no such figure to test; it is not a pass and not a model gap. |
+
+## Patch 8 from the fourth ESO run, Fm-00046 (2026-10-19)
+
+| Change | Detail |
+|---|---|
+| Critical Query cap, wider | The Patch 7 cap on medium and low severity absences no longer needs the A1 fallback cell. In Fm-00046 the reviewer anchored the deferred tax absence to SystemOperator!AP658 and it stayed a Critical Query. |
+| Scope tier R7 (regulated-network profile) | Six more procedures whose subject matter the reviewer said does not exist: T2-S7-005 (IRR/NPV range), T2-S10-353 (construction equity bridge), T2-S10-425 (PSC), T2-S10-451 (economic cost-benefit), T2-S10-493 (tiered promote), T2-S10-709 (pumped storage). T2-S7-005 and T2-S10-353 were Critical Queries at 40% and 30% confidence. |
+| Not changed | T2-S3-005 (WCF values in two places, critical rule, 50% confidence) stays a Critical Query: it is a real unresolved question. |

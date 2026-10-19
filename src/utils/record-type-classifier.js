@@ -87,13 +87,17 @@ function screeningRecordType(id) {
 // raised eleven of these (bid transition, termination valuation, ESCO contract, ...) as Queries and Critical Queries,
 // which blocked reliance on nothing. They stay visible as Observations; a check that sets its own record_type, or an
 // absence with real confidence (40+), is not touched.
+function isAbsenceText(f) {
+  const text = [f.condition, f.what_wrong, f.finding, f.issue].map(x => String(x || '')).find(x => x.trim()) || '';
+  const t = text.replace(/^\s*not present in the workbook:\s*/i, '');
+  return isAbsenceFinding(t);
+}
+
 function isWorkbookWideAbsence(f) {
   if (!/^T2-/.test(String(f.id || ''))) return false;
   const cell = String(f.cell || '').trim().toUpperCase();
   if (cell && cell !== 'A1') return false;
-  const text = [f.condition, f.what_wrong, f.finding, f.issue].map(x => String(x || '')).find(x => x.trim()) || '';
-  const t = text.replace(/^\s*not present in the workbook:\s*/i, '');
-  return isAbsenceFinding(t);
+  return isAbsenceText(f);
 }
 
 function isLowConfidenceWorkbookWideAbsence(f) {
@@ -130,7 +134,9 @@ function classifyRecordType(finding) {
     // question about documentation, not a possible misstatement of a key output. An ESO run raised "no deferred tax
     // line" at 45% confidence as the report's only Critical Query purely because the word "tax" is in the key-output
     // list. Fatal, critical and high severity rules keep the escalation.
-    if (isWorkbookWideAbsence(finding) && (severity === 'medium' || severity === 'low')) return 'Query';
+    // The reviewer sometimes anchors an absence to a nearby cell (T2-S5-008 named SystemOperator!AP658 in Fm-00046),
+    // so this does not require the A1 fallback that the Observation rule above does.
+    if (/^T2-/.test(String(finding.id || '')) && isAbsenceText(finding) && (severity === 'medium' || severity === 'low')) return 'Query';
     return mentionsKeyOutputArea(finding) ? 'Critical Query' : 'Query';
   }
 
