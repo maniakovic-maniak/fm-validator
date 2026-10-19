@@ -59,8 +59,30 @@ function mentionsKeyOutputArea(finding) {
 /** Classifies a single finding, returning its record_type. Respects an
  * already-set, explicit record_type unconditionally — this function
  * only fills in a default when a check hasn't opted to set one itself. */
+// Screening checks flag a pattern, not a defect: the formula differs from its neighbours, a link passes through
+// another cell, a formula is long. Whether any of them is wrong needs a person to look at the cells. An independent
+// review of a licence model showed these stood as P2 Confirmed Findings although none was a demonstrated error
+// (the pattern changes at a period or scenario boundary on purpose; label columns were compared with number
+// columns). They stay in the report, with their samples, as a Query (a candidate to examine) or an Observation
+// (a maintainability note); a check that sets its own record_type is still respected.
+const SCREENING_RECORD_TYPES = [
+  ['T0-FMLPATTERN', 'Query'], ['T0-COLPATTERN', 'Query'], ['T0-REGIMECHANGE', 'Query'],
+  ['T0-MIXEDREF', 'Observation'], ['T0-DAISYCHAIN', 'Observation'], ['T0-NESTEDIF', 'Observation'],
+  ['T0-COMPLEXFML', 'Observation'], ['T0-HIDDEN-002', 'Observation'],
+];
+
+function screeningRecordType(id) {
+  const s = String(id || '');
+  for (const [prefix, type] of SCREENING_RECORD_TYPES) {
+    if (s === prefix || s.startsWith(prefix + '-') || s.startsWith(prefix + ' ')) return type;
+  }
+  return null;
+}
+
 function classifyRecordType(finding) {
   if (finding.record_type) return finding.record_type;
+  const screening = screeningRecordType(finding.id);
+  if (screening) return screening;
 
   const confidence = typeof finding.confidence === 'number' ? finding.confidence : 100;
   const urgency = (finding.urgency || '').toLowerCase();
@@ -129,4 +151,4 @@ function assignRecordTypes(findings) {
   return findings;
 }
 
-module.exports = { classifyRecordType, assignRecordTypes };
+module.exports = { classifyRecordType, assignRecordTypes, screeningRecordType };

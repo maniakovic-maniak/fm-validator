@@ -27,6 +27,8 @@ const { checkNumbersStoredAsText } = require('./src/utils/number-as-text-check')
 const { checkBalanceNeverNegative } = require('./src/utils/balance-never-negative-check');
 const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distributions-check');
 const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check');
+const { checkNestedSubtotals } = require('./src/utils/nested-subtotal-check');
+const { checkPlaceholderText } = require('./src/utils/placeholder-text-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
 const { checkTaxEffectiveRate } = require('./src/utils/tax-effective-rate-check');
@@ -35,6 +37,7 @@ const { checkBlankCellReferences, groupBlankCellReferencesByTarget } = require('
 const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
+const { linkRelatedFindings } = require('./src/utils/related-findings');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
@@ -1311,6 +1314,54 @@ async function run() {
       root_cause: 'VLOOKUP/HLOOKUP/MATCH call missing an explicit exact-match argument', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 75,
       ...buildRootCauseFields('T0-LOOKUPMATCH-001', lookupExactMatchCheck, { commonRemediationAction: 'Add an explicit FALSE (VLOOKUP/HLOOKUP) or 0 (MATCH) exact-match argument.' })
+    });
+  }
+
+  // ── Nested subtotal: a SUM that also covers a subtotal and its components ──
+  // Found by an independent review of a licence model (retained-earnings total counted a 244.2 subtotal twice).
+  // Needs no labels: it reads only the formulas, and quotes the cached effect.
+  const nestedSubtotalCheck = (() => { try { return checkNestedSubtotals(parsed._raw); }
+    catch (e) { console.error('   ⚠️  Nested-subtotal check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (nestedSubtotalCheck.applicable && nestedSubtotalCheck.findings.length > 0) {
+    const _ns = nestedSubtotalCheck.findings;
+    const _nsSample = _ns.slice(0, 5).map(f => `${f.sheet}!${f.cell} (counts ${f.innerCell} and its components twice${f.instanceCount > 1 ? `; ${f.instanceCount} periods` : ''})`).join('; ');
+    allFlagged.push({
+      id: 'T0-NESTEDSUM-001',
+      label: `${_ns.length} total(s) count a subtotal and its own components twice`,
+      severity: 'high', status: 'fail',
+      sheet: _ns[0].sheet, cell: _ns[0].cell, category: 'Structure',
+      condition: `${_nsSample}${_ns.length > 5 ? ' and others' : ''}. ${_ns[0].note}`,
+      reason: `${_ns.length} SUM total(s) include a subtotal together with the cells it already adds up`,
+      corrective_action: 'Change each total to add the subtotal and the remaining rows, or the components alone, not both. Then reconcile the total to the figure it should equal (for example the matching statement line) and trace what reads it.',
+      workstream: 'Structure', issue_type: 'Subtotal counted twice',
+      model_risk: 'A total that adds a subtotal on top of its own components overstates the figure by the subtotal in every period it is copied to, and every ratio or output built on it inherits the error.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'SUM range covers a subtotal and its components', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 85,
+      ...buildRootCauseFields('T0-NESTEDSUM-001', nestedSubtotalCheck, { commonRemediationAction: 'Remove the double count and reconcile the total.' })
+    });
+  }
+
+  // ── Placeholder note standing in for a missing calculation ──
+  const placeholderTextCheck = (() => { try { return checkPlaceholderText(parsed._raw); }
+    catch (e) { console.error('   ⚠️  Placeholder-text check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (placeholderTextCheck.applicable && placeholderTextCheck.findings.length > 0) {
+    const _pt = placeholderTextCheck.findings;
+    const _ptSample = _pt.slice(0, 6).map(f => `${f.sheet}!${f.cell} ("${f.text}")`).join('; ');
+    allFlagged.push({
+      id: 'T0-PLACEHOLDER-001',
+      label: `${_pt.length} output row(s) hold only a "to be provided" note instead of a calculation`,
+      severity: 'medium', status: 'fail',
+      sheet: _pt[0].sheet, cell: _pt[0].cell, category: 'Structure',
+      condition: `${_ptSample}${_pt.length > 6 ? ' and others' : ''}. The rest of each row is empty while the rows beside it hold numbers or formulas, so the calculation looks unfinished. Anything that reads the row sees a blank, which behaves as zero.`,
+      reason: `${_pt.length} unfinished row(s) marked with a placeholder note`,
+      corrective_action: 'Build the calculation, or state in the model that the item is out of scope and remove the row from any output that reads it. Do not leave a blank to be read as zero.',
+      workstream: 'Structure', issue_type: 'Unfinished calculation',
+      model_risk: 'An output that depends on a row never built shows zero or blank rather than an error, so a missing ratio can pass as a real result.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Placeholder note in place of a calculation', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 75,
+      ...buildRootCauseFields('T0-PLACEHOLDER-001', placeholderTextCheck, { commonRemediationAction: 'Build the missing calculation or remove the row from outputs.' })
     });
   }
 
@@ -2703,6 +2754,9 @@ async function run() {
   // Finding' is eligible for a P1/P2/P3 priority downstream — see
   // priority() in build_report.py (Tier 1 item 2).
   assignRecordTypes(allFlagged);
+  // Findings from different checks that name the same cells are one repair; cross-reference them (nothing is dropped).
+  try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
+  catch (e) { console.error('   \u26a0\ufe0f  Related-findings link failed:', e.message); }
 
   // ── P1/P2/P3 framework renewal, Tier 2 item 3 ────────────────────────────
   // 4-dimension risk score (Decision consequence, Exposure, Propagation,
