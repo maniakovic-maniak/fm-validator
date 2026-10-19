@@ -196,3 +196,13 @@ Scope: tier R5 in `config/rule-exclusions.json` takes ten conditional project-fi
 | Tier 2 prompt (Step 5c) | Fixes tested on a stored value, signs read from values, no stale "no computed values" claims, "deliberate" needs evidence, function semantics, label before description; new sum_range_integrity and iferror_not_masking tests; ABS() no longer recommended on signed balances |
 
 Hidden Gem (38,798 sums): 12 s, 0 findings from the new checks.
+
+## Patch 6 from the second ESO run (2026-10-19)
+
+| Change | Detail |
+|---|---|
+| Finding class (regulated-network profile only) | `config/finding-class.json`: governance absences (T2-S9-001, S9-002, S13-001, S13-002, S13-009) rated P3; design-preference stress cases (T2-S8-010, S8-012) recorded as Observations. Other profiles unchanged. Completion unchanged. |
+| Same-remedy group (all models) | T2-S9-002, S13-001 and S13-002 share group RC-VERSION-CONTROL |
+| Stored values digest | Full-parse payload now ends each sheet with first/last/min/max/negatives for every labelled formula row (about 17,600 tokens on ESO). Switch off with FM_VALUES_DIGEST=off |
+| Validation Matrix evidence | Full-parse runs now say what the reviewer saw instead of "Standard data subset" |
+| Tier 2 prompt | First-forecast-column initialisation is a pass; check for spare scenario columns and selectors before reporting a missing stress case; no_impossible_balances reads the digest |

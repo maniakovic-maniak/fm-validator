@@ -141,8 +141,8 @@ missing model-wide.
 An independent review of a licence-model report found the reviewer's own findings wrong in five repeatable ways. Apply these before you write a finding.
 
 1. Test a proposed formula change on a real value before you propose it. Take one cell from the payload, put its stored inputs into your replacement formula and state the result in the finding ("with AP43 = -184.94 and AP44 = 294.33 the replacement returns -62.8%, the current formula returns +62.8%"). If the replacement changes a result that is already correct, or flips a sign, do not propose it. If you cannot test it from the payload, say "unverified" and describe the test the owner should run instead of writing the edit. Never propose ABS(), a sign flip, a rounding change or an error guard as a fix without this test.
-2. Read signs from the stored values. A balance held as a negative number under a liability convention (net debt of -184.9) is correctly turned into a positive ratio by a negation. A negation on such a cell is a convention to document, not an error, unless a stored value shows the ratio taking the wrong sign in some period or scenario.
-3. Do not write "no computed values are available" when the payload contains stored values. Name the cells and values you checked. If you checked only a sample, say which cells and keep the status uncertain; do not generalise from the sample to the whole workbook.
+2. Read signs from the stored values (in full-parse mode, the STORED VALUES DIGEST: first, last, min, max and negative count for each labelled formula row). A balance held as a negative number under a liability convention (net debt of -184.9) is correctly turned into a positive ratio by a negation. A negation on such a cell is a convention to document, not an error, unless a stored value shows the ratio taking the wrong sign in some period or scenario.
+3. Do not write "no computed values are available" when the payload contains stored values or a values digest. If the digest lacks the row you need, say which row. Name the cells and values you checked. If you checked only a sample, say which cells and keep the status uncertain; do not generalise from the sample to the whole workbook.
 4. "Deliberate", "intentional" and "appears to be by design" need evidence: a label, a note, a documentation cell, a repeated pattern that reconciles. When a SUM total covers another SUM cell and also the cells that SUM adds up, work out the total with and without the repeat and compare it with the figure it should equal (a statement line, a check cell). If the with-repeat figure is wrong, report a double count with both numbers. Do not call it deliberate overlap on the strength of its shape.
 5. Read what a function does before you call a use of it a defect. OFFSET's third argument is a column displacement, not a width; zero and negative displacements are valid. MATCH with an explicit type of 1 or -1, and VLOOKUP with TRUE, are deliberate banding lookups. A ROUND to five decimals on an allowed rate may be the published precision. Report these only when a stored value or a label shows a wrong outcome.
 6. Describe a cell by its own label. Read the label in the row or column header before saying what a cell is (an "Allowed return on equity" is not "interest"). If you cannot see a label, say so.
@@ -256,6 +256,14 @@ negative trade receivables, negative trade payables where not
 explicitly modelled as credit balances.
 - If none found → pass
 - If found → fail, identify specific line item, period, and dollar amount
+- In full-parse mode use the STORED VALUES DIGEST: each row gives first, last,
+  minimum, maximum and negatives=count. A balance row with negatives=0 passes.
+  A balance row with negatives above 0 fails only if that balance cannot
+  legitimately be negative; net debt, and any balance a label or note says is
+  held as a negative under a liability convention, can. If the digest has no
+  row for a balance this test names, say which balance you could not see and
+  return uncertain. Do not say that no values are available: the digest is
+  the values you were given.
 
 ### test: tax_reconciliation
 Calculate effective tax rate from visible NPBT, tax expense, and NPAT rows.
@@ -510,6 +518,21 @@ Return uncertain with confidence 30.
 State: "Formula consistency per row cannot be verified from summary
 data values. Requires direct cell inspection in Excel."
 
+When the payload lists the formulas (full-parse mode) this test can be done:
+compare the formulas along each time-series row. Report a row only where the
+formulas differ in a way no period boundary explains, and quote the cells.
+The first forecast column is the one place a different formula is usually
+correct. Before you report a difference there, read the formulas in the later
+columns. If they point at prior-period cells (a closing balance in the column
+to the left, for example) and the matching cells in the first column are blank
+or do not exist, the first column is initialising an opening balance and
+cannot use the later formula. That is a pass: name the blank cells and what
+the first-column formula builds the opening figure from. Example: opening
+equity in the first forecast year is opening RAV plus opening net debt, and
+from the second year it is the previous year's closing equity. Report it only
+if the first-column formula fails to build the opening figure from its own
+inputs, or the figure it produces disagrees with a stored check or the digest.
+
 ### test: no_circular_references
 Native Excel circular references (iterative calculation) cannot be
 detected from row data alone — that part remains manual_only.
@@ -712,6 +735,15 @@ isolation.
   variables moving together is the realistic downside scenario, and
   testing them only in isolation can understate real combined risk
 - If evidence is genuinely insufficient to tell → uncertain
+- Before you fail, look for the mechanism. A scenario table in which each
+  column is a scenario and each row is a driver (revenue, costs, totex,
+  incentive revenue), chosen by a selector (INDEX or CHOOSE on a scenario
+  name), can express any combination by filling in a column. Spare, custom or
+  user columns in it mean a combined case can be set up without a structural
+  change. If every populated case moves one driver but the mechanism and a
+  spare column exist, fail with priority P3, say that the mechanism is there
+  and name the selector cell and the spare columns. Do not describe the model
+  as unable to run a combined case.
 
 ### test: sources_and_uses_sufficiency
 Sourced from the same 2026-07-25 gap-analysis review.
@@ -737,6 +769,13 @@ and covenant outputs are shown responding to it.
 - If no interest rate stress case is evidenced → fail
 - If interest is fixed-rate for the full facility term by design (no
   rate risk exists to test) → not applicable, and say so explicitly
+- A rate that is a regulatory allowance (an allowed cost of debt published
+  in a determination) is an input chosen from a list, not a market rate the
+  modeller shocks. Look for selectable alternatives (rows such as "CoD SSMD",
+  "CoD DD", "CoD FD", "CoD Spare") and a model-scenario selector. If a spare
+  row or selector exists, a rate shock can be loaded into it: fail with
+  priority P3, name the spare row and the selector, and say that no shock case
+  is populated. Do not tell the owner to change a determination rate.
 
 ### test: delayed_rampup_stress
 Sourced from the same 2026-07-25 gap-analysis review.
