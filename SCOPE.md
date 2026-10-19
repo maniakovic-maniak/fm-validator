@@ -206,3 +206,12 @@ Hidden Gem (38,798 sums): 12 s, 0 findings from the new checks.
 | Stored values digest | Full-parse payload now ends each sheet with first/last/min/max/negatives for every labelled formula row (about 17,600 tokens on ESO). Switch off with FM_VALUES_DIGEST=off |
 | Validation Matrix evidence | Full-parse runs now say what the reviewer saw instead of "Standard data subset" |
 | Tier 2 prompt | First-forecast-column initialisation is a pass; check for spare scenario columns and selectors before reporting a missing stress case; no_impossible_balances reads the digest |
+
+## Patch 7 from the third ESO run, Fm-00045 (2026-10-19)
+
+| Change | Detail |
+|---|---|
+| Critical Query cap (all models) | A disclosure-type "Not present in the workbook" finding on a medium or low severity rule, below 60% confidence, is a Query. It was a Critical Query only because the word "tax" is in the key-output list (T2-S5-008, 45% confidence, the report's only Critical Query). Fatal, critical and high severity keep the escalation. |
+| Scope tier R6 (regulated-network profile) | Seven procedures the reviewer answered "Not applicable to this model type" are scoped out: T2-S10-354, 381, 429, 453, 461, 503, 720. Each ended Uncertain, which does not count towards completion. Expected effect on the same answers: 98 of 118 planned, 83.1% (was 98 of 125, 78.4%). |
+| Regulated return parameters | New Reasonableness Review section and Tier 0 check T0-RSN-010: vanilla WACC (0.5%-10%), cost of equity (3%-15%), notional gearing (30%-80%). Reads the first number on a labelled row up to 60 columns right. Disclosed rule-of-thumb ranges, flagged as a Query. ESO: 3.31%, 7.57%, 55.0%, all in range, 0.2 s. |
+| N/A explanation | Reasonableness Review states that N/A means the model has no such figure to test; it is not a pass and not a model gap. |

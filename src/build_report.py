@@ -860,10 +860,13 @@ def build_report(data_path, output_path):
         ('Commercial reasonableness',
          (reasonIn.get('waccOverride',{}).get('mismatch',False) or reasonIn.get('terminalValue',{}).get('flagged',False)
           or reasonIn.get('outputs',{}).get('flaggedCount',0)>0 or dupIn.get('flaggedCount',0)>0
+          or reasonIn.get('regulatedReturns',{}).get('flaggedCount',0)>0
           or (reasonIn.get('revenuePerUnit',{}).get('applicable',False) and not reasonIn.get('revenuePerUnit',{}).get('found',True))
           or (reasonIn.get('terminalValueCrossCheck',{}).get('applicable',False) and not reasonIn.get('terminalValueCrossCheck',{}).get('found',True))),
          (f"{reasonIn.get('outputs',{}).get('flaggedCount',0)} output metric(s), {dupIn.get('flaggedCount',0)} duplicate sheet(s), revenue-per-unit metric {'found' if reasonIn.get('revenuePerUnit',{}).get('found') else 'not found'}, and terminal value cross-check {'found' if reasonIn.get('terminalValueCrossCheck',{}).get('found') else 'not found'} — this checks whether results are believable, not whether the model is wired correctly. See the Reasonableness Review tab."
           if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
+          else f"{reasonIn.get('regulatedReturns',{}).get('flaggedCount',0)} of {len(reasonIn.get('regulatedReturns',{}).get('results',[]))} regulated return parameter(s) (vanilla WACC, cost of equity, notional gearing) outside the usual range — investment-style checks (WACC override, terminal value, IRR, margins) do not apply to this model type. See the Reasonableness Review tab."
+          if reasonIn.get('regulatedReturns',{}).get('applicable',False)
           else 'No output metrics or duplicate sheets were found to warrant flagging'
           if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
           else 'Not applicable — no labelled output metrics found to test in this model')),
@@ -2594,6 +2597,11 @@ def build_report(data_path, output_path):
             for cc in range(c1,c2+1): wrr.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(wrr,r_rr,14); set_row(wrr,r_rr+1,24); r_rr+=3
 
+    merge(wrr,f'B{r_rr}:F{r_rr}',
+          'N/A means the model has no such figure to test (for example no DCF, exit value or EBITDA margin in a regulated licence model). It is not a pass, and it is not a gap in the model.',
+          sz=8,col=GREY_TXT2,italic=True,wrap=True)
+    set_row(wrr,r_rr,24); r_rr+=2
+
     def section_header(row,title):
         merge(wrr,f'B{row}:F{row}',title,bold=True,sz=11,col=WHITE,bg=DARK_BLUE,v='center')
         fill_range(wrr,row,2,row,6,DARK_BLUE); set_row(wrr,row,20)
@@ -2636,6 +2644,28 @@ def build_report(data_path, output_path):
         set_row(wrr,r_rr,26); r_rr+=1
     else:
         merge(wrr,f'B{r_rr}:F{r_rr}','Not applicable — no labelled output metrics were found to test.',sz=9,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wrr,r_rr,20); r_rr+=1
+    set_row(wrr,r_rr,10); r_rr+=1
+
+    # ── Regulated Return Parameters ─────────────────────────────────────
+    _reg = reasonIn.get('regulatedReturns',{'applicable':False,'results':[]})
+    r_rr = section_header(r_rr,'REGULATED RETURN PARAMETERS')
+    if _reg.get('applicable') and _reg.get('results'):
+        for label,c1 in [('Parameter',2),('Value',3),('Expected range',4),('Status',5),('Rationale',6)]:
+            cell(wrr,f'{get_column_letter(c1)}{r_rr}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
+        set_row(wrr,r_rr,16); r_rr+=1
+        for res in _reg['results']:
+            wrr.cell(r_rr,2).value=res['metric']; wrr.cell(r_rr,2).font=Fn(sz=9,bold=True,col=CHARCOAL); wrr.cell(r_rr,2).fill=F(WHITE)
+            wrr.cell(r_rr,3).value=f"{res['value']*100:.2f}%"; wrr.cell(r_rr,3).font=Fn(sz=9,col=CHARCOAL); wrr.cell(r_rr,3).fill=F(WHITE); wrr.cell(r_rr,3).alignment=A(h='center')
+            wrr.cell(r_rr,4).value=f"{res['low']*100:.1f}% to {res['high']*100:.1f}%"; wrr.cell(r_rr,4).font=Fn(sz=9,col=GREY_TXT2); wrr.cell(r_rr,4).fill=F(WHITE); wrr.cell(r_rr,4).alignment=A(h='center')
+            badge(wrr,r_rr,5,'Review' if res['flagged'] else 'In range', P2_FILL if res['flagged'] else OK_FILL, P2_TXT if res['flagged'] else OK_TXT, sz=8, bold=False)
+            wrr.cell(r_rr,6).value=f"{res['location']}: {res['rationale']}"; wrr.cell(r_rr,6).font=Fn(sz=8,col=GREY_TXT2); wrr.cell(r_rr,6).fill=F(WHITE); wrr.cell(r_rr,6).alignment=A(wrap=True)
+            for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
+            set_row(wrr,r_rr,34); r_rr+=1
+        merge(wrr,f'B{r_rr}:F{r_rr}', _reg.get('note',''), sz=8,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wrr,r_rr,38); r_rr+=1
+    else:
+        merge(wrr,f'B{r_rr}:F{r_rr}','Not applicable — no vanilla WACC, cost of equity or notional gearing row was found.',sz=9,col=GREY_TXT2,italic=True,wrap=True)
         set_row(wrr,r_rr,20); r_rr+=1
     set_row(wrr,r_rr,10); r_rr+=1
 

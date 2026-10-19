@@ -507,7 +507,66 @@ function checkDebtYieldNegative(workbook) {
   };
 }
 
-module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative };
+
+// ── Regulated-return parameters ─────────────────────────────────────────
+// A regulated network or licence model has no DCF, exit value or EBITDA margin, so the investment-style checks above
+// have nothing to test (an ESO licence run showed every card as N/A). What it does carry is the allowed-return
+// parameter set: vanilla WACC, cost of equity and notional gearing. Their rows put the label in one of the first few
+// columns and the values 30+ columns to the right, so the label search used above (6 cells) cannot see them; this
+// reads the first number in the row. The ranges are wide, disclosed rule-of-thumb triggers for REAL, post-tax
+// regulatory parameters, not benchmarks: they exist to catch a unit slip (3.3 entered for 3.3%) or a pasted
+// investment-model rate, not to second-guess a regulator's determination.
+const REGULATED_PARAMS = [
+  { terms: ['vanilla wacc'], label: 'Vanilla WACC', low: 0.005, high: 0.10,
+    rationale: 'a real vanilla WACC outside 0.5%-10% is unusual for a regulated network and is more often a unit slip or a corporate-finance rate pasted in than a determination' },
+  { terms: ['cost of equity'], label: 'Cost of equity', low: 0.03, high: 0.15,
+    rationale: 'an allowed cost of equity outside 3%-15% is unusual for a regulated network; check units and that the figure is the allowed, not the achieved, return' },
+  { terms: ['notional gearing'], label: 'Notional gearing', low: 0.30, high: 0.80,
+    rationale: 'notional gearing outside 30%-80% is unusual for a regulated network and changes the financeability test materially' },
+];
+
+function checkRegulatedReturnParams(workbook) {
+  const results = [];
+  for (const param of REGULATED_PARAMS) {
+    const candidates = [];
+    workbook.eachSheet(ws => {
+      if (/\b(backup|copy|duplicate|old|archive)\b/i.test(ws.name)) return;
+      ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
+        let labelled = null;
+        row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+          if (labelled || colNum > 6) return;
+          const t = cellText(cell.value).trim().toLowerCase();
+          if (t && t.length <= 60 && param.terms.some(term => t.startsWith(term))) labelled = { cell, colNum, t };
+        });
+        if (!labelled) return;
+        for (let c = labelled.colNum + 1; c <= labelled.colNum + 60; c++) {
+          const vc = row.getCell(c);
+          const raw = vc.formula || (vc.value && vc.value.formula) ? (vc.result !== undefined ? vc.result : (vc.value && vc.value.result)) : vc.value;
+          if (typeof raw === 'number') {
+            candidates.push({ sheet: ws.name, labelCell: labelled.cell.address, valueCell: vc.address, labelText: labelled.t, value: raw });
+            break;
+          }
+        }
+      });
+    });
+    if (candidates.length === 0) continue;
+    const pick = pickModalCandidate(candidates);
+    const value = pick.value > 1 && pick.value <= 100 ? pick.value / 100 : pick.value;
+    results.push({
+      metric: param.label, value, location: `${pick.sheet}!${pick.valueCell}`, low: param.low, high: param.high,
+      flagged: value < param.low || value > param.high, rationale: param.rationale, candidateCount: candidates.length
+    });
+  }
+  const flaggedCount = results.filter(r => r.flagged).length;
+  return {
+    applicable: results.length > 0, results, flaggedCount,
+    note: results.length === 0
+      ? 'No vanilla WACC, cost of equity or notional gearing row was found, so there are no regulated return parameters to test.'
+      : 'Ranges are disclosed, wide rule-of-thumb triggers for real, post-tax regulatory parameters, not market benchmarks. The first value on each labelled row is tested (the most common value where a label repeats across scenario blocks); a flag is a reason to check units and source, not a finding that the determination is wrong.'
+  };
+}
+
+module.exports = { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative, checkRegulatedReturnParams };
 
 // ── Valuation-method divergence (DCF vs. direct/income capitalisation) ──
 // Found via investigating why a confirmed real defect (Completed

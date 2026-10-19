@@ -45,6 +45,12 @@
           "decision": "Scope decision recorded 2026-10-19 on Mik Riazanov's go-ahead after an independent review of the ESO licence model report (Fm-00036 era). The reviewer classed these procedures as not applicable to a regulated licence model: conditional project-finance or merchant-asset procedures (digital wholesale contracts, PPP contractor step-in, concession shareholder distress, index-linked debt instruments, ESCO ancillary benefits, generation outage and dispatch, fixed/variable cost split against a volume driver, construction WIP, statutory working-capital days) that the earlier reports answered with 'none present, no action required'. T2-S6-003 (DSCR structure) was added to the statutory-gates tier above for the same reason. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
           "ruleIds": ["T2-S10-343", "T2-S10-405", "T2-S10-553", "T2-S10-584", "T2-S10-688", "T2-S10-695", "T2-S7-003", "T2-S10-012", "T2-S5-005", "T2-S10-009"]
         },
+        "R6_scope_decision_regulated_network_not_applicable": {
+          "enabled": true,
+          "allowFatal": false,
+          "decision": "Scope decision recorded 2026-10-19 on Mik Riazanov's go-ahead after Fm-00045: the reviewer answered each of these domain procedures with 'Not applicable to this model type' (CFADS from a finance document, authority-side committed vs contingent payments, future tariff increases, post-close operating-structure reset, recurring lender submission reconciliation, project cost-benefit/FIRR evaluation, planned outage and component replacement schedules). They are conditional project, PPP or merchant-asset procedures with no equivalent in a licence allowed-revenue model, and each ended as Uncertain, which does not count towards completion. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
+          "ruleIds": ["T2-S10-354", "T2-S10-381", "T2-S10-429", "T2-S10-453", "T2-S10-461", "T2-S10-503", "T2-S10-720"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]

@@ -60,7 +60,7 @@ const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwn
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
 const { runVbaReview } = require('./src/validator-vba');
-const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative } = require('./src/utils/reasonableness-checks');
+const { checkWaccOverride, checkTerminalValueConcentration, checkOutputReasonableness, checkRevenuePerUnitMetric, checkTerminalValueCrossCheck, checkModelStatusFlag, checkNpvSignConsistency, checkValuationMethodDivergence, checkDebtYieldNegative, checkRegulatedReturnParams } = require('./src/utils/reasonableness-checks');
 const { checkDegenerateCovenantBranch } = require('./src/utils/degenerate-covenant-branch-check');
 const { checkEquityComponentBackwardSolved } = require('./src/utils/equity-component-backward-solved-check');
 const { checkMidRowFormulaRegimeChange } = require('./src/utils/mid-row-formula-regime-change-check');
@@ -146,9 +146,10 @@ async function run() {
     modelStatusFlag: checkModelStatusFlag(parsed._raw),
     npvSignConsistency: checkNpvSignConsistency(parsed._raw),
     valuationMethodDivergence: checkValuationMethodDivergence(parsed._raw),
-    debtYieldNegative: checkDebtYieldNegative(parsed._raw)
+    debtYieldNegative: checkDebtYieldNegative(parsed._raw),
+    regulatedReturns: checkRegulatedReturnParams(parsed._raw)
   }; } catch (e) { console.error('   \u26a0\ufe0f  Reasonableness checks failed:', e.message);
-    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false}, npvSignConsistency:{applicable:false}, valuationMethodDivergence:{applicable:false}, debtYieldNegative:{applicable:false} }; } })();
+    return { waccOverride:{applicable:false}, terminalValue:{applicable:false}, outputs:{applicable:false}, revenuePerUnit:{applicable:false}, terminalValueCrossCheck:{applicable:false}, modelStatusFlag:{applicable:false}, npvSignConsistency:{applicable:false}, valuationMethodDivergence:{applicable:false}, debtYieldNegative:{applicable:false}, regulatedReturns:{applicable:false} }; } })();
   const duplicateSheets = (() => { try { return detectDuplicateSheets(parsed.sheetNames); }
     catch (e) { console.error('   \u26a0\ufe0f  Duplicate-sheet scan failed:', e.message); return { applicable:false, flaggedCount:0, flagged:[] }; } })();
   // FIX (R-3): found via an independent review's single most serious
@@ -2431,6 +2432,21 @@ async function run() {
         model_risk: 'A negative debt yield implies negative NOI relative to total debt in that period — a summary "average" or "minimum" statistic elsewhere in the model may not surface this specific period.',
         key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Negative periodic debt yield value',
         escalation_flag: true, urgency: 'Before next reliance', confidence: 85
+      });
+    }
+    if (reasonableness.regulatedReturns && reasonableness.regulatedReturns.applicable && reasonableness.regulatedReturns.flaggedCount > 0) {
+      const rr = reasonableness.regulatedReturns;
+      const fl = rr.results.filter(r => r.flagged);
+      const summary = fl.map(r => `${r.metric} = ${(r.value * 100).toFixed(2)}% (expected ${(r.low * 100).toFixed(1)}%-${(r.high * 100).toFixed(1)}%)`).join(', ');
+      allFlagged.push({
+        id: 'T0-RSN-010', label: `${fl.length} regulated return parameter(s) outside the usual range`,
+        severity: 'medium', status: 'fail', sheet: fl[0].location.split('!')[0], cell: fl[0].location.split('!')[1],
+        category: 'Reasonableness', condition: `${summary}. ${rr.note}`, reason: `Outside range: ${summary}`,
+        corrective_action: 'Check the units (a percentage entered as a whole number), the source of the figure and that it is the allowed return, not an investment-model rate.',
+        workstream: 'Inputs', issue_type: 'Regulated return parameter',
+        model_risk: 'A unit slip or a pasted corporate rate in the allowed-return parameters moves allowed revenue and every return metric built on it.',
+        key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Regulated return parameter outside the usual range',
+        escalation_flag: false, urgency: 'Before external circulation', confidence: 70, record_type: 'Query'
       });
     }
     if (duplicateSheets.applicable && duplicateSheets.flaggedCount > 0) {
