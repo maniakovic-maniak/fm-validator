@@ -857,6 +857,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     const fullParseTokens = Math.round(JSON.stringify(fullParsePayload).length / FORMULA_CHARS_PER_TOKEN);
     console.log(`   Full-parse payload: ~${fullParseTokens.toLocaleString()} tokens across ${Object.keys(fullParsePayload).length} sheets (all 3 batches)`);
     console.log(`   Static text index: ${built.textIndex.mode} (${built.textIndex.chars.toLocaleString()} chars, ${Object.keys(built.textIndex.bySheet).length} sheets); named ranges: ${built.namedRanges.names.length}${built.namedRanges.truncated ? ` of ${built.namedRanges.total} (cut)` : ''}; coverage: ${fullParseCoverage}${built.textIndex.truncatedSheets.length ? ' - text cut in: ' + built.textIndex.truncatedSheets.join(', ') : ''}`);
+    if (built.valuesDigest && built.valuesDigest.included) console.log(`   Stored values digest: ${built.valuesDigest.rows.toLocaleString()} labelled formula rows (~${Math.round(built.valuesDigest.chars / 3.2).toLocaleString()} tokens)${built.valuesDigest.truncated ? ' - cut at the size cap' : ''}`);
     batch1Data = batch2Data = batch3Data = fullParsePayload;
     builtFullParse = built;
     // the full-parse guidance is added to the system prompt after the chunking decision below
@@ -1298,6 +1299,11 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     if (locationCategories.scope_not_applicable + locationCategories.mode_a_limitation + locationCategories.workbook_level > 0) {
       console.log(`   \u2139\ufe0f  ${badLocationRows.length - unexplainedRows.length} additional Tier 2 finding(s) show "A1" for an honest, correct reason (not a bug): ${locationCategories.scope_not_applicable} scope-not-applicable, ${locationCategories.mode_a_limitation} Mode A limitation stated directly, ${locationCategories.workbook_level} workbook-level.`);
     }
+
+    // What the reviewer was given, for the Validation Matrix's Evidence Reviewed column.
+    Object.defineProperty(normalised, '_evidence', { value: useFullParse && builtFullParse
+      ? { route: 'full_parse', coverage: fullParseCoverage, valuesDigest: !!(builtFullParse.valuesDigest && builtFullParse.valuesDigest.included) }
+      : { route: 'curated' }, enumerable: false });
 
     if (!useFullParse) {
       // Only meaningful on the curated path - full-parse mode already sees

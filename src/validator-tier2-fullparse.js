@@ -208,6 +208,50 @@ function textBudgetChars(formulaChars, estimatedCharsPerToken = 1.15) {
   return Math.max(TEXT_INDEX_MAX_CHARS, Math.min(TEXT_INDEX_MAX_CHARS_CEILING, Math.floor(room * TEXT_CHARS_PER_TOKEN)));
 }
 
+
+// ── Stored values digest ─────────────────────────────────────────────────────
+// The reviewer is given formulas and wording, not cell values, so it cannot test a sign, a balance, a direction of
+// movement or a proposed replacement formula against what the workbook actually holds. An independent review of a
+// licence-model report found it asserting "no computed values are available" and recommending a sign change that
+// would have flipped a correct result. This adds, per sheet, one line for every labelled formula row: the first and
+// last value, the minimum and maximum, and how many values are negative. It is small (about 3% of the payload for
+// the ESO model, roughly 17,600 tokens), deterministic, and lets the reviewer cite numbers instead of guessing.
+const VALUES_DIGEST_MAX_CHARS = 90000;           // about 28k tokens in total, across all sheets
+
+function fmtDigestNumber(n) {
+  const a = Math.abs(n);
+  if (a >= 1000) return n.toFixed(0);
+  if (a >= 10) return n.toFixed(1);
+  if (a === 0) return '0';
+  return n.toFixed(3);
+}
+
+function buildSheetValuesDigest(ws, budget) {
+  const lines = [];
+  const maxRow = Math.min(ws.rowCount || 0, 6000);
+  for (let r = 1; r <= maxRow; r++) {
+    if (budget.used >= budget.max) { budget.truncated = true; break; }
+    const row = ws.getRow(r);
+    let label = null, hasFormula = false;
+    const nums = [];
+    row.eachCell({ includeEmpty: false }, (cell, col) => {
+      const v = cell.value;
+      const isFormula = v && typeof v === 'object' && ('formula' in v || 'sharedFormula' in v);
+      const raw = (v && typeof v === 'object' && 'result' in v) ? v.result : v;
+      if (label === null && typeof raw === 'string' && col <= 8) { label = raw; return; }
+      if (typeof raw === 'number' && Number.isFinite(raw) && col > 8) { nums.push(raw); if (isFormula) hasFormula = true; }
+    });
+    if (!label || nums.length < 3 || !hasFormula) continue;
+    let min = nums[0], max = nums[0], neg = 0;
+    for (const x of nums) { if (x < min) min = x; if (x > max) max = x; if (x < 0) neg++; }
+    const line = `R${r} ${label.replace(/\s+/g, ' ').trim().slice(0, 50)}: first=${fmtDigestNumber(nums[0])} last=${fmtDigestNumber(nums[nums.length - 1])} min=${fmtDigestNumber(min)} max=${fmtDigestNumber(max)} negatives=${neg}/${nums.length}`;
+    lines.push(line);
+    budget.used += line.length + 1;
+    budget.rows++;
+  }
+  return lines.length ? lines.join('\n') : null;
+}
+
 function buildFullParsePayloadWithText(workbook, opts = {}) {
   const formulas = buildFullParseFormulaPayload(workbook);
   const formulaChars = Object.values(formulas).reduce((n, v) => n + String(v).length, 0);
@@ -215,14 +259,21 @@ function buildFullParsePayloadWithText(workbook, opts = {}) {
   const namedRanges = buildNamedRangeMap(workbook);
   const payload = {};
   const names = new Set([...Object.keys(formulas), ...Object.keys(textIndex.bySheet)]);
+  const withDigest = opts.valuesDigest !== false && process.env.FM_VALUES_DIGEST !== 'off';
+  const budget = { used: 0, max: opts.valuesDigestMaxChars || VALUES_DIGEST_MAX_CHARS, rows: 0, truncated: false };
   workbook.eachSheet(ws => {                                              // keep workbook sheet order
     if (!names.has(ws.name)) return;
     const parts = [];
     if (formulas[ws.name]) parts.push(formulas[ws.name]);
     if (textIndex.bySheet[ws.name]) parts.push('# STATIC TEXT CELLS (labels, headings, notes; not formulas):\n' + textIndex.bySheet[ws.name]);
+    if (withDigest) {
+      const digest = buildSheetValuesDigest(ws, budget);
+      if (digest) parts.push('# STORED VALUES DIGEST (one line per labelled formula row; first, last, min, max of the saved values, and how many are negative):\n' + digest);
+    }
     payload[ws.name] = parts.join('\n\n');
   });
-  return { payload, textIndex, namedRanges, coverage: fullParseCoverage(textIndex, namedRanges) };
+  const valuesDigest = { included: withDigest, rows: budget.rows, chars: budget.used, truncated: budget.truncated };
+  return { payload, textIndex, namedRanges, valuesDigest, coverage: fullParseCoverage(textIndex, namedRanges) };
 }
 
 // "complete_workbook" means: every formula, every static text cell and every named range reached the reviewer.
@@ -243,11 +294,17 @@ const FULL_PARSE_PROMPT_ADDENDUM = `
 FULL-PARSE MODE — IMPORTANT DIFFERENCE FROM YOUR USUAL DATA:
 
 This run is small enough to fit the whole workbook's logic and wording. For every sheet you get:
-  1. "CellAddress: =formula" lines for every formula cell, exactly as the formula reads in the workbook; and
+  1. "CellAddress: =formula" lines for every formula cell, exactly as the formula reads in the workbook;
   2. a "# STATIC TEXT CELLS" section, one line per row ("R12: A=Receivables | D=Notes"), holding every plain
      text cell: row labels, headings, the cover note, change log, instructions and source references.
-The payload also carries namedRangeMap (each name and what it refers to). Numeric constants and calculated values
-are not included, except where a number is written inside a formula.
+  3. a "# STORED VALUES DIGEST" section: one line for every labelled formula row, with the first, last, minimum and
+     maximum of the values saved in the workbook and how many of them are negative ("R38 Net debt / RAV: first=0.62
+     last=0.58 min=0.55 max=0.64 negatives=0/5").
+The payload also carries namedRangeMap (each name and what it refers to). Individual cell values are not listed: only
+that digest. Use it to check signs, size and direction of movement, and to test a replacement formula you propose on the
+numbers it shows. Quote the row and the figures you used. If a test needs a cell value the digest does not give
+(one period in the middle of a row, a constant input), say which value you could not see; do not say that no values
+exist.
 
 State review_mode as "llm_full_parse" for every finding in this run — not
 llm_only or llm_with_partial_formulas, since both of those describe curated-
@@ -293,4 +350,4 @@ only if no chunk raised an issue; an uncertain answer is dropped if any chunk ga
 Keep review_mode as "llm_full_parse".
 `.trim();
 
-module.exports = { CHUNK_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS_CEILING, buildSheetFormulaList, buildFullParseFormulaPayload, buildFullParsePayloadWithText, textBudgetChars, buildTextIndex, buildNamedRangeMap, fullParseCoverage, FULL_PARSE_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS };
+module.exports = { buildSheetValuesDigest, CHUNK_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS_CEILING, buildSheetFormulaList, buildFullParseFormulaPayload, buildFullParsePayloadWithText, textBudgetChars, buildTextIndex, buildNamedRangeMap, fullParseCoverage, FULL_PARSE_PROMPT_ADDENDUM, TEXT_INDEX_MAX_CHARS };

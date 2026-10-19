@@ -13,7 +13,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     originalName, modelType, modelIndustry, modelPurpose,
     modelSummary, tier0, auditLog, overallAssessment,
     igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets, namedRangeAudit, formulaDeepDive, reasonableness, duplicateSheets, vbaReview,
-    deepAccountingResolvedSheets, crossRunStats, batchFailures, recalcCheckResult, excludedRuleIds, scopeSummary
+    deepAccountingResolvedSheets, crossRunStats, batchFailures, recalcCheckResult, excludedRuleIds, scopeSummary, tier2Evidence
   } = meta;
 
   // Enrich findings with F-score using the cell-level index built by Tier 0.
@@ -66,6 +66,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     reviewMode:      meta.reviewMode || 'llm_only',
     ruleResults:     ruleResults || [],
     batchFailures:   batchFailures || [],
+    tier2Evidence:   tier2Evidence || null,
     errorScan:       errorScan || [],
     redundantInputs: redundantInputs || { applicable:false, totalInputs:0, redundantCount:0, redundant:[], inputSheets:[] },
     orphanSheets: orphanSheets || { applicable:false, orphanSheets:[], financialStatementSheets:[], reachableSheets:[], totalSheets:0 },

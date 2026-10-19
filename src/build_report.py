@@ -127,6 +127,7 @@ def build_report(data_path, output_path):
     reviewMode   = d.get('reviewMode','llm_only')
     ruleResults  = d.get('ruleResults',[])
     batchFailures = d.get('batchFailures',[])
+    tier2Evidence = d.get('tier2Evidence') or {}
     # FIX: found via a real, direct transparency gap in a production
     # report - "Not Performed" rules previously all shared one generic
     # placeholder reason regardless of why they were genuinely missing.
@@ -1763,6 +1764,10 @@ def build_report(data_path, output_path):
         conf_num = (max(confs)/100.0) if (confs and tier=='Tier 2') else None
         sm=re.search(r'-S(\d+)-',rid)
         if tier=='Tier 1': evidence='Full workbook — deterministic code check'
+        elif tier2Evidence.get('route')=='full_parse':
+            # The reviewer saw every formula, all static text and the named ranges; stored values only as a per-row digest.
+            evidence='Every formula, all static text and named ranges' + ('; stored values as a per-row digest (first, last, min, max)' if tier2Evidence.get('valuesDigest') else '; stored values not provided')
+            if tier2Evidence.get('coverage')=='partial_view': evidence += ' (some text or names cut to fit)'
         elif sm and int(sm.group(1)) in (5,6,7,10):
             _resolved = deepAcctSheets.get('resolvedMap',{})
             if _resolved:
