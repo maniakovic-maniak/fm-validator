@@ -38,6 +38,7 @@ const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { linkRelatedFindings } = require('./src/utils/related-findings');
+const { applyFindingClasses, groupSameRemediation } = require('./src/utils/finding-class');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
@@ -2753,10 +2754,13 @@ async function run() {
   // confidence/severity/urgency fields. Only record_type === 'Confirmed
   // Finding' is eligible for a P1/P2/P3 priority downstream — see
   // priority() in build_report.py (Tier 1 item 2).
+  try { const _fc = applyFindingClasses(allFlagged, { profileId: null }); if (_fc.capped.length || _fc.observations.length) console.log(`   \u2139\ufe0f  Finding class: ${_fc.capped.length} governance absence(s) rated P3, ${_fc.observations.length} design-preference finding(s) recorded as Observations`); }
+  catch (e) { console.error('   \u26a0\ufe0f  Finding-class step failed:', e.message); }
   assignRecordTypes(allFlagged);
   // Findings from different checks that name the same cells are one repair; cross-reference them (nothing is dropped).
   try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
   catch (e) { console.error('   \u26a0\ufe0f  Related-findings link failed:', e.message); }
+  try { groupSameRemediation(allFlagged); } catch (e) { console.error('   \u26a0\ufe0f  Same-remedy grouping failed:', e.message); }
 
   // ── P1/P2/P3 framework renewal, Tier 2 item 3 ────────────────────────────
   // 4-dimension risk score (Decision consequence, Exposure, Propagation,

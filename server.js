@@ -59,6 +59,7 @@ const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { linkRelatedFindings } = require('./src/utils/related-findings');
+const { applyFindingClasses, groupSameRemediation } = require('./src/utils/finding-class');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
@@ -3229,10 +3230,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     // ── P1/P2/P3 framework renewal, Tier 1 item 1 ──────────────────────────
     // See the matching comment in index.js for the full rationale.
+    try { const _fc = applyFindingClasses(allFlagged, { profileId: ruleExclusions.profileId }); if (_fc.capped.length || _fc.observations.length) console.log(`   \u2139\ufe0f  Finding class: ${_fc.capped.length} governance absence(s) rated P3, ${_fc.observations.length} design-preference finding(s) recorded as Observations`); }
+    catch (e) { console.error('   \u26a0\ufe0f  Finding-class step failed:', e.message); }
     assignRecordTypes(allFlagged);
     // Findings from different checks that name the same cells are one repair; cross-reference them (nothing is dropped).
     try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
     catch (e) { console.error('   \u26a0\ufe0f  Related-findings link failed:', e.message); }
+    try { groupSameRemediation(allFlagged); } catch (e) { console.error('   \u26a0\ufe0f  Same-remedy grouping failed:', e.message); }
 
     // ── P1/P2/P3 framework renewal, Tier 2 item 3 ──────────────────────────
     // See the matching comment in index.js for the full rationale.
@@ -3364,7 +3368,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       excludedRuleIds: ruleExclusions.excludedIds,
       scopeSummary: summarizeScopeForReport(ruleExclusions.record, scopePlan),
       ownerDecisionChecklist,
-      batchFailures:     t2Results._batchFailures || []
+      batchFailures:     t2Results._batchFailures || [],
+      tier2Evidence:     t2Results._evidence || null
     });
 
     let driveResult = null;

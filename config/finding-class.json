@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "description": "How findings from named Tier 2 procedures are classed and grouped. Classification never changes whether a procedure counts as performed or raised an issue (completion is unchanged); it changes how a finding is rated and presented. Decisions follow an independent review of the ESO licence model report (2026-10-19) and were recorded on Mik Riazanov's go-ahead.",
+  "sameRemediationGroups": [
+    {
+      "id": "RC-VERSION-CONTROL",
+      "label": "Version and change control",
+      "ruleIds": ["T2-S9-002", "T2-S13-001", "T2-S13-002"],
+      "note": "One version and change-control record answers all of these; they are grouped as one repair and one retest."
+    }
+  ],
+  "profiles": {
+    "regulated_network_utility": {
+      "governanceImprovement": {
+        "ruleIds": ["T2-S9-001", "T2-S9-002", "T2-S13-001", "T2-S13-002", "T2-S13-009"],
+        "maxSeverity": "low",
+        "note": "Rated as a governance improvement (P3) for a regulated-network model: release, version and issue governance is normally kept in a controlled record outside the workbook, and the workbook's own check rows count as controls. The absence is real; it is not evidence of a calculation error."
+      },
+      "designPreference": {
+        "ruleIds": ["T2-S8-010", "T2-S8-012"],
+        "recordType": "Observation",
+        "note": "Recorded as an observation for a regulated-network model: the scenario table is a vector of selectable parameters with spare columns, so a combined or rate-shock case can be configured without a structural change. No failure of a required method is shown."
+      }
+    }
+  }
+}
