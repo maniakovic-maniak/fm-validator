@@ -77,21 +77,32 @@ function findEmbeddedActualForecastFlagRow(parsed) {
 function findLabelledPeriodFlagRow(parsed) {
   if (!(parsed && parsed._raw && parsed._type === 'exceljs')) return null;
   const LABEL_RE = /\b(histor\w*|actual\w*|forecast\w*|projected|projection)\b.{0,40}\b(flag|switch|indicator|period|timing)\b|\b(flag|switch|indicator)\b.{0,40}\b(histor\w*|actual\w*|forecast\w*|projected)\b|^\s*(histor\w*|actuals?|forecast|projected)\s*\??\s*$/i;
+  const BROAD_LABEL_RE = /\b(histor\w*|actual\w*|forecast\w*|projected)\b/i;
   let found = null;
   parsed._raw.eachSheet(ws => {
     if (found) return;
     const maxRow = Math.min(ws.rowCount || 0, 5000);
     for (let r = 1; r <= maxRow && !found; r++) {
       const row = ws.getRow(r);
-      let label = null, flagCells = 0;
+      let label = null, flagCells = 0, boolCells = 0, ones = 0, zeros = 0;
       row.eachCell({ includeEmpty: false }, (cell, col) => {
         if (col > 150) return;
         const v = cell.value;
         const raw = (v && typeof v === 'object' && 'result' in v) ? v.result : v;
         if (label === null && typeof raw === 'string' && col <= 8) label = raw;
-        else if (raw === 0 || raw === 1 || raw === true || raw === false) flagCells++;
+        else if (raw === 0 || raw === 1 || raw === true || raw === false) {
+          flagCells++;
+          if (typeof raw === 'boolean') boolCells++;
+          if (raw === 1 || raw === true) ones++; else zeros++;
+        }
       });
-      if (label && flagCells >= 3 && LABEL_RE.test(label)) found = { sheetName: ws.name, rowNum: r };
+      if (!label || flagCells < 3) continue;
+      // Narrow wording ("Historical period flag") with numeric or logical flags, or any label that names a
+      // historic/actual/forecast period when the row holds TRUE/FALSE results (a logical row is a flag by nature).
+      // The ESO licence model labels them "Historic totex (FYI only)" and "Historic year (regulatory year < AIP year)".
+      const narrow = LABEL_RE.test(label);
+      const broadLogical = BROAD_LABEL_RE.test(label) && boolCells >= 3 && boolCells >= flagCells * 0.8;
+      if (narrow || broadLogical) found = { sheetName: ws.name, rowNum: r };
     }
   });
   return found;
