@@ -59,27 +59,35 @@ function linkRelatedFindings(findings) {
       shared.set(k, (shared.get(k) || 0) + 1);
     }
   }
-  for (const k of shared.keys()) { const [i, j] = k.split('|').map(Number); parent[find(i)] = find(j); }
-
-  const inPair = new Set();
-  for (const k of shared.keys()) { const [i, j] = k.split('|').map(Number); inPair.add(i); inPair.add(j); }
+  // A pair is related only when the overlap is substantial: a single cell that two long texts happen to mention
+  // (a denominator both quote, say) must not chain unrelated findings together.
+  const strong = new Map();            // index -> Set of directly related indexes
+  for (const [k, n] of shared) {
+    const [i, j] = k.split('|').map(Number);
+    if (n / Math.min(sets[i].size, sets[j].size) < 0.5) continue;
+    parent[find(i)] = find(j);
+    if (!strong.has(i)) strong.set(i, new Set());
+    if (!strong.has(j)) strong.set(j, new Set());
+    strong.get(i).add(j); strong.get(j).add(i);
+  }
   const groups = new Map();
-  findings.forEach((f, i) => { if (!sets[i].size || sets[i].size > MAX_CELLS_PER_FINDING) return; const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); });
+  for (const i of strong.keys()) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); }
 
+  const MAX_GROUP = 8, MAX_LISTED = 5;
   const linked = [];
-  for (const members of groups.values()) {
-    const real = members.filter(i => inPair.has(i));
+  for (const real of groups.values()) {
     if (real.length < 2) continue;
     const ids = real.map(i => findings[i].id);
-    const groupId = 'RC-' + [...ids].sort()[0];
+    const groupId = real.length <= MAX_GROUP ? 'RC-' + [...ids].sort()[0] : null;
     for (const i of real) {
-      const others = ids.filter(x => x !== findings[i].id);
-      findings[i].related_ids = others;
-      findings[i].related_group_id = groupId;
-      const note = ` (Same cell(s) are also reported by ${others.join(', ')}: one repair and one retest cover them.)`;
+      const direct = [...strong.get(i)].map(x => findings[x].id).filter(x => x !== findings[i].id);
+      findings[i].related_ids = direct;
+      if (groupId) findings[i].related_group_id = groupId;
+      const shown = direct.slice(0, MAX_LISTED).join(', ') + (direct.length > MAX_LISTED ? ` and ${direct.length - MAX_LISTED} more` : '');
+      const note = ` (Same cell(s) are also reported by ${shown}: one repair and one retest cover them.)`;
       if (!String(findings[i].condition || '').includes('Same cell(s) are also reported by')) findings[i].condition = (findings[i].condition || '') + note;
     }
-    linked.push({ groupId, ids });
+    linked.push({ groupId: groupId || 'RC-large', ids });
   }
   return linked;
 }

@@ -43,6 +43,8 @@
 // deliberate materiality judgment, just an accidental keyword miss.
 // Added the specific phrase "terminal value" rather than the bare word
 // "value", which would be too broad and catch unrelated mentions.
+const { isAbsenceFinding } = require('./rule-exclusions');
+
 const KEY_OUTPUT_CATEGORY_HINTS = [
   'valuation', 'terminal value', 'debt', 'interest', 'liquidity', 'funding', 'covenant', 'dscr', 'dsra',
   'ownership', 'dilution', 'equity', 'tax', 'gst', 'circular', 'external',
@@ -79,10 +81,27 @@ function screeningRecordType(id) {
   return null;
 }
 
+
+// A reviewer answer of the form "No X was found anywhere in the workbook" at low confidence and with no cell to point
+// at (the A1 fallback) is a scope note about a procedure that may not apply to this model, not a defect. An ESO run
+// raised eleven of these (bid transition, termination valuation, ESCO contract, ...) as Queries and Critical Queries,
+// which blocked reliance on nothing. They stay visible as Observations; a check that sets its own record_type, or an
+// absence with real confidence (40+), is not touched.
+function isLowConfidenceWorkbookWideAbsence(f) {
+  if (!/^T2-/.test(String(f.id || ''))) return false;
+  if (typeof f.confidence !== 'number' || f.confidence >= 40) return false;
+  const cell = String(f.cell || '').trim().toUpperCase();
+  if (cell && cell !== 'A1') return false;
+  const text = [f.condition, f.what_wrong, f.finding, f.issue].map(x => String(x || '')).find(x => x.trim()) || '';
+  const t = text.replace(/^\s*not present in the workbook:\s*/i, '');
+  return isAbsenceFinding(t);
+}
+
 function classifyRecordType(finding) {
   if (finding.record_type) return finding.record_type;
   const screening = screeningRecordType(finding.id);
   if (screening) return screening;
+  if (isLowConfidenceWorkbookWideAbsence(finding)) return 'Observation';
 
   const confidence = typeof finding.confidence === 'number' ? finding.confidence : 100;
   const urgency = (finding.urgency || '').toLowerCase();

@@ -133,3 +133,34 @@ test('two findings on different cells of one sheet are not linked', () => {
 });
 
 console.log(`\n${passed} check(s) passed${process.exitCode ? ' - WITH FAILURES' : ''}`);
+
+// Regression: a cell quoted in many long texts must not chain unrelated findings into one group.
+(function chainTest() {
+  const { linkRelatedFindings } = require('./src/utils/related-findings');
+  const assert = require('assert');
+  const mk = (id, txt) => ({ id, condition: txt });
+  const fs2 = [
+    mk('A', 'S!A10:A20 duplicated, and S!A10 also compared with S!B1:B30 and S!C1:C30'),
+    mk('B', 'S!A10:A20 duplicated'),
+    mk('C', 'S!E1:E30 and S!F1:F30 are unrelated to A except one cell mentioned in passing: S!A10'),
+    mk('D', 'S!D1:D2 something else'),
+    mk('E', 'S!D1:D2 something else again'),
+  ];
+  linkRelatedFindings(fs2);
+  assert.deepStrictEqual(fs2[0].related_ids, ['B']);
+  assert.ok(!fs2[2].related_ids, 'C only shares one cell of many with A');
+  assert.deepStrictEqual(fs2[3].related_ids, ['E']);
+  console.log('3 chain check(s) passed');
+})();
+
+// Low-confidence workbook-wide absences become Observations, not Queries or Critical Queries.
+(function absenceTest() {
+  const { classifyRecordType } = require('./src/utils/record-type-classifier');
+  const assert = require('assert');
+  const mk = o => Object.assign({ id: 'T2-S10-359', severity: 'high', confidence: 20, cell: 'A1', condition: 'No bid/financial-close transition structure found anywhere in the workbook.' }, o);
+  assert.strictEqual(classifyRecordType(mk({})), 'Observation');
+  assert.strictEqual(classifyRecordType(mk({ confidence: 70 })), 'Confirmed Finding');
+  assert.strictEqual(classifyRecordType(mk({ cell: 'AP4' })), 'Query');
+  assert.strictEqual(classifyRecordType(mk({ id: 'T0-X' })), 'Query');
+  console.log('4 absence check(s) passed');
+})();
