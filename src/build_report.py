@@ -1550,6 +1550,10 @@ def build_report(data_path, output_path):
     # the whole purpose of this tab is tracking and closing out
     # blocking items.
     rem_findings=[f for f in findings if priority(f) in ('P1','P2','Critical Query')]
+    # Findings that report the same cell(s) share a related_group_id (set by related-findings.js): keep them
+    # adjacent within their priority so one repair and one retest is visible as one block.
+    _pri_rank = {'P1': 0, 'Critical Query': 0, 'P2': 1}
+    rem_findings.sort(key=lambda f: (_pri_rank.get(priority(f), 2), str(f.get('related_group_id') or '~'), str(f.get('id', ''))))
     _rf_first, _rf_last = REM_HEADER_ROW+1, REM_HEADER_ROW+len(rem_findings)
     PRI_L2 = get_column_letter(rem_idx['Priority']); AS_L = get_column_letter(rem_idx['Action Status'])
     TIM_L  = get_column_letter(rem_idx['Timing'])
@@ -1598,7 +1602,7 @@ def build_report(data_path, output_path):
             'Action Status': 'Not Started', 'Timing': '',  # Timing set as a live formula below
             'Owner': '', 'Target Date': '', 'Suggested Action': action_text,
             'Promised Fix Version': '', 'Retest Required': 'Yes', 'Retest Result': 'Pending',
-            'Root Cause Group': f.get('root_cause',''), 'F-Score': f.get('fscore','') or '—',
+            'Root Cause Group': ((f.get('related_group_id') + ' - ') if f.get('related_group_id') else '') + str(f.get('root_cause','') or ''), 'F-Score': f.get('fscore','') or '—',
             'Urgency': f.get('urgency','') or '', 'Retested By': '', 'Retest Date': '',
             'Eligible to Close': 'No',
         }
