@@ -501,6 +501,13 @@ def build_report(data_path, output_path):
         'RELIANCE-READY FOR LENDER / INVESTOR REVIEW': 'Ready for lender / investor review',
         'RELIANCE-READY FOR TRANSACTION EXECUTION': 'Ready for transaction execution',
     }.get(verdict_short, verdict_short.title())
+    # An open P1, an unresolved Critical Query or a failed gate caps the tier at internal review, but the model is
+    # then NOT reliance-ready, and the Key Takeaway says so. An independent review of the ESO report found the Status
+    # line ("Ready for internal review only") and the Key Takeaway ("not currently suitable for reliance") read as a
+    # contradiction. The tier is unchanged; only the wording follows the blockers.
+    _reliance_blocked = p1_open>0 or critical_query_open>0 or other_gates_open
+    if _reliance_blocked and verdict_short=='RELIANCE-READY FOR INTERNAL REVIEW ONLY':
+        _verdict_display = 'Not ready for reliance — internal review only'
     # ── P1/P2/P3 framework renewal, Tier 1 item 3 (completion) ───────────────
     # Found via reviewing a real run: verdict_short/verdict_bg/verdict_text
     # above were correctly updated to gate on critical_query_open, but these
@@ -688,6 +695,9 @@ def build_report(data_path, output_path):
     for rr in (_lbl_row,_val_row):
         for cc in range(2,10): ws1.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(ws1,_lbl_row,16); set_row(ws1,_val_row,26); r=_val_row+1
+    merge(ws1,f'B{r}:I{r}','Audit Completion is the share of scheduled procedures that reached a verdict (passed or raised an issue). It measures checklist coverage. It is not independent verification of the model\'s logic or of its numbers; see Scope and Reliance for what was recalculated.',
+          sz=8,col=GREY_TXT2,italic=True,wrap=True,v='center')
+    set_row(ws1,r,26); r+=1
     set_row(ws1,r,10); r+=1
 
     # ── KPI cards — Row A2: Since Last Run (Closed/New/Still Open/Regressed) ──
@@ -865,7 +875,7 @@ def build_report(data_path, output_path):
           or (reasonIn.get('terminalValueCrossCheck',{}).get('applicable',False) and not reasonIn.get('terminalValueCrossCheck',{}).get('found',True))),
          (f"{reasonIn.get('outputs',{}).get('flaggedCount',0)} output metric(s), {dupIn.get('flaggedCount',0)} duplicate sheet(s), revenue-per-unit metric {'found' if reasonIn.get('revenuePerUnit',{}).get('found') else 'not found'}, and terminal value cross-check {'found' if reasonIn.get('terminalValueCrossCheck',{}).get('found') else 'not found'} — this checks whether results are believable, not whether the model is wired correctly. See the Reasonableness Review tab."
           if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
-          else f"{reasonIn.get('regulatedReturns',{}).get('flaggedCount',0)} of {len(reasonIn.get('regulatedReturns',{}).get('results',[]))} regulated return parameter(s) (vanilla WACC, cost of equity, notional gearing) outside the usual range — investment-style checks (WACC override, terminal value, IRR, margins) do not apply to this model type. See the Reasonableness Review tab."
+          else f"{reasonIn.get('regulatedReturns',{}).get('flaggedCount',0)} of {len(reasonIn.get('regulatedReturns',{}).get('results',[]))} regulated return parameter(s) (vanilla WACC, cost of equity, notional gearing, AICR, RoRE) outside the usual range — investment-style checks (WACC override, terminal value, IRR, margins) do not apply to this model type. See the Reasonableness Review tab."
           if reasonIn.get('regulatedReturns',{}).get('applicable',False)
           else 'No output metrics or duplicate sheets were found to warrant flagging'
           if (reasonIn.get('waccOverride',{}).get('applicable',False) or reasonIn.get('outputs',{}).get('applicable',False))
@@ -1057,8 +1067,11 @@ def build_report(data_path, output_path):
         'RELIANCE-READY FOR LENDER / INVESTOR REVIEW': 'Reliance-ready — lender / investor review',
         'RELIANCE-READY FOR TRANSACTION EXECUTION': 'Reliance-ready — transaction execution',
     }.get(verdict_short, verdict_short.title())
+    if _reliance_blocked and verdict_short=='RELIANCE-READY FOR INTERNAL REVIEW ONLY':
+        _verdict_display2 = 'Not reliance-ready — internal review only'
     _decision_text = (f'Not reliance-ready until {p1_open} P1 finding(s) are closed and outstanding procedures ({cov_np} not run, {cov_unc} uncertain) are completed.'
                        if p1_open>0 else
+                       f'{_verdict_display2}. Open: {_open_desc}. {p2_open} P2 item(s) remain; see Issue Log for detail.' if _reliance_blocked else
                        f'{_verdict_display2}. {p2_open} P2 item(s) remain; see Issue Log for detail.')
     merge(ws3,f'B{r3}:E{r3}',f'RELIANCE DECISION:   {_verdict_display2}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
     fill_range(ws3,r3,2,r3,5,verdict_bg); set_row(ws3,r3,24); r3+=1
@@ -2649,15 +2662,17 @@ def build_report(data_path, output_path):
 
     # ── Regulated Return Parameters ─────────────────────────────────────
     _reg = reasonIn.get('regulatedReturns',{'applicable':False,'results':[]})
-    r_rr = section_header(r_rr,'REGULATED RETURN PARAMETERS')
+    r_rr = section_header(r_rr,'REGULATED RETURN PARAMETERS AND OUTCOMES')
     if _reg.get('applicable') and _reg.get('results'):
         for label,c1 in [('Parameter',2),('Value',3),('Expected range',4),('Status',5),('Rationale',6)]:
             cell(wrr,f'{get_column_letter(c1)}{r_rr}',label,bold=True,sz=8,col=WHITE,bg=DARK_BLUE,h='center')
         set_row(wrr,r_rr,16); r_rr+=1
         for res in _reg['results']:
             wrr.cell(r_rr,2).value=res['metric']; wrr.cell(r_rr,2).font=Fn(sz=9,bold=True,col=CHARCOAL); wrr.cell(r_rr,2).fill=F(WHITE)
-            wrr.cell(r_rr,3).value=f"{res['value']*100:.2f}%"; wrr.cell(r_rr,3).font=Fn(sz=9,col=CHARCOAL); wrr.cell(r_rr,3).fill=F(WHITE); wrr.cell(r_rr,3).alignment=A(h='center')
-            wrr.cell(r_rr,4).value=f"{res['low']*100:.1f}% to {res['high']*100:.1f}%"; wrr.cell(r_rr,4).font=Fn(sz=9,col=GREY_TXT2); wrr.cell(r_rr,4).fill=F(WHITE); wrr.cell(r_rr,4).alignment=A(h='center')
+            _fv = (lambda v: f"{v:.2f}x") if res.get('unit')=='multiple' else (lambda v: f"{v*100:.2f}%")
+            _range_txt = (f"at least {_fv(res['low'])}" if res.get('high') is None else f"{_fv(res['low'])} to {_fv(res['high'])}")
+            wrr.cell(r_rr,3).value=_fv(res['value']); wrr.cell(r_rr,3).font=Fn(sz=9,col=CHARCOAL); wrr.cell(r_rr,3).fill=F(WHITE); wrr.cell(r_rr,3).alignment=A(h='center')
+            wrr.cell(r_rr,4).value=_range_txt; wrr.cell(r_rr,4).font=Fn(sz=9,col=GREY_TXT2); wrr.cell(r_rr,4).fill=F(WHITE); wrr.cell(r_rr,4).alignment=A(h='center')
             badge(wrr,r_rr,5,'Review' if res['flagged'] else 'In range', P2_FILL if res['flagged'] else OK_FILL, P2_TXT if res['flagged'] else OK_TXT, sz=8, bold=False)
             wrr.cell(r_rr,6).value=f"{res['location']}: {res['rationale']}"; wrr.cell(r_rr,6).font=Fn(sz=8,col=GREY_TXT2); wrr.cell(r_rr,6).fill=F(WHITE); wrr.cell(r_rr,6).alignment=A(wrap=True)
             for cc in range(2,7): wrr.cell(r_rr,cc).border=B(col=PANEL_BORDER)
@@ -2665,7 +2680,7 @@ def build_report(data_path, output_path):
         merge(wrr,f'B{r_rr}:F{r_rr}', _reg.get('note',''), sz=8,col=GREY_TXT2,italic=True,wrap=True)
         set_row(wrr,r_rr,38); r_rr+=1
     else:
-        merge(wrr,f'B{r_rr}:F{r_rr}','Not applicable — no vanilla WACC, cost of equity or notional gearing row was found.',sz=9,col=GREY_TXT2,italic=True,wrap=True)
+        merge(wrr,f'B{r_rr}:F{r_rr}','Not applicable — no vanilla WACC, cost of equity, notional gearing, AICR or RoRE row was found.',sz=9,col=GREY_TXT2,italic=True,wrap=True)
         set_row(wrr,r_rr,20); r_rr+=1
     set_row(wrr,r_rr,10); r_rr+=1
 

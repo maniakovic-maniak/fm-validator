@@ -2966,12 +2966,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       if (reasonableness.regulatedReturns && reasonableness.regulatedReturns.applicable && reasonableness.regulatedReturns.flaggedCount > 0) {
         const rr = reasonableness.regulatedReturns;
         const fl = rr.results.filter(r => r.flagged);
-        const summary = fl.map(r => `${r.metric} = ${(r.value * 100).toFixed(2)}% (expected ${(r.low * 100).toFixed(1)}%-${(r.high * 100).toFixed(1)}%)`).join(', ');
+        const fmtV = (r, v) => (r.unit === 'multiple' ? `${v.toFixed(2)}x` : `${(v * 100).toFixed(2)}%`);
+          const summary = fl.map(r => `${r.metric} = ${fmtV(r, r.value)} (expected ${r.high == null ? 'at least ' + fmtV(r, r.low) : fmtV(r, r.low) + ' to ' + fmtV(r, r.high)})`).join(', ');
         allFlagged.push({
-          id: 'T0-RSN-010', label: `${fl.length} regulated return parameter(s) outside the usual range`,
+          id: 'T0-RSN-010', label: `${fl.length} regulated return parameter(s) or outcome(s) outside the usual range`,
           severity: 'medium', status: 'fail', sheet: fl[0].location.split('!')[0], cell: fl[0].location.split('!')[1],
           category: 'Reasonableness', condition: `${summary}. ${rr.note}`, reason: `Outside range: ${summary}`,
-          corrective_action: 'Check the units (a percentage entered as a whole number), the source of the figure and that it is the allowed return, not an investment-model rate.',
+          corrective_action: 'Check the units (a percentage entered as a whole number), the source of the figure and that it is the allowed return, not an investment-model rate. For AICR or RoRE, confirm the basis and scenario shown and compare with the financeability threshold the licence applies.',
           workstream: 'Inputs', issue_type: 'Regulated return parameter',
           model_risk: 'A unit slip or a pasted corporate rate in the allowed-return parameters moves allowed revenue and every return metric built on it.',
           key_output_impact: 'Yes', method: 'automated', needs_retest: true, root_cause: 'Regulated return parameter outside the usual range',

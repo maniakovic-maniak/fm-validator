@@ -145,7 +145,7 @@ import openpyxl, json
 wb = openpyxl.load_workbook(${JSON.stringify(path.join(tmp, 'o.xlsx'))}, read_only=True)
 t = [str(v) for row in wb['Reasonableness Review'].iter_rows(values_only=True) for v in row if v is not None]
 a = [str(v) for row in wb['Audit Output'].iter_rows(values_only=True) for v in row if v is not None]
-print(json.dumps({'sec': 'REGULATED RETURN PARAMETERS' in t, 'vw': 'Vanilla WACC' in t, 'review': 'Review' in t, 'legend': any('It is not a pass' in x for x in t),
+print(json.dumps({'sec': 'REGULATED RETURN PARAMETERS AND OUTCOMES' in t, 'vw': 'Vanilla WACC' in t, 'review': 'Review' in t, 'legend': any('It is not a pass' in x for x in t),
                   'summary': any('regulated return parameter' in x for x in a)}))
 `], { encoding: 'utf8' });
   assert.strictEqual(chk.status, 0, chk.stderr);

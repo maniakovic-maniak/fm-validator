@@ -517,13 +517,35 @@ function checkDebtYieldNegative(workbook) {
 // regulatory parameters, not benchmarks: they exist to catch a unit slip (3.3 entered for 3.3%) or a pasted
 // investment-model rate, not to second-guess a regulator's determination.
 const REGULATED_PARAMS = [
-  { terms: ['vanilla wacc'], label: 'Vanilla WACC', low: 0.005, high: 0.10,
+  { terms: ['vanilla wacc'], label: 'Vanilla WACC', unit: 'percent', low: 0.005, high: 0.10,
     rationale: 'a real vanilla WACC outside 0.5%-10% is unusual for a regulated network and is more often a unit slip or a corporate-finance rate pasted in than a determination' },
-  { terms: ['cost of equity'], label: 'Cost of equity', low: 0.03, high: 0.15,
+  { terms: ['cost of equity'], label: 'Cost of equity', unit: 'percent', low: 0.03, high: 0.15,
     rationale: 'an allowed cost of equity outside 3%-15% is unusual for a regulated network; check units and that the figure is the allowed, not the achieved, return' },
-  { terms: ['notional gearing'], label: 'Notional gearing', low: 0.30, high: 0.80,
+  { terms: ['notional gearing'], label: 'Notional gearing', unit: 'percent', low: 0.30, high: 0.80,
     rationale: 'notional gearing outside 30%-80% is unusual for a regulated network and changes the financeability test materially' },
 ];
+
+
+// Outcome series: the lowest value across the forecast years must stay above a floor. An independent review of the ESO
+// report (Fm-00046) found saved AICR of 0.40x-0.86x and a negative RoRE that the Reasonableness Review never looked
+// at. Both are review triggers, not findings of a regulatory breach: the financeability threshold depends on the
+// licence and the rating target, and a negative RoRE can follow from a scenario or a basis choice.
+const REGULATED_SERIES = [
+  { startsWith: ['adjusted cash interest coverage ratio', 'aicr'], label: 'AICR (lowest forecast year)', unit: 'multiple', floor: 1.0,
+    rationale: 'an adjusted cash interest cover below 1.0x in any forecast year means cash interest is not covered by the adjusted cash flow in that year; compare it with the financeability threshold the licence applies before relying on the output' },
+  { startsWith: ['rore (based on'], label: 'RoRE (lowest forecast year)', unit: 'percent', floor: 0,
+    rationale: 'a negative return on regulated equity in any forecast year is below the cost of equity by more than the allowed return; confirm the basis (NPV-neutral or closing values) and whether the scenario shown is intended' },
+];
+
+function seriesAfterLabel(row, fromCol) {
+  const out = [];
+  for (let c = fromCol + 1; c <= fromCol + 60; c++) {
+    const vc = row.getCell(c);
+    const raw = vc.formula || (vc.value && vc.value.formula) ? (vc.result !== undefined ? vc.result : (vc.value && vc.value.result)) : vc.value;
+    if (typeof raw === 'number' && isFinite(raw)) out.push({ cell: vc.address, value: raw });
+  }
+  return out;
+}
 
 function checkRegulatedReturnParams(workbook) {
   const results = [];
@@ -553,16 +575,41 @@ function checkRegulatedReturnParams(workbook) {
     const pick = pickModalCandidate(candidates);
     const value = pick.value > 1 && pick.value <= 100 ? pick.value / 100 : pick.value;
     results.push({
-      metric: param.label, value, location: `${pick.sheet}!${pick.valueCell}`, low: param.low, high: param.high,
+      metric: param.label, value, location: `${pick.sheet}!${pick.valueCell}`, unit: param.unit, low: param.low, high: param.high,
       flagged: value < param.low || value > param.high, rationale: param.rationale, candidateCount: candidates.length
+    });
+  }
+  for (const m of REGULATED_SERIES) {
+    const candidates = [];
+    workbook.eachSheet(ws => {
+      if (/\b(backup|copy|duplicate|old|archive)\b/i.test(ws.name)) return;
+      ws.eachRow({ includeEmpty: false }, row => {
+        let labelled = null;
+        row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+          if (labelled || colNum > 6) return;
+          const t = cellText(cell.value).trim().toLowerCase();
+          if (t && t.length <= 90 && m.startsWith.some(term => t.startsWith(term))) labelled = { colNum };
+        });
+        if (!labelled) return;
+        const ser = seriesAfterLabel(row, labelled.colNum);
+        if (ser.length < 2) return;
+        const lo = ser.reduce((a, b) => (b.value < a.value ? b : a));
+        candidates.push({ sheet: ws.name, valueCell: lo.cell, labelText: m.label, value: lo.value });
+      });
+    });
+    if (candidates.length === 0) continue;
+    const pick = pickModalCandidate(candidates);
+    results.push({
+      metric: m.label, value: pick.value, location: `${pick.sheet}!${pick.valueCell}`, unit: m.unit, low: m.floor, high: null,
+      flagged: pick.value < m.floor, rationale: m.rationale, candidateCount: candidates.length
     });
   }
   const flaggedCount = results.filter(r => r.flagged).length;
   return {
     applicable: results.length > 0, results, flaggedCount,
     note: results.length === 0
-      ? 'No vanilla WACC, cost of equity or notional gearing row was found, so there are no regulated return parameters to test.'
-      : 'Ranges are disclosed, wide rule-of-thumb triggers for real, post-tax regulatory parameters, not market benchmarks. The first value on each labelled row is tested (the most common value where a label repeats across scenario blocks); a flag is a reason to check units and source, not a finding that the determination is wrong.'
+      ? 'No vanilla WACC, cost of equity, notional gearing, AICR or RoRE row was found, so there are no regulated return parameters to test.'
+      : 'Ranges are disclosed, wide rule-of-thumb triggers for real, post-tax regulatory parameters, not market benchmarks. For the parameters the first value on each labelled row is tested; for AICR and RoRE the lowest forecast year is tested (the most common result where a label repeats across scenario blocks). A flag is a reason to check units, source and basis, not a finding that the determination is wrong or that a regulatory threshold is breached.'
   };
 }
 

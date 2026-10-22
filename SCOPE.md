@@ -223,3 +223,12 @@ Hidden Gem (38,798 sums): 12 s, 0 findings from the new checks.
 | Critical Query cap, wider | The Patch 7 cap on medium and low severity absences no longer needs the A1 fallback cell. In Fm-00046 the reviewer anchored the deferred tax absence to SystemOperator!AP658 and it stayed a Critical Query. |
 | Scope tier R7 (regulated-network profile) | Six more procedures whose subject matter the reviewer said does not exist: T2-S7-005 (IRR/NPV range), T2-S10-353 (construction equity bridge), T2-S10-425 (PSC), T2-S10-451 (economic cost-benefit), T2-S10-493 (tiered promote), T2-S10-709 (pumped storage). T2-S7-005 and T2-S10-353 were Critical Queries at 40% and 30% confidence. |
 | Not changed | T2-S3-005 (WCF values in two places, critical rule, 50% confidence) stays a Critical Query: it is a real unresolved question. |
+
+## Patch 9 from the independent review of Fm-00046 (2026-10-22)
+
+| Change | Detail |
+|---|---|
+| Tier 2 prompt, Step 5c | Rule 6 now says to quote the row's existing label before naming a hardcoded constant (T2-S1-003 called the "RIIO-2 Wokingham adjustment to RAV" row a "DRS revenue conversion factor"). New rule 7: results a macro pastes in per scenario are deliberate snapshots, so do not recommend live links; the check is whether they can be shown to be current. New rule 8: a fix to a switch must show both flag positions. Unproven until a paid ESO run. |
+| Reliance wording | With an open P1, an unresolved Critical Query or a failed gate, the tier is still internal review only, but the Audit Output status and the Scope and Reliance decision now read "Not ready for reliance - internal review only" and the decision text names the open blockers. Tier logic unchanged. |
+| Completion tile | A note under the tiles says Audit Completion measures checklist coverage and is not independent verification of the model's logic or numbers. |
+| Regulated outcomes | The Reasonableness Review section now also tests AICR (lowest forecast year at least 1.0x) and RoRE (lowest forecast year not negative), shown as Review when they fail and raised through T0-RSN-010 as a Query. On the real ESO model: AICR 0.40x at FinancialRatios!AQ132, RoRE -2.61% at FinancialRatios!AQ94. The 1.0x floor is a disclosed rule of thumb, not a regulatory threshold. |
