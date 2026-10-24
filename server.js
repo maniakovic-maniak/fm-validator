@@ -3279,10 +3279,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       const regDet = crossRunStats.regressedDeterministicCount ?? crossRunStats.regressed.length;
       const regLlm = crossRunStats.regressedLlmCount ?? 0;
       if (regDet > 0) {
-        console.log(`   \u26a0\ufe0f  ${regDet} previously-closed deterministic item(s) have reappeared (regressed) since a prior run`);
+        console.log(`   \u26a0\ufe0f  ${regDet} deterministic item(s) not found in an earlier run have reappeared (regressed) since a prior run`);
       }
       if (regLlm > 0) {
-        console.log(`   \u2139\ufe0f  ${regLlm} previously-closed Tier 2 (LLM) item(s) have reappeared — Tier 2 findings can vary between runs even with an unchanged model, so this is not necessarily a genuine regression`);
+        console.log(`   \u2139\ufe0f  ${regLlm} Tier 2 (LLM) item(s) not found in an earlier run have reappeared — Tier 2 findings can vary between runs even with an unchanged model, so this is not necessarily a genuine regression`);
       }
     }
 
@@ -3386,6 +3386,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       scopeSummary: summarizeScopeForReport(ruleExclusions.record, scopePlan),
       ownerDecisionChecklist,
       batchFailures:     t2Results._batchFailures || [],
+      partialCoverage:   t2Results._partialCoverage || [],
       tier2Evidence:     t2Results._evidence || null
     });
 

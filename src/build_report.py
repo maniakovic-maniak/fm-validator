@@ -127,6 +127,7 @@ def build_report(data_path, output_path):
     reviewMode   = d.get('reviewMode','llm_only')
     ruleResults  = d.get('ruleResults',[])
     batchFailures = d.get('batchFailures',[])
+    partialCoverage = d.get('partialCoverage',[])
     tier2Evidence = d.get('tier2Evidence') or {}
     # FIX: found via a real, direct transparency gap in a production
     # report - "Not Performed" rules previously all shared one generic
@@ -606,9 +607,9 @@ def build_report(data_path, output_path):
         # These checks produce the exact same result every time on an
         # unchanged model, so a genuine change here means the model or
         # the validator's own code genuinely changed.
-        _crn_text_det = f'{_crn_closed_det} closed · {_crn_new_det} new · {_crn_still_open} still open since the last run'
+        _crn_text_det = f'{_crn_closed_det} not found in this run · {_crn_new_det} new · {_crn_still_open} still open since the last run'
         if _crn_regressed_det > 0:
-            _crn_text_det += f' · \u26a0 {_crn_regressed_det} regressed (previously closed, now reappeared)'
+            _crn_text_det += f' · \u26a0 {_crn_regressed_det} regressed (not found in an earlier run, now found again)'
         merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run (deterministic checks):   ',_crn_text_det,sz=10,col=CHARCOAL,bg=(LIGHT_RED if _crn_regressed_det>0 else PANEL_GREY),v='center')
         set_row(ws1,r,20); r+=1
         # Tier 2 (LLM) line — explicitly caveated, never uses the
@@ -616,7 +617,7 @@ def build_report(data_path, output_path):
         # nonzero, since this is expected, routine model variance, not
         # a reliability signal the way the deterministic line is.
         if _crn_closed_llm > 0 or _crn_new_llm > 0 or _crn_regressed_llm > 0:
-            _crn_text_llm = f'{_crn_closed_llm} closed · {_crn_new_llm} new'
+            _crn_text_llm = f'{_crn_closed_llm} not found in this run · {_crn_new_llm} new'
             if _crn_regressed_llm > 0:
                 _crn_text_llm += f' · {_crn_regressed_llm} reappeared'
             _crn_text_llm += ' — Tier 2 (LLM) findings can vary between runs even with an unchanged model, since Tier 2 re-reasons from scratch each time; not necessarily a sign of genuine progress or regression.'
@@ -712,10 +713,10 @@ def build_report(data_path, output_path):
     # existing "Since last run:" text line below already covers that case
     # with its own explicit "no prior report to compare against" message.
     if not _is_first_run:
-        merge(ws1,f'B{r}:I{r}','Since Last Run',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')
+        merge(ws1,f'B{r}:I{r}','Since Last Run  ("not found" means the finding did not reappear in this run; it is not evidence that it was fixed)',bold=True,sz=8,col=GREY_TXT2,bg=WHITE,h='left')
         set_row(ws1,r,14); r+=1
         _crn_lbl_row, _crn_val_row = r, r+1
-        kpi_card(ws1,_crn_lbl_row,_crn_val_row,2,3,'CLOSED',_crn_closed,fmt='#,##0;[Red](#,##0);-',val_col=(GREEN if _crn_closed>0 else CHARCOAL))
+        kpi_card(ws1,_crn_lbl_row,_crn_val_row,2,3,'NOT FOUND THIS RUN',_crn_closed,fmt='#,##0;[Red](#,##0);-',val_col=CHARCOAL)
         kpi_card(ws1,_crn_lbl_row,_crn_val_row,4,5,'NEW',_crn_new,fmt='#,##0;[Red](#,##0);-',val_col=(AMBER if _crn_new>0 else CHARCOAL))
         kpi_card(ws1,_crn_lbl_row,_crn_val_row,6,7,'STILL OPEN',_crn_still_open,fmt='#,##0;[Red](#,##0);-',val_col=CHARCOAL)
         kpi_card(ws1,_crn_lbl_row,_crn_val_row,8,9,'REGRESSED',_crn_regressed,fmt='#,##0;[Red](#,##0);-',val_col=(RED if _crn_regressed>0 else CHARCOAL))
@@ -1212,6 +1213,13 @@ def build_report(data_path, output_path):
         _recalc_summary = (f"A genuine, independent recalculation did not complete for this workbook: {recalcIn.get('reason', recalcIn.get('error','no reason recorded'))}. "
                             f"Conclusions rest on the workbook's own cached, displayed values for this run - not an independently recalculated result.")
         _recalc_next = 'Investigate the real, specific cause above before relying on this model\'s cached values for any downstream decision'
+    elif _recalc_status_raw != 'success':
+        # Patch 10: only a recognised successful result may read as a clean recalculation. Any other status
+        # (batch_evaluation_failed, error, or one not seen before) is shown as not completed.
+        _recalc_status = 'Not performed'
+        _recalc_summary = (f"A genuine, independent recalculation did not complete for this workbook (status: {_recalc_status_raw}): {recalcIn.get('reason', recalcIn.get('error','no reason recorded'))}. "
+                            f"Conclusions rest on the workbook's own cached, displayed values for this run - not an independently recalculated result.")
+        _recalc_next = 'Investigate the specific cause above before relying on this model\'s cached values for any downstream decision'
     else:
         _mismatch_count = recalcIn.get('mismatch_count', 0)
         _cells_checked = recalcIn.get('formula_cells_checked', 0)
@@ -1322,6 +1330,13 @@ def build_report(data_path, output_path):
             f"{_bf.get('label','A batch')} (this run only)",
             'Not performed',
             f"This batch genuinely failed to complete during this run: {_bf.get('error','unknown error').rstrip('.')}. The {len(_bf.get('ruleIds',[]))} rule(s) it covered are marked Not Performed in the Validation Matrix - this was a real, one-off infrastructure failure, not a deliberate scope decision.",
+            'Re-run the validation once the underlying issue is resolved'
+        ))
+    for _pc in partialCoverage:
+        _exclusions.append((
+            f"{_pc.get('label','A batch')} (partial coverage, this run only)",
+            'Partially performed',
+            f"This batch failed during this run: {str(_pc.get('error','unknown error')).rstrip('.')}. The {len(_pc.get('ruleIds',[]))} rule(s) it covered were answered from the other data chunk(s), so the data in the failed chunk was not reviewed for them. They keep their verdict but are not fully covered.",
             'Re-run the validation once the underlying issue is resolved'
         ))
     # Scope disclosure (config/rule-scope.json): what was left out of the planned set before the run, shown by category.

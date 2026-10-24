@@ -46,7 +46,7 @@ const baseMeta = {
   // twice with no fixes applied. Direct comparison confirmed 18
   // closed findings were ALL Tier 2 (LLM), and of 19 new findings,
   // 12 were genuine new deterministic checks and 7 were more LLM
-  // variance. The old blended line ("18 closed, 19 new") looked like
+  // variance. The old blended line ("18 not found in this run, 19 new") looked like
   // real progress/regression; it wasn't.
   // ══════════════════════════════════════════════════════════════
   {
@@ -62,16 +62,16 @@ const baseMeta = {
     });
     const lines = readAuditOutputLines(outPath);
     const text = lines.join(' ');
-    check('deterministic line shows the genuine 12 new (not blended with LLM noise), and correctly shows 0 closed',
-      text.includes('Since last run (deterministic checks)') && text.includes('0 closed') && text.includes('12 new'));
-    check('LLM line shows the 18 closed / 7 new with the explicit non-determinism caveat',
-      text.includes('Since last run (Tier 2 / LLM findings)') && text.includes('18 closed') && text.includes('7 new') && text.includes('can vary between runs even with an unchanged model'));
+    check('deterministic line shows the genuine 12 new (not blended with LLM noise), and correctly shows 0 not found in this run',
+      text.includes('Since last run (deterministic checks)') && text.includes('0 not found in this run') && text.includes('12 new'));
+    check('LLM line shows the 18 not found in this run / 7 new with the explicit non-determinism caveat',
+      text.includes('Since last run (Tier 2 / LLM findings)') && text.includes('18 not found in this run') && text.includes('7 new') && text.includes('can vary between runs even with an unchanged model'));
   }
 
   // ══════════════════════════════════════════════════════════════
   // Confirms the LLM line is entirely OMITTED when there's genuinely
   // nothing to report there — a run where only deterministic checks
-  // changed shouldn't show an empty, confusing "0 closed · 0 new" LLM
+  // changed shouldn't show an empty, confusing "0 not found in this run · 0 new" LLM
   // line cluttering the report.
   // ══════════════════════════════════════════════════════════════
   {
@@ -109,7 +109,7 @@ const baseMeta = {
     const lines = readAuditOutputLines(outPath);
     const text = lines.join(' ');
     check('a genuine deterministic regression still shows the explicit warning text',
-      text.includes('2 regressed (previously closed, now reappeared)'));
+      text.includes('2 regressed (not found in an earlier run, now found again)'));
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -129,7 +129,7 @@ const baseMeta = {
     const lines = readAuditOutputLines(outPath);
     const text = lines.join(' ');
     check('a pre-split payload (no split fields at all) still renders without crashing, falling back to the blended numbers',
-      text.includes('Since last run (deterministic checks)') && text.includes('5 closed') && text.includes('4 new'));
+      text.includes('Since last run (deterministic checks)') && text.includes('5 not found in this run') && text.includes('4 new'));
   }
 
   console.log('\n' + (allPass ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED'));

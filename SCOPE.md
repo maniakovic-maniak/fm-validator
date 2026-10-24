@@ -232,3 +232,15 @@ Hidden Gem (38,798 sums): 12 s, 0 findings from the new checks.
 | Reliance wording | With an open P1, an unresolved Critical Query or a failed gate, the tier is still internal review only, but the Audit Output status and the Scope and Reliance decision now read "Not ready for reliance - internal review only" and the decision text names the open blockers. Tier logic unchanged. |
 | Completion tile | A note under the tiles says Audit Completion measures checklist coverage and is not independent verification of the model's logic or numbers. |
 | Regulated outcomes | The Reasonableness Review section now also tests AICR (lowest forecast year at least 1.0x) and RoRE (lowest forecast year not negative), shown as Review when they fail and raised through T0-RSN-010 as a Query. On the real ESO model: AICR 0.40x at FinancialRatios!AQ132, RoRE -2.61% at FinancialRatios!AQ94. The 1.0x floor is a disclosed rule of thumb, not a regulatory threshold. |
+
+## Patch 10 from the developer refinement report (2026-10-25)
+
+Code claims 1-6 in the report were checked against the repo and are true. This patch takes the three truthfulness fixes.
+
+| Change | Detail |
+|---|---|
+| Recalculation status | Only status "success" can read as a clean recalculation. Any other status (batch_evaluation_failed, error, one not seen before) is shown as Not performed with the status named. |
+| "Closed" | A finding absent from a run is reported as "not found in this run". The tile and note say this is not evidence it was fixed. History bookkeeping is unchanged, so regression detection still works. |
+| Failed chunk | In a multi-chunk run, a failed batch whose rules another chunk answered is no longer erased. It is kept as partial coverage and listed in Scope and Reliance. The rules keep their verdicts and are not marked Not Performed. |
+
+Not in this patch: keeping several issues per rule through the chunk merge (Patch 11), classifier handling of missing confidence (Patch 12).

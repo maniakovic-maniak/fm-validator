@@ -962,6 +962,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   // failed batch, and the real, actual error message, so build_report.py
   // can use the honest reason instead of the generic one.
   const batchFailures = [];
+  const partialCoverage = []; // rules answered by one data chunk while another chunk's batch for them failed
   let topLevelMeta = {};
 
   // Compact Wave 1 (named-range audit) and Wave 2 (VBA review) summaries —
@@ -1123,9 +1124,14 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       }
       const merged = reconcileDataSplitResults(perChunk);
       allResults.push(...merged);
-      // a rule one chunk could not review but another did is not a failed rule
+      // A rule one chunk could not review but another did is not a Not Performed rule - but the chunk that failed was NOT
+      // reviewed for it, so the gap stays on the record as partial coverage instead of being cleared (Patch 10).
       const have = new Set(merged.map(r => r.id));
-      for (const f of batchFailures) f.ruleIds = f.ruleIds.filter(id => !have.has(id));
+      for (const f of batchFailures) {
+        const answered = f.ruleIds.filter(id => have.has(id));
+        if (answered.length) partialCoverage.push({ label: f.label, error: f.error, ruleIds: answered });
+        f.ruleIds = f.ruleIds.filter(id => !have.has(id));
+      }
       for (let k = batchFailures.length - 1; k >= 0; k--) if (batchFailures[k].ruleIds.length === 0) batchFailures.splice(k, 1);
     } else {
     await Promise.all([
@@ -1316,6 +1322,9 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       console.log(`   Tier 2 API usage: ${_usage.calls} call(s), ${_usage.input.toLocaleString()} input + ${_usage.cacheWrite.toLocaleString()} cache-write + ${_usage.cacheRead.toLocaleString()} cache-read + ${_usage.output.toLocaleString()} output tokens = about $${promptCache.estimateCost(_usage, _costCfg).toFixed(2)} (estimate at list prices; the classification, familiarisation and domain-drafting calls are extra)`);
     }
 
+    if (partialCoverage.length > 0) {
+      Object.defineProperty(normalised, '_partialCoverage', { value: partialCoverage, enumerable: false });
+    }
     if (batchFailures.length > 0) {
       Object.defineProperty(normalised, '_batchFailures', { value: batchFailures, enumerable: false });
     }
