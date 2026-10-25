@@ -1366,20 +1366,26 @@ settings require workbook property inspection."
 
 ### test: macros_documented
 Check `vbaSummary.hasVbaProject` first — this tells you definitively
-whether the workbook contains a VBA project, closing the gap the old
-version of this test couldn't resolve on its own ("if model appears to
-use VBA" was previously something you had no reliable way to know).
+whether the workbook contains a VBA project.
 
 - If `hasVbaProject` is false or `vbaSummary` is absent: this test does
   not apply — pass, confidence 90, state no VBA project was detected.
-- If `hasVbaProject` is true: look for a macros or VBA section on the
-  cover sheet or README tab in the row data you were given.
-  - If present and it names all `vbaSummary.moduleCount` modules with
-    their purpose: pass, confidence 80.
-  - If absent, or documents fewer modules than `moduleCount` actually
-    present: fail (not uncertain — you now have a definitive fact to
-    report), confidence 80. State the module count found by the VBA
-    scan versus what is documented.
+- If `hasVbaProject` is true, use `vbaSummary.digest`. It separates modules
+  with real code (`substantiveCount`, listed in `digest.modules` with their
+  procedure names) from empty sheet and ThisWorkbook stubs (`emptyCount`).
+  Judge the documentation against the substantive modules, not against
+  `moduleCount`: 24 empty stubs among 31 modules do not need documenting.
+  Look for a macros or VBA section on the cover sheet, a README or an
+  instructions sheet in the row data you were given.
+  - If it names or describes what each substantive module (or each macro by
+    name) does: pass, confidence 80.
+  - If it describes only some of them: fail, confidence 80. Name the
+    undocumented modules and their procedures from `digest.modules`, and
+    state the counts (documented versus `substantiveCount`).
+  - If there is no macro documentation at all: fail, confidence 80.
+- This test is about documentation. Do not return uncertain because you
+  cannot judge whether a macro is safe to run; say so in one sentence and
+  rate the documentation.
 
 ### test: protection_allows_review
 Use `sheetFacts` from the payload (`sheetProtected`, `passwordProtected`
@@ -1860,10 +1866,20 @@ comparison) as a pass/fail gate on financial-scale values.
 Trigger: the workbook contains a SavedResults/LiveResults pattern,
 OFFSET-based recall blocks, and/or VBA that manipulates calculation or
 writes values.
+Use `vbaSummary.digest` for what the macros do. `digest.anyRecordsDateOrTime`
+tells you whether any macro records a date or time (a refresh log or
+timestamp); `usesClock` alone (for example a pause with Application.Wait)
+is not a log. `digest.modules` shows which macros write values and which
+show a message.
 - If a stale-state warning, a run log recording the last refresh, and a
   deterministic reset mechanism all exist → pass, confidence 80+
 - If one or more of these three controls is genuinely absent → fail.
-  Name which is missing.
+  Name which is missing. A control counts as present only if you can point
+  to the cell, sheet text or macro that provides it. "No macro records a
+  date or time and no sheet holds a last-refresh stamp" is a sufficient
+  basis for "run log absent"; do not return uncertain for that reason.
+  An instruction that tells the user to remember to re-run a macro is not
+  a deterministic mechanism.
 - If the trigger condition doesn't apply to this workbook → not applicable
 
 ### test: year_index_offset_boundary_robust

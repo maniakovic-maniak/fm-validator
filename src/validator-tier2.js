@@ -11,6 +11,7 @@ const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-resul
 const { buildVisibilityRecord } = require('./utils/build-visibility-record');
 const { buildSheetFacts } = require('./utils/sheet-facts');
 const { applyAbsencePolicy } = require('./utils/absence-policy');
+const { buildVbaDigest } = require('./utils/vba-digest');
 const promptCache = require('./utils/prompt-cache');
 const dataChunker = require('./utils/data-chunker');
 
@@ -983,6 +984,8 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     hasVbaProject: vbaReview.hasVbaProject,
     moduleCount: vbaReview.moduleCount || 0,
     findingSummary: (vbaReview.findings || []).map(f => `${f.id}: ${f.label}`),
+    // Patch 14: facts read from the macro source (which modules have real code, what each does), so macro rules can conclude
+    digest: (() => { try { return vbaReview.hasVbaProject ? buildVbaDigest(vbaReview.modules) : null; } catch (_) { return null; } })(),
   } : { note: 'VBA review did not complete for this run — treat macros_documented and any VBA-dependent test as manual_only.' };
 
   // Reusable batch runner with consistent error handling

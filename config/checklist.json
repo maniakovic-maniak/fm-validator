@@ -1792,7 +1792,7 @@
       "source_section": "13. Governance and handover",
       "test": "macros_documented",
       "severity": "critical",
-      "manual_only": true,
+      "manual_only": false,
       "fixable": false,
       "fix_instruction": "List all macros, VBA scripts, add-ins, and external data connections on the cover sheet. Each must be reviewed for accuracy, security, and portability. The model must not depend on add-ins unavailable to the reviewer."
     },

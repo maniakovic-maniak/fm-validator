@@ -279,3 +279,16 @@ Decision (Mik, option A): the completion figure is not changed. A Tier 2 answer 
 | Rule | A rule is treated as unconcluded only when it has an uncertain result and no raised issue. Tier 1 is unchanged. |
 
 Not changed: how completion is computed (Option C, counting these only when the finding is a Confirmed Finding, was considered and set aside).
+
+## Patch 14: the reviewer is told what the macros do (2026-10-25)
+
+Diagnosis on the real ESO model. T2-S10-788 (iteration-state integrity) is correctly in scope: SavedResults and LiveResults sheets, 341 OFFSET formulas, a 31-module VBA project that sets Application.Calculation. It had concluded in 2 of 7 runs because the reviewer saw only the module count and the labels of two scan findings, never the macro source, so it could not tell whether any macro records a refresh date. T2-S13-004 (macros documented) compared the README with a raw count of 31 modules, 24 of which are empty sheet stubs.
+
+| Change | Detail |
+|---|---|
+| `src/utils/vba-digest.js` | Facts read from the macro source with comments and text strings removed: modules with real code versus empty stubs, procedure names, and flags for writes values, sets calculation, records a date or time, uses the clock, shows a message. A pause such as Application.Wait (Now + ...) uses the clock but is not a run log. |
+| Reviewer payload | `vbaSummary.digest`. About 1-2k tokens. |
+| skill.md | macros_documented is judged against substantive modules and may not return uncertain for "cannot judge safety". riio_iteration_state_integrity may fail on "no macro records a date or time and no sheet holds a last-refresh stamp". |
+| checklist.json | T2-S13-004 manual_only set to false: its test text is decidable from the VBA scan. |
+
+On ESO: 31 modules, 7 with real code, 24 stubs; macros set calculation and write values; none records a date or time. Unproven until a paid ESO run: whether the reviewer now concludes these two rules.
