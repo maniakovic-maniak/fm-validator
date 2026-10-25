@@ -288,6 +288,16 @@ def build_report(data_path, output_path):
     p1 = [f for f in findings if priority(f)=='P1']
     p2 = [f for f in findings if priority(f)=='P2']
     p3 = [f for f in findings if priority(f)=='P3']
+    # Patch 19: the memo asks for one master finding per root cause. Rows are kept; when linked findings make the
+    # distinct count lower, the count is shown next to the row count.
+    def _mf_note(lst):
+        try:
+            if not lst or not any(f.get('master_finding_id') for f in lst): return ''
+            pri_of = priority(lst[0])
+            masters = {f.get('master_finding_id') or f.get('id') for f in lst if (f.get('master_priority') or pri_of) == pri_of}
+            return f' ({len(masters)} root cause{"" if len(masters)==1 else "s"})' if len(masters) < len(lst) else ''
+        except Exception:
+            return ''
     critical_queries = [f for f in findings if f.get('record_type')=='Critical Query']
 
     # Pre-compute display titles ONCE (shared by dashboard + Issue Log — was
@@ -570,7 +580,7 @@ def build_report(data_path, output_path):
     # detail. p1/p2/p3 are already computed above for the Work Not
     # Performed table's own logic; this just surfaces the same counts
     # more prominently, right where a reader looks first.
-    merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2 · {len(p3)} P3' + (f' · {critical_query_open} Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open>0 else ''),sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+    merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2{_mf_note(p2)} · {len(p3)} P3{_mf_note(p3)}' + (f' · {critical_query_open} Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open>0 else ''),sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
     set_row(ws1,r,20); r+=1
     # ── P1/P2/P3 framework renewal, Tier 2 item 2 ────────────────────────────
     # Cross-run Closed/New/Regressed — previously the report only ever
@@ -1418,7 +1428,7 @@ def build_report(data_path, output_path):
                 'Model Impact','Required Fix','Owner','Target Date','Closure Evidence',
                 'Relevance','Urgency','Issue Type','Workstream','What is wrong',
                 'Why it matters','Output affected','Key Output\nImpact','F-Score',
-                'Confidence','Method','Range','Root Cause',
+                'Confidence','Method','Range','Root Cause','Master\nFinding','Occur-\nrences',
                 'Investment\nBlocker','Escalation\nFlag','Date Raised','Days Open',
                 'Management\nResponse','Reviewer\nResponse','Client\nResponse','']
     n_cols = len(il_headers)
@@ -1513,6 +1523,8 @@ def build_report(data_path, output_path):
             'Output affected': out_impact, 'Key Output Impact': f.get('key_output_impact','Unknown'),
             'F-Score': fscore_val, 'Confidence': confidence_display, 'Method': f.get('method',''), 'Range': '',
             'Root Cause': f.get('root_cause',''),
+            'Master Finding': (f.get('master_finding_id') or f.get('id','')) if (f.get('linked_findings') or 1) > 1 else '—',
+            'Occur- rences': f.get('master_occurrences') or f.get('occurrence_count') or '',
             'Investment Blocker': 'Yes' if f.get('investment_grade_blocker') else 'No',
             'Escalation Flag': 'Yes' if f.get('escalation_flag') else 'No',
             'Date Raised': reviewDate, 'Days Open': '', 'Management Response': '',

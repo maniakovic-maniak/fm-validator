@@ -59,6 +59,7 @@ const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { linkRelatedFindings } = require('./src/utils/related-findings');
+const { annotateMasterFindings, countMasters } = require('./src/utils/master-findings');
 const { applyFindingClasses, groupSameRemediation } = require('./src/utils/finding-class');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
@@ -3254,6 +3255,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
     catch (e) { console.error('   \u26a0\ufe0f  Related-findings link failed:', e.message); }
     try { groupSameRemediation(allFlagged); } catch (e) { console.error('   \u26a0\ufe0f  Same-remedy grouping failed:', e.message); }
+    try {
+      annotateMasterFindings(allFlagged);
+      const _m = countMasters(allFlagged);
+      const _c = { P1: 0, P2: 0, P3: 0 }; allFlagged.forEach(f => { if (_c[f.priority] !== undefined) _c[f.priority]++; });
+      console.log(`   \u2139\ufe0f  Master findings (one per root cause): P1 ${_m.P1} of ${_c.P1}, P2 ${_m.P2} of ${_c.P2}, P3 ${_m.P3} of ${_c.P3}`);
+    } catch (e) { console.error('   \u26a0\ufe0f  Master-finding step failed:', e.message); }
 
     // ── P1/P2/P3 framework renewal, Tier 2 item 3 ──────────────────────────
     // See the matching comment in index.js for the full rationale.

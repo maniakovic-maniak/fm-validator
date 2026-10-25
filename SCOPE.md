@@ -343,3 +343,17 @@ Fm-00049 (ESO, Patches 8-17 live): 120 planned, 85% completion, 11 P3 findings (
 | One batch of 60 results left the review_mode label off, so the report said only 52% of Tier 2 findings were grounded in formula text, when every batch was given the complete formula text. | `utils/review-mode.js`: on the full-parse route a missing or llm_only label is recorded as llm_full_parse. Labels the reviewer chose are kept. Curated route unchanged. |
 
 Not changed: T2-S8-005 and T2-S9-004 can still end as Critical Queries if the reviewer is genuinely unsure; the aim is that they conclude when the formulas settle the question. The Critical Query cap for T2-S10-336 is still open.
+
+## Patch 19: master findings, one per root cause (2026-10-26)
+
+The P1/P2/P3 memo (principle 4, "Root-cause consolidation") asks for a master finding per root cause with its occurrences, so repeated or look-alike findings do not inflate the count. The tool already linked findings that share cells or a remedy (`related_group_id`, cross-referenced in the text and shown on the Remediation tab), but it still counted every row: Fm-00049 reported 29 P2 where the embedded-literal findings (T2-S1-003, S3-002, S3-005), the duplicated SUM (T0-DUPCALC + T2-S1-004) and the masked #REF! (T0-ERRLITERAL + T2-S4-006) are 4 rows too many, 25 root causes.
+
+| Change | Detail |
+|---|---|
+| `src/utils/master-findings.js` | After linking, each finding gets `master_finding_id` (group id, or its own id), `master_priority` (highest in the group), `linked_findings`, `occurrence_count` (distinct cells it names) and `master_occurrences` (distinct cells across the group). No row is dropped or merged. Wired into server.js and index.js after the same-remedy grouping. |
+| Audit Output | "Findings by priority" shows the root-cause count beside a row count that is higher: "29 P2 (25 root causes)". Unchanged when nothing is linked. |
+| Issue Log | Two new columns after Root Cause: Master Finding (the group id, "—" when the finding stands alone) and Occurrences (cells across the group). Added at the right of the existing columns, so nothing moves. |
+| Server log | "Master findings (one per root cause): P1 a of b, P2 c of d, P3 e of f". |
+
+Not built: Material Occurrence Count (needs a key-output test per cell), and the memo's Root Cause ID as a separate field from the group id. Counts that drive the readiness gates (P1 open, Critical Queries) are unchanged.
+Not done in this patch: the adjudication step for mismatches such as T2-S5-004 (the typed 0 at FinancialStatements!AP42 whose 12.2 is already in opening equity). That needs the reviewer to check the link, so it is a skill-text change to test on a run.
