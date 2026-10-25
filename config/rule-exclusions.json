@@ -67,6 +67,11 @@
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]
         },
+        "A2_regulated_network_conditional_families": {
+          "enabled": true,
+          "families": ["ppp", "power", "construction", "feedstock", "energy_efficiency"],
+          "note": "Added 2026-10-25 after Fm-00048. Exploration drew conditional procedures from these families (PPP credit support and refinancing, generation degradation and blended returns, live construction cost-to-complete, feedstock, energy-efficiency M&V and PACE) and the reviewer answered that the subject matter does not exist in a licence allowed-revenue model. Family tiers only remove a rule that returned an uncertain absence: a Pass or Issue verdict, a fatal rule, or a substantive finding always keeps it in scope."
+        },
         "B_ppp_contract_archetype": {
           "enabled": false,
           "families": ["ppp", "pfi", "vfm", "public"]

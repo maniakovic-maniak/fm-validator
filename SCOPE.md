@@ -319,3 +319,15 @@ Findings from Fm-00047. (1) 9 of 114 Tier 2 findings had an unusable location: a
 
 On the real Fm-00047 findings the repair reads one sheet from the text for two rows (T2-S12-007 SystemOperator, T2-S10-508 FinancialRatios) and records the rest as workbook-level.
 Not changed: which procedures are mandatory, or how a mandatory procedure is judged complete (pass only). The six unconcluded ones are reviewer judgement calls, not a reporting fault.
+
+## Patch 17: "the subject does not exist" is not a finding (2026-10-25)
+
+Fm-00048 (ESO, Patches 8-16 live): 85% completion on 133 planned procedures, locations down from 9 unusable to 2, mandatory wording split as intended. It also showed a side effect of the absence policy. 16 exploration procedures about toll roads, waste, PACE finance, feedstock, ADC facilities and similar were answered "No X subject matter exists anywhere in the workbook". The absence policy recorded each as a confirmed absence (P3 "Not present in the workbook"), which (a) added 16 irrelevant P3 findings (P3 count 13 -> 24) and (b) made the scope exclusion keep them, because it never removes a rule with a verdict. In Fm-00047 the same procedures were answered "not applicable to this model type", stayed uncertain, and were not reported.
+
+| Change | Detail |
+|---|---|
+| `absence-policy.js` | An answer that says the "subject matter" does not exist, or that the mechanism "exists in this ... model", is a not-applicable answer. It stays uncertain, as the policy always intended. Genuine missing controls (change log, adjustments register) are still converted. |
+| Tier A2 (regulated_network_utility) | Family tier for ppp, power, construction, feedstock and energy_efficiency procedures. Like the other family tiers it only removes a rule that returned an uncertain absence; a Pass or Issue, a fatal rule or a substantive finding keeps it in scope. |
+
+Expected on a rerun of the same model: the 15 procedures leave the plan (about 118 planned), P3 findings fall back to about 8, completion about 82%. That is lower than 85% because the 85% included procedures that should never have counted.
+T2-S10-369 (technical-to-financial bridge, a Query) and T2-S10-389 (correlated downside) are not family-matched and are unchanged.

@@ -20,7 +20,7 @@ const { isAbsenceFinding } = require('./rule-exclusions');
 // The reviewer talking about what it could or could not see, not about what the workbook contains.
 const LIMITATION_RE = /(confirmed or ruled out|ruled out|could not|cannot|can't|unable|not possible|formula-only|extract(ion)?\b|not performed|was performed|were performed|formatting|colou?r|truncated|trimmed|subset|not visible|not shown|not provided|not available to)/i;
 // The reviewer saying the structure does not belong in this kind of model.
-const NOT_APPLICABLE_RE = /(not applicable|n\/a|does not (produce|apply|belong|have a|require)|do not (apply|require)|by design|not expected|not designed|not required|model type|not part of (this|the) model|outside (the )?scope|or expected|expected in this|would not be expected|no .{0,40} concept exists|not a (class|feature|component))/i;
+const NOT_APPLICABLE_RE = /(not applicable|n\/a|does not (produce|apply|belong|have a|require)|do not (apply|require)|by design|not expected|not designed|not required|model type|not part of (this|the) model|outside (the )?scope|or expected|expected in this|would not be expected|no .{0,40} concept exists|not a (class|feature|component)|subject matter|exists in this [\w\s/&-]{0,50}model)/i;
 
 // The finding must OPEN with the absence. A sentence that starts with a cell reference and has "no visible ..."
 // somewhere in the middle is a substantive observation, not a missing-schedule finding.
