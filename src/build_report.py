@@ -222,6 +222,17 @@ def build_report(data_path, output_path):
     _incomplete_mandatory = [rid for rid in _mandatory_critical_ids
         if not _rule_statuses_by_id.get(rid) or any(st != 'pass' for st in _rule_statuses_by_id[rid])]
     mandatory_procedure_gap = len(_incomplete_mandatory) > 0
+    # Patch 16: say which kind of gap it is. A mandatory procedure that ran and raised an issue is finished work with a
+    # finding that blocks reliance; one that was uncertain or never ran is work still to do. Both block, but they are
+    # different actions for the reader, and calling the first "incomplete" overstated how much of the audit was missing.
+    _mand_with_issue = [rid for rid in _incomplete_mandatory
+        if any(st not in ('pass', 'uncertain', None) for st in _rule_statuses_by_id.get(rid, []))]
+    _mand_not_concluded = [rid for rid in _incomplete_mandatory if rid not in set(_mand_with_issue)]
+    def _mandatory_phrase():
+        parts = []
+        if _mand_not_concluded: parts.append(f'{len(_mand_not_concluded)} mandatory critical procedure(s) not concluded')
+        if _mand_with_issue: parts.append(f'{len(_mand_with_issue)} mandatory critical procedure(s) with a raised issue')
+        return ' and '.join(parts)
 
     # 2. "An unaudited critical module" — from deepAcctSheets'
     # unresolvedCategories, filtered to only the categories that are
@@ -422,7 +433,7 @@ def build_report(data_path, output_path):
         _blocker_parts = []
         if p1_open > 0: _blocker_parts.append(f'{p1_open} P1 item(s)')
         if critical_query_open > 0: _blocker_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}')
-        if mandatory_procedure_gap: _blocker_parts.append(f'{len(_incomplete_mandatory)} incomplete mandatory critical procedure(s)')
+        if mandatory_procedure_gap: _blocker_parts.append(_mandatory_phrase())
         if critical_module_gap: _blocker_parts.append(f'{len(_unresolved_critical_modules)} unaudited critical module(s) ({", ".join(_unresolved_critical_modules)})')
         if key_output_gap: _blocker_parts.append('an unreconciled key output')
         _blocker_desc = ', '.join(_blocker_parts)
@@ -537,7 +548,7 @@ def build_report(data_path, output_path):
     _open_parts = []
     if p1_open>0: _open_parts.append(f'{p1_open} open P1 finding(s)')
     if critical_query_open>0: _open_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}')
-    if mandatory_procedure_gap: _open_parts.append(f'{len(_incomplete_mandatory)} incomplete mandatory critical procedure(s)')
+    if mandatory_procedure_gap: _open_parts.append(_mandatory_phrase())
     if critical_module_gap: _open_parts.append(f'{len(_unresolved_critical_modules)} unaudited critical module(s)')
     if key_output_gap: _open_parts.append('an unreconciled key output')
     _open_desc = ', '.join(_open_parts)
@@ -545,7 +556,7 @@ def build_report(data_path, output_path):
     _reason = (f'{_open_desc} and {cov_conclusive_pct}% audit completion' if _has_blocker
                else f'{cov_conclusive_pct}% audit completion, {cov_unc} procedure(s) uncertain, {cov_np} not run' if cov_conclusive_pct<100 or cov_unc or cov_np
                else 'All planned procedures completed with no open P1 findings or unresolved Critical Queries')
-    _next_step = ('Close all P1 items, resolve all Critical Queries (confirming whether a defect exists either way), and clear any incomplete mandatory procedures, unaudited critical modules, and unreconciled key outputs — then complete outstanding procedures and reassess.' if _has_blocker
+    _next_step = ('Close all P1 items, resolve all Critical Queries (confirming whether a defect exists either way), and clear any mandatory procedures that are not concluded or have a raised issue, unaudited critical modules, and unreconciled key outputs — then complete outstanding procedures and reassess.' if _has_blocker
                   else 'Resolve remaining P2 items and complete outstanding procedures before wider reliance.' if igReadiness<95
                   else ('Record reviewer approval to reach Transaction Execution readiness.' if reviewer_approval_gap else 'No further action required for this reliance level.'))
     merge(ws1,f'B{r}:I{r}',f'Status:   {_verdict_display}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
@@ -677,7 +688,7 @@ def build_report(data_path, output_path):
     _blockers=[]
     if p1_open>0: _blockers.append('open P1 findings')
     if critical_query_open>0: _blockers.append('unresolved Critical Queries')
-    if mandatory_procedure_gap: _blockers.append('incomplete mandatory critical procedures')
+    if mandatory_procedure_gap: _blockers.append('mandatory critical procedures not concluded or with a raised issue')
     if critical_module_gap: _blockers.append('unaudited critical modules')
     if key_output_gap: _blockers.append('an unreconciled key output')
     if t0.get('stats',{}).get('totalExternalLinks',0)>0: _blockers.append('external workbook links')
@@ -1530,7 +1541,7 @@ def build_report(data_path, output_path):
         # but the label itself is now always exactly "View", never raw
         # formula/implementation text, never a variable fallback label.
         vc=ws4.cell(row_i,VIEW_COL)
-        if sheet and sheet not in ('—','N/A','Multiple'):
+        if sheet and sheet not in ('—','N/A','Multiple','Workbook'):
             vc.value=f'=HYPERLINK("[{sourceFile}]{sheet}!A1","View")'
             vc.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
         else:

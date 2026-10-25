@@ -72,10 +72,13 @@ test('a fatal rule with one pass and one issue is still an incomplete mandatory 
   const mand = [...checklist.tier1, ...checklist.tier2].filter(r => r.severity === 'fatal' || /fatal gate/i.test(String(r.source_section || '')));
   const allPass = mand.map(r => ({ id: r.id, status: 'pass', confidence: 80 }));
   const mk = list => Object.values(build({ modelName: 's', sourceFile: 's.xlsx', findings: [], ruleResults: list })).flat().join(' | ');
-  assert.ok(!/incomplete mandatory critical procedure/.test(mk(allPass)), 'baseline should have no mandatory gap');
+  assert.ok(!/mandatory critical procedure/.test(mk(allPass)), 'baseline should have no mandatory gap');
   const target = mand[0].id;
   const mixed = allPass.filter(r => r.id !== target).concat([{ id: target, status: 'P1', confidence: 80, sheet: 'IS', cell: 'D10' }, { id: target, status: 'pass', confidence: 80 }]);
-  assert.ok(/1 incomplete mandatory critical procedure/.test(mk(mixed)));
+  assert.ok(/1 mandatory critical procedure\(s\) with a raised issue/.test(mk(mixed)));
+  const unc = allPass.filter(r => r.id !== target).concat([{ id: target, status: 'uncertain', confidence: 30 }]);
+  const text = mk(unc);
+  assert.ok(/1 mandatory critical procedure\(s\) not concluded/.test(text) && !/procedure\(s\) with a raised issue/.test(text), 'an uncertain mandatory rule is "not concluded", not "raised issue"');
 });
 
 console.log(`\n${passed} check(s) passed`);

@@ -305,3 +305,17 @@ Findings from Fm-00047. (1) "Since last run" always said first run: the stored f
 
 Effect on Fm-00047: 126 planned becomes 119, completion about 85% (101 of 119) with no change to the definition.
 Not changed: the Critical Query cap for uncertain results on medium rules (T2-S10-336), left for later at Mik's instruction.
+
+## Patch 16: honest locations and honest "mandatory" wording (2026-10-25)
+
+Findings from Fm-00047. (1) 9 of 114 Tier 2 findings had an unusable location: a sheet called "A1", a blank or "None" sheet, or "Workbook" with a View link that pointed nowhere. Most were really workbook-level (VBA calculation override, named-range counts, change-log and issue-tracker absences, sheet list). (2) The report said "9 incomplete mandatory critical procedures", but only 6 were unfinished: T1-006, T2-S1-002, S3-002, S4-003, S9-004 and S13-008 were uncertain, while S4-006, S8-005 and S9-001 had run and raised an issue.
+
+| Change | Detail |
+|---|---|
+| `src/utils/location-repair.js` | Runs before the unusable-location count. Order: one `Sheet!Cell` reference in the text (only when all references point at one sheet); else exactly one real sheet named in the text (case-sensitive whole name); else the finding is recorded as workbook-level with sheet "Workbook". Never guesses between sheets. Sets `location_basis`. |
+| Issue Log | "Workbook" rows show "—" in the View column instead of a link to a sheet that does not exist. |
+| Location check | "Workbook" counts as workbook-level; an absence starting "Not present", "Not found" or "Not applicable" counts as an honest A1. |
+| `build_report.py` | Verdict banner, Scope and Reliance, and Audit Output now say "N mandatory critical procedure(s) not concluded" and "N mandatory critical procedure(s) with a raised issue" separately. Both still block reliance. |
+
+On the real Fm-00047 findings the repair reads one sheet from the text for two rows (T2-S12-007 SystemOperator, T2-S10-508 FinancialRatios) and records the rest as workbook-level.
+Not changed: which procedures are mandatory, or how a mandatory procedure is judged complete (pass only). The six unconcluded ones are reviewer judgement calls, not a reporting fault.

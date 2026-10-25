@@ -1227,6 +1227,11 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     // the frequency directly and objectively on every run — the same
     // "make it monitorable, not just inferable from prose" pattern
     // that made R-8's usage directly verifiable via review_mode above.
+    // Patch 16: repair the location first, so the count below only reports what could not be recovered
+    try {
+      const _loc = require('./utils/location-repair').repairLocations(normalised, parsed.sheetNames || []);
+      if (_loc.fromRef + _loc.fromText + _loc.workbookLevel > 0) console.log(`   \u2139\ufe0f  Location repair: ${_loc.fromRef} sheet/cell read from the finding text, ${_loc.fromText} sheet read from the finding text, ${_loc.workbookLevel} recorded as workbook-level (no single sheet)`);
+    } catch (e) { console.error('   \u26a0\ufe0f  Location repair failed (locations left as returned):', e.message); }
     const validSheetSet = new Set((parsed.sheetNames || []).map(s => s.toLowerCase()));
     // FIX: split into separate counts - the combined check below tells
     // us THAT locations are unusable, but not WHICH of two genuinely
@@ -1267,7 +1272,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       if (fixLower.startsWith('no action required') || fixLower.startsWith('no action needed')) {
         return 'scope_not_applicable';
       }
-      if (/^(no |there is no )/.test(findingLower)) {
+      if (/^(no |there is no |not present|not found|not applicable)/.test(findingLower)) {
         return 'scope_not_applicable';
       }
 
@@ -1283,7 +1288,7 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
 
       // Category C - workbook-level: the finding is genuinely about the
       // whole workbook (VBA project, a missing tab), not one cell.
-      if (!r.sheet || r.sheet === 'N/A' || r.sheet === 'None') {
+      if (!r.sheet || r.sheet === 'N/A' || r.sheet === 'None' || r.sheet === 'Workbook') {
         return 'workbook_level';
       }
 
