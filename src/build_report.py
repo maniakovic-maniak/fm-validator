@@ -127,6 +127,13 @@ def build_report(data_path, output_path):
     reviewMode   = d.get('reviewMode','llm_only')
     ruleResults  = d.get('ruleResults',[])
     batchFailures = d.get('batchFailures',[])
+    # Rules the reviewer answered "uncertain" (no raised issue). A Tier 2 uncertain answer can still carry a priority and
+    # appears in the Issue Log; the Validation Matrix and the completion figure rightly do not count it as concluded.
+    # These ids let the Issue Log and the Matrix say so, instead of leaving two views that seem to disagree.
+    _by_rule_status = {}
+    for _r in ruleResults:
+        _by_rule_status.setdefault(_r.get('id'), set()).add('pass' if _r.get('status')=='pass' else 'uncertain' if _r.get('status')=='uncertain' else 'issue')
+    _unconcluded_ids = {i for i, st in _by_rule_status.items() if 'uncertain' in st and 'issue' not in st}
     partialCoverage = d.get('partialCoverage',[])
     tier2Evidence = d.get('tier2Evidence') or {}
     # FIX: found via a real, direct transparency gap in a production
@@ -1467,6 +1474,8 @@ def build_report(data_path, output_path):
         category=f.get('category','')
         issue_title=f.get('label') or f.get('id','')
         what_wrong=f.get('condition') or f.get('reason','')
+        if f.get('id','') in _unconcluded_ids and str(f.get('id','')).startswith('T2-'):
+            what_wrong='[Procedure not concluded: the reviewer was uncertain, so this is an open question, not a confirmed defect] '+str(what_wrong)
         why_matters=f.get('consequence','')
         fix_action=f.get('corrective_action') or f.get('fix_instruction','')
         out_impact=f.get('dollar_impact','')
@@ -1783,7 +1792,7 @@ def build_report(data_path, output_path):
             if r.get('reason'): return str(r['reason'])
         return None
 
-    m_rows=[]; n_pass=n_issue=n_unc=n_np=0
+    m_rows=[]; n_pass=n_issue=n_unc=n_np=0; n_unc_open=0
     for rule in checklist_rules:
         rid=rule.get('id',''); tier=rule.get('_tier','Tier 2')
         rres=[r for r in ruleResults if _rmatch(rid,r.get('id',''))]
@@ -1816,7 +1825,12 @@ def build_report(data_path, output_path):
         refs=[f.get('id','') for f in rfnd]
         ref_txt=', '.join(refs[:4])+(f' +{len(refs)-4} more' if len(refs)>4 else '') if refs else '—'
         if status=='Not Performed': missing=_rule_to_batch_failure_reason.get(rid, 'Rule not returned by the review — re-run validation or test manually')
-        elif status=='Uncertain': missing=_t1_missing_reason(unc, tier) or 'Evidence insufficient for a conclusive test — see related finding'
+        elif status=='Uncertain':
+            if rfnd and tier=='Tier 2':
+                n_unc_open += 1
+                missing='The reviewer could not conclude this procedure and recorded an open question in the Issue Log ('+', '.join(refs[:2])+'). It is not counted as completed.'
+            else:
+                missing=_t1_missing_reason(unc, tier) or 'Evidence insufficient for a conclusive test — see related finding'
         else: missing='—'
         retest='Yes' if (issues or any(f.get('needs_retest') for f in rfnd)) else 'No'
         m_rows.append(dict(rid=rid, area=rule.get('source_section','') or rule.get('section',''),
@@ -1836,9 +1850,12 @@ def build_report(data_path, output_path):
         for rr in (3,4):
             for cc in range(c1,c2+1): wsm.cell(rr,cc).border=B(col=PANEL_BORDER)
     set_row(wsm,3,14); set_row(wsm,4,24)
-    if extras:
+    _vm_notes=[]
+    if n_unc_open: _vm_notes.append(f'{n_unc_open} Uncertain procedure(s) also have an open question in the Issue Log; they are not counted as completed.')
+    if extras: _vm_notes.append(f'{extras} additional finding(s) fall outside the checklist — see Issue Log for detail.')
+    if _vm_notes:
         merge(wsm,f'B{VM_HEADER_ROW-1}:{get_column_letter(n_vm_cols-1)}{VM_HEADER_ROW-1}',
-              f'{extras} additional finding(s) fall outside the checklist — see Issue Log for detail.',
+              ' '.join(_vm_notes),
               sz=8,col=GREY_TXT2,italic=True)
         set_row(wsm,VM_HEADER_ROW-1,14)
     else:

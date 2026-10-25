@@ -267,3 +267,15 @@ Not in this patch: asking later chunks for additional problems under an already-
 | Record | `confidence_basis` is set on the finding when the value was assumed. An explicit `record_type` set by a check is still respected. |
 
 Not changed: a detector that sets `record_type: Confirmed Finding` itself. That needs the detector list reviewed one by one.
+
+## Patch 13: Uncertain with an Issue Log entry (2026-10-25)
+
+Decision (Mik, option A): the completion figure is not changed. A Tier 2 answer of "uncertain" can still carry a priority, so it appears in the Issue Log while the Validation Matrix correctly shows the rule as Uncertain and does not count it. The report now says so in both places.
+
+| Where | Change |
+|---|---|
+| Issue Log | The "What is wrong" text of such an entry starts "[Procedure not concluded: the reviewer was uncertain, so this is an open question, not a confirmed defect]". The Status dropdown is unchanged. |
+| Validation Matrix | Missing Evidence reads "The reviewer could not conclude this procedure and recorded an open question in the Issue Log (ID). It is not counted as completed." A note above the table gives the count. |
+| Rule | A rule is treated as unconcluded only when it has an uncertain result and no raised issue. Tier 1 is unchanged. |
+
+Not changed: how completion is computed (Option C, counting these only when the finding is a Confirmed Finding, was considered and set aside).
