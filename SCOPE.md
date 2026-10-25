@@ -244,3 +244,14 @@ Code claims 1-6 in the report were checked against the repo and are true. This p
 | Failed chunk | In a multi-chunk run, a failed batch whose rules another chunk answered is no longer erased. It is kept as partial coverage and listed in Scope and Reliance. The rules keep their verdicts and are not marked Not Performed. |
 
 Not in this patch: keeping several issues per rule through the chunk merge (Patch 11), classifier handling of missing confidence (Patch 12).
+
+## Patch 11: more than one problem under a rule (2026-10-25)
+
+| Change | Detail |
+|---|---|
+| Chunk merge | `reconcileDataSplitResults` keeps every distinct raised result for a rule. The same problem (same sheet and a real cell, or the same wording for a result with no cell) is kept once. A rule with no issue still keeps one result. |
+| Mandatory gate | build_report.py built a last-wins id-to-status dict, so a later pass could hide an earlier issue on a fatal rule. A rule is now complete only when every one of its results is a pass. |
+| Completion and Validation Matrix | Already filtered by rule id, so a rule with several results counts once. Tested. |
+
+Known edge: `consolidateTier2Duplicates` keys on finding id, so a "same as T2-X" cross-reference on a rule that now has several results applies to the id, not one cell. Not changed.
+Not in this patch: asking later chunks for additional problems under an already-raised rule, and the prompt line asking for one object per distinct problem (both add Tier 2 cost; measure on a paid run first).

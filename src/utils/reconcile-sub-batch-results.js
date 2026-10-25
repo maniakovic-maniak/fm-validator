@@ -43,42 +43,55 @@ function statusPriority(status) {
   return 1; // 'uncertain'
 }
 
+const GENERIC_CELL = /^(|A1|N\/A|NA|-)$/i;
+// Two raised results are the same problem when they point at the same sheet and a specific cell. A result with no
+// real cell (an absence, a workbook-wide point) is compared on its wording instead, so two different absences
+// under one rule are both kept.
+function raisedKey(r) {
+  const sheet = String(r.sheet || '').trim().toLowerCase();
+  const cell = String(r.cell || '').trim().toUpperCase();
+  if (!GENERIC_CELL.test(cell)) return `${sheet}|${cell}`;
+  const text = String(r.condition || r.reason || '').toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+  return `${sheet}|${cell}|${text}`;
+}
+
 /**
  * Reconciles an array of result arrays (one per data sub-batch, all
- * covering the same rule set) into one, final array with exactly one
- * result per rule id.
+ * covering the same rule set) into one final array.
+ *
+ * Every distinct problem a rule raised in any sub-batch is kept (Patch 11): two chunks that each find a different
+ * error under one rule both reach the report. The same problem found twice (same sheet and cell) is kept once, from
+ * the first sub-batch that raised it. A rule with no issue keeps one result: a pass beats uncertain.
  *
  * @param {Array<Array<object>>} subBatchResultArrays
- * @returns {Array<object>} one reconciled result per distinct rule id
+ * @returns {Array<object>} for each rule id, its distinct raised results, or else one pass or uncertain result
  */
 function reconcileDataSplitResults(subBatchResultArrays) {
-  const byRuleId = new Map();
+  const byRuleId = new Map(); // id -> { raised: Map(key -> result), other: result|null, seen: n }
 
   for (const resultsArray of subBatchResultArrays) {
     for (const result of resultsArray) {
-      const existing = byRuleId.get(result.id);
-      if (!existing) {
-        byRuleId.set(result.id, result);
-        continue;
-      }
-      // Real, deliberate tie-break: a strictly higher-priority status
-      // always wins. On a genuine tie (both sub-batches raised an issue
-      // for the same rule, or both passed), keep the existing one - the
-      // two are equally definitive, and arbitrarily replacing the first
-      // with the second isn't a genuine improvement, just churn.
-      if (statusPriority(result.status) > statusPriority(existing.status)) {
-        byRuleId.set(result.id, {
-          ...result,
-          // Preserve a record that this rule was genuinely re-attempted
-          // across sub-batches - useful for audit-trail purposes, not
-          // shown in the report itself.
-          _reconciledFrom: (existing._reconciledFrom || 1) + 1,
-        });
+      let e = byRuleId.get(result.id);
+      if (!e) { e = { raised: new Map(), other: null, seen: 0 }; byRuleId.set(result.id, e); }
+      e.seen++;
+      if (statusPriority(result.status) === 3) {
+        const k = raisedKey(result);
+        if (!e.raised.has(k)) e.raised.set(k, result);
+      } else if (!e.other || statusPriority(result.status) > statusPriority(e.other.status)) {
+        e.other = result;
       }
     }
   }
 
-  return Array.from(byRuleId.values());
+  const out = [];
+  for (const e of byRuleId.values()) {
+    if (e.raised.size > 0) {
+      for (const r of e.raised.values()) out.push(e.seen > 1 ? { ...r, _reconciledFrom: e.seen } : r);
+    } else if (e.other) {
+      out.push(e.seen > 1 ? { ...e.other, _reconciledFrom: e.seen } : e.other);
+    }
+  }
+  return out;
 }
 
 module.exports = { reconcileDataSplitResults, statusPriority };

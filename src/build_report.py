@@ -207,9 +207,13 @@ def build_report(data_path, output_path):
     # complete audit can still have one of these unresolved.
     _mandatory_critical_ids = {r['id'] for r in checklist_rules
         if r.get('severity')=='fatal' or 'fatal gate' in str(r.get('source_section','')).lower()}
-    _rule_status_by_id = {r.get('id'): r.get('status') for r in ruleResults}
+    # Patch 11: a rule may now carry several results (one per distinct problem). It is complete only when it has
+    # at least one result and every one of them is a pass; the last result must not overwrite an earlier issue.
+    _rule_statuses_by_id = {}
+    for r in ruleResults:
+        _rule_statuses_by_id.setdefault(r.get('id'), []).append(r.get('status'))
     _incomplete_mandatory = [rid for rid in _mandatory_critical_ids
-        if _rule_status_by_id.get(rid) not in ('pass',)]
+        if not _rule_statuses_by_id.get(rid) or any(st != 'pass' for st in _rule_statuses_by_id[rid])]
     mandatory_procedure_gap = len(_incomplete_mandatory) > 0
 
     # 2. "An unaudited critical module" — from deepAcctSheets'
