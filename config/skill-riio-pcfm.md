@@ -230,6 +230,22 @@ separately traceable in the model's formulas — and a model's financeability co
 be inferred purely from its RoRE percentage; it depends on real cash-flow timing separately from the
 level of return itself.
 
+## 8. Opening gearing reset and the equity roll-forward
+
+Some licence models reset opening net debt to the notional gearing at the start of a price control
+(the ESO model labels the row "Start of price control change in notional gearing"). The cash flow
+then shows the reset as an equity issuance in the first period, while the balance-sheet equity
+roll-forward shows no issuance in that period, because the opening equity was already built from
+the asset base less the opening net debt taken after the reset. A typed 0 in "equity issued" for
+that period is then correct, and adding the issuance would count it twice.
+
+**Reviewer implication.** Before reporting an equity or net-debt mismatch in the first forecast
+period, trace the opening equity row to the opening net debt row it reads and check whether the
+reset is already inside it (see the opening-balance check under equity_reconciliation). A real
+mismatch is one where opening equity ignores the reset, or closing equity differs between the
+balance sheet and the cash flow. The mismatch of the two statements in that one period, on its
+own, is not.
+
 ## A genuine, honestly-flagged gap: "DARTs"
 
 One further term the independent review named specifically — "DARTs" — did not surface as a

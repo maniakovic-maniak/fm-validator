@@ -357,3 +357,14 @@ The P1/P2/P3 memo (principle 4, "Root-cause consolidation") asks for a master fi
 
 Not built: Material Occurrence Count (needs a key-output test per cell), and the memo's Root Cause ID as a separate field from the group id. Counts that drive the readiness gates (P1 open, Critical Queries) are unchanged.
 Not done in this patch: the adjudication step for mismatches such as T2-S5-004 (the typed 0 at FinancialStatements!AP42 whose 12.2 is already in opening equity). That needs the reviewer to check the link, so it is a skill-text change to test on a run.
+
+## Patch 20: check the opening balance before raising a first-period equity mismatch (2026-10-26)
+
+Checked against the real ESO workbook. T2-S5-004 (P2, 65% in Fm-00049; a Critical Query in Fm-00048) says FinancialStatements!AP42 "Equity issued" is a typed 0 while the cash flow shows 12.2 in the same period. That 12.2 is SystemOperator row 606, "Start of price control change in notional gearing": the opening net debt is reset (row 522, taken after the reset), and the opening equity (FinancialStatements AP37 = AP25 + AP56, AP56 = SystemOperator!AP522) is built from the asset base plus that reset net debt. The reset is already inside opening equity, so the typed 0 is correct and adding 12.2 would count it twice. The statements are consistent; the finding is a false positive.
+
+| Change | Detail |
+|---|---|
+| `config/skill.md`, equity_reconciliation | Before failing on an equity or net-debt mismatch, the reviewer must check whether the opening balance was already reset to include it, and quote the opening-equity and opening net debt formulas. Already inside: pass or Observation, no P2. Not inside: fail with the amount. Formula not visible: uncertain, naming it. |
+| `config/skill-riio-pcfm.md`, new section 8 | Describes the opening gearing reset and the double-count trap, as something some licence models do (the ESO model labels the row), not as a regulatory rule. |
+
+Unproven until a paid run: whether the reviewer now passes T2-S5-004 on the ESO model. Related rules T2-S2-009 and T2-S11-006 (opening forecast equals latest actual closing) were uncertain in Fm-00049 and are untouched.

@@ -242,8 +242,27 @@ Look for this roll-forward in AFS or Equity sheet.
 Share issues, buybacks, and other equity movements must appear in
 both the balance sheet equity section and financing activities.
 - If movements match across both locations → pass
-- If movement appears in one but not the other → fail, identify item
-  and estimated dollar amount
+- If movement appears in one but not the other → do the opening-balance
+  check below BEFORE failing, then fail, identify item and estimated
+  dollar amount
+- Opening-balance check (required before any equity or net-debt mismatch
+  is raised): a cash-flow equity issuance can be missing from the balance
+  sheet roll-forward on purpose when the first period's OPENING balance
+  was already reset to include it. Typical form: a typed 0 (or a blank)
+  in "equity issued" in the first forecast period, while the cash flow
+  shows a one-off issuance such as "start of price control change in
+  notional gearing", and the opening equity row is built from the asset
+  base plus an opening net debt that is itself taken after that reset.
+  Quote the opening-equity formula and the opening net debt formula it
+  reads, and say whether the reset is already inside them.
+  - Already inside the opening balance → pass, or an Observation that
+    names the typed value and the reset. Adding the issuance again would
+    count it twice. Do not raise a P2.
+  - Not inside it (opening equity ignores the reset, or the cash flow
+    and the balance sheet end up with different closing equity) → fail
+    with the amount.
+  - Cannot see the opening-equity formula → uncertain, and say which
+    formula you could not see.
 
 ### test: working_capital_reconciliation
 Changes in receivables, payables, inventory on the balance sheet
