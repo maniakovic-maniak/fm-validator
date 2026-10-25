@@ -331,3 +331,15 @@ Fm-00048 (ESO, Patches 8-16 live): 85% completion on 133 planned procedures, loc
 
 Expected on a rerun of the same model: the 15 procedures leave the plan (about 118 planned), P3 findings fall back to about 8, completion about 82%. That is lower than 85% because the 85% included procedures that should never have counted.
 T2-S10-369 (technical-to-financial bridge, a Query) and T2-S10-389 (correlated downside) are not family-matched and are unchanged.
+
+## Patch 18: documentation requests, two fatal-gate procedures, review-depth label (2026-10-25)
+
+Fm-00049 (ESO, Patches 8-17 live): 120 planned, 85% completion, 11 P3 findings (Patch 17 worked), locations clean, "Since last run" compares against Fm-00048 (112 deterministic items still open, 27 Tier 2 not found, 13 new). It also showed three things.
+
+| Finding | Change |
+|---|---|
+| Critical Queries rose from 2 to 4. Two were "no adjustments register / overlay register found" (T2-S11-004 high, T2-S12-009 critical) at 30% confidence. In Fm-00047 they were Observations; in Fm-00049 the reviewer anchored them to a SystemOperator cell, which skipped the A1 rule and let them escalate on severity. | `record-type-classifier.js`: a T2 finding in a Documentation category at under 60% confidence is a Query, whatever the severity or anchor. A request for paperwork cannot misstate an output on its own. Fatal rules and anything at 60%+ are unchanged. |
+| T2-S9-004 (returns from live cash flows, fatal gate) has come back uncertain in Fm-00047, 48 and 49, each time because the reviewer could not confirm what happens to figures outside the workbook, while saying the RoRE cells are live formulas. The rule had no skill text and was marked manual_only. T2-S8-005 (downside not suppressed, fatal) also had none. | `config/skill.md`: a decision procedure for each. Live formulas passes; typed numbers on an output sheet fail; external publication is out of scope and not a reason for uncertain; macro-written snapshot sheets are deliberate; a visible equity injection is a pass for a notional-gearing model, a floor or plug that hides the shortfall is a fail. `checklist.json`: T2-S9-004 manual_only false. |
+| One batch of 60 results left the review_mode label off, so the report said only 52% of Tier 2 findings were grounded in formula text, when every batch was given the complete formula text. | `utils/review-mode.js`: on the full-parse route a missing or llm_only label is recorded as llm_full_parse. Labels the reviewer chose are kept. Curated route unchanged. |
+
+Not changed: T2-S8-005 and T2-S9-004 can still end as Critical Queries if the reviewer is genuinely unsure; the aim is that they conclude when the formulas settle the question. The Critical Query cap for T2-S10-336 is still open.

@@ -1424,6 +1424,47 @@ unanswerable.
   counts: fall back to uncertain, confidence 30: "Named ranges require
   Name Manager inspection to verify currency" — the same as before.
 
+### test: returns_from_live_cashflows
+You are given every formula in the workbook, so this is decidable from the
+formula text. It does not need Excel, and it does not need to know what was
+done with the numbers after they left the workbook.
+1. Find the return metrics the model reports: rows or cells labelled IRR,
+   NPV, equity multiple or MOIC, payback, return on equity, or (for a
+   regulated network) RoRE and its ranges.
+2. For each, read its formula. A formula that traces back to cash-flow,
+   earnings or allowed-revenue rows is live. A cell holding a typed number
+   where neighbouring periods or scenarios hold formulas is pasted.
+3. Pass (confidence 80) when the headline metrics are live formulas. Say
+   which cells you read.
+4. Fail (P1 if a headline metric on an output sheet is a typed number, else
+   P2) and name the sheet and cell.
+5. Whether figures printed in a report, a slide or another file match the
+   model is outside the workbook. Do not return uncertain for that reason;
+   pass on the live formulas and add one sentence to the finding that
+   external publication was not tested.
+6. Stored result sheets written by a macro (for example SavedResults or a
+   results archive) are deliberate snapshots. They are not a fail by
+   themselves. Fail only when a headline metric labelled as live reads from
+   one instead of from the live calculation.
+7. Return uncertain only when no return metric can be found at all, and say
+   what you looked for.
+
+### test: downside_not_suppressed
+1. Find the downside or financeability scenarios (cost overspend, return
+   underperformance, volume or price stress, a funding-gap case).
+2. Find what the model does when a scenario would breach a funding, gearing
+   or covenant-style threshold: an automatic equity injection, a cash sweep,
+   a MAX(0, ...) floor, a plug.
+3. Pass (confidence 75) when the shortfall or breach stays visible: an
+   equity-injection or funding-gap row is reported for each scenario, or a
+   pre-correction ratio is shown, or a breach flag exists. For a notional
+   gearing model an equity injection that restores gearing is the deliberate
+   mechanism; it passes if the amount injected is shown per scenario.
+4. Fail (P2) when a floor or plug removes the shortfall and no row, flag or
+   output shows that it happened. Name the sheet and cells.
+5. Return uncertain only when no downside or financeability scenario exists,
+   and then say so as an absence.
+
 ### test: instructions_complete
 Look for an Instructions tab or instructions section on the cover sheet.
 If present and covering model purpose, scenario controls, and output interpretation: pass.

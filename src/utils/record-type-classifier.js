@@ -160,6 +160,13 @@ function classifyRecordType(finding) {
     // The reviewer sometimes anchors an absence to a nearby cell (T2-S5-008 named SystemOperator!AP658 in Fm-00046),
     // so this does not require the A1 fallback that the Observation rule above does.
     if (/^T2-/.test(String(finding.id || '')) && isAbsenceText(finding) && (severity === 'medium' || severity === 'low')) return 'Query';
+    // Patch 18: a documentation register that could not be found (adjustments log, overlay register, change log) is an
+    // information request, whatever the rule's severity and wherever the reviewer anchored it. Missing paperwork cannot
+    // misstate a key output on its own. In Fm-00047 two such results were Observations; in Fm-00049 the reviewer anchored
+    // them to a SystemOperator cell, escaped the A1 rule above and became Critical Queries that blocked reliance.
+    // Fatal rules keep the escalation.
+    if (/^T2-/.test(String(finding.id || '')) && severity !== 'fatal' &&
+        /documentation/i.test(`${finding.category || ''} ${finding.issue_type || ''}`)) return 'Query';
     return mentionsKeyOutputArea(finding) ? 'Critical Query' : 'Query';
   }
 

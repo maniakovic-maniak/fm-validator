@@ -1192,7 +1192,11 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       // objectively verify R-8's usage — only indirect inference from
       // prose wording, which turned out to be unreliable (LLM prose
       // varies run to run regardless of what data it saw).
-      review_mode:              r.review_mode || 'llm_only',
+      // Patch 18: on the full-parse route every batch is given the complete formula text, so a result the reviewer left
+      // unlabelled (or labelled llm_only) was still reviewed from formulas. Fm-00049: one batch of 60 left the label
+      // off and the report said only 52% of findings were grounded in formula text. Labels the reviewer chose that
+      // say more (llm_with_partial_formulas, llm_full_parse) are kept as they are.
+      review_mode:              require('./utils/review-mode').resolveReviewMode(r.review_mode, useFullParse),
       // Top-level meta fields (from overall assessment)
       _meta: topLevelMeta
     }));

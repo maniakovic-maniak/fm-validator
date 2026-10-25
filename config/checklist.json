@@ -1264,7 +1264,7 @@
       "source_section": "0. Fatal gate",
       "test": "returns_from_live_cashflows",
       "severity": "fatal",
-      "manual_only": true,
+      "manual_only": false,
       "fixable": false,
       "fix_instruction": "IRR, NPV, equity multiple, and all return metrics must be calculated directly from live investor or project cash flows."
     },
