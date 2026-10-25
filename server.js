@@ -3258,7 +3258,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     try {
       annotateMasterFindings(allFlagged);
       const _m = countMasters(allFlagged);
-      const _c = { P1: 0, P2: 0, P3: 0 }; allFlagged.forEach(f => { if (_c[f.priority] !== undefined) _c[f.priority]++; });
+      const _c = { P1: 0, P2: 0, P3: 0 }; allFlagged.forEach(f => { if ((f.record_type || 'Confirmed Finding') === 'Confirmed Finding' && _c[f.priority] !== undefined) _c[f.priority]++; });
       console.log(`   \u2139\ufe0f  Master findings (one per root cause): P1 ${_m.P1} of ${_c.P1}, P2 ${_m.P2} of ${_c.P2}, P3 ${_m.P3} of ${_c.P3}`);
     } catch (e) { console.error('   \u26a0\ufe0f  Master-finding step failed:', e.message); }
 

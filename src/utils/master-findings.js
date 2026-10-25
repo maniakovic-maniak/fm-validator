@@ -11,7 +11,10 @@
 const { cellsOf } = require('./related-findings');
 
 const RANK = { P1: 1, P2: 2, P3: 3 };
+// Only a Confirmed Finding has a P1/P2/P3 (framework: Query, Critical Query and Observation sit outside the hierarchy).
+// f.priority is also set on those records from severity, so it is ignored for them here.
 function prio(f) {
+  if ((f.record_type || 'Confirmed Finding') !== 'Confirmed Finding') return null;
   const p = String(f.priority || '');
   return RANK[p] ? p : null;
 }

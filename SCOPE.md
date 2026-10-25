@@ -368,3 +368,7 @@ Checked against the real ESO workbook. T2-S5-004 (P2, 65% in Fm-00049; a Critica
 | `config/skill-riio-pcfm.md`, new section 8 | Describes the opening gearing reset and the double-count trap, as something some licence models do (the ESO model labels the row), not as a regulatory rule. |
 
 Unproven until a paid run: whether the reviewer now passes T2-S5-004 on the ESO model. Related rules T2-S2-009 and T2-S11-006 (opening forecast equals latest actual closing) were uncertain in Fm-00049 and are untouched.
+
+## Patch 21 - master-finding counts use Confirmed Findings only
+
+Fm-00050 logged "Master findings: P1 5 of 7" while the report showed 0 P1. `f.priority` is also set from severity on Queries, Critical Queries and Observations, and the master count included them. Per the framework those sit outside the P1/P2/P3 hierarchy. `master-findings.js` now ignores non-confirmed records, and the server.js log line counts confirmed findings only. Report content is unchanged. Test: `test-patch21.js`.
