@@ -63,6 +63,12 @@
           "decision": "Scope decision recorded 2026-10-25 on Mik Riazanov's go-ahead after Fm-00047: exploration picked these domain procedures and the reviewer answered each with 'Not applicable to this model type' (IFRIC 12 / PPP concession classification, technology-project maturity and downside, managed energy service agreements, retrofit avoided capex, generation PPA tariff reverse-solve, hydro run-of-river). They are conditional project or generation-asset procedures with no equivalent in a licence allowed-revenue model, and each ended as Uncertain, which does not count towards completion. T2-S10-336 (revenue control classification), T2-S10-508 (covenants) and T2-S10-369 (technical-to-financial bridge) stay in scope. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
           "ruleIds": ["T2-S10-383", "T2-S10-532", "T2-S10-574", "T2-S10-665", "T2-S10-689", "T2-S10-700", "T2-S10-708"]
         },
+        "R9_scope_decision_regulated_network_ppp_economic_not_applicable": {
+          "enabled": true,
+          "allowFatal": false,
+          "decision": "Scope decision recorded 2026-10-26 on Mik Riazanov's go-ahead after Fm-00050: five procedures ended Uncertain with the reviewer stating the subject does not exist in a licence allowed-revenue model (net debt is a notional regulatory construct with no refinancing tenor or lender direct agreements; no economic appraisal structure; no resettlement or land-access obligations; Ofgem's standard price control rather than a negotiated PPP). Two of them (T2-S10-362, T2-S10-375) were reported as Critical Queries with 'None / No action required'. T2-S10-336, T2-S10-369, T2-S10-468 stay in scope. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
+          "ruleIds": ["T2-S10-362", "T2-S10-375", "T2-S10-452", "T2-S10-492", "T2-S10-776"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]

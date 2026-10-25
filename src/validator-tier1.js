@@ -307,8 +307,13 @@ function runTier1(parsed, opts = {}) {
         let found = false;
         let anyRowMatchedKeyword = false;
         ws.eachRow({ includeEmpty: false }, (row) => {
-          const firstCell = row.getCell(1);
-          const label = firstCell.text ? firstCell.text.toLowerCase() : '';
+          // The label is the first text cell in the first six columns, not only column A: some models (the RIIO
+          // licence models) put line labels in column E. labelCol is skipped when scanning the values.
+          let label = '', labelCol = 1;
+          for (let c = 1; c <= 6; c++) {
+            const t = row.getCell(c).text;
+            if (t && /[a-z]/i.test(t) && t.trim().length > 2) { label = t.toLowerCase(); labelCol = c; break; }
+          }
           // keyword_aliases: other names for the same line; exclude_keywords: rows that contain the keyword but are
           // a different thing (e.g. "Net cash flow", "Depreciation on PP&E"), whose negative values are normal.
           const kwHit = !keyword || label.includes(keyword) || (rule.keyword_aliases || []).some(a => label.includes(String(a).toLowerCase()));
@@ -316,7 +321,7 @@ function runTier1(parsed, opts = {}) {
           if ((rule.exclude_keywords || []).some(x => label.includes(String(x).toLowerCase()))) return;
           anyRowMatchedKeyword = true;
           row.eachCell({ includeEmpty: false }, (cell, colNum) => {
-            if (colNum === 1) return;
+            if (colNum <= labelCol) return;
             const val = typeof cell.value === 'number' ? cell.value
               : (cell.value && typeof cell.value === 'object' && typeof cell.value.result === 'number')
                 ? cell.value.result : null;

@@ -527,10 +527,16 @@ Cannot verify from summary data."
 
 ### test: fast_principles
 FAST principles require short, transparent formulas.
-This is a manual_only test.
-Return uncertain with confidence 30.
-State: "FAST principle compliance requires formula text inspection.
-Cannot verify from summary data."
+When the payload lists the formulas (full-parse mode) this test can be concluded. Do not return uncertain because
+the workbook is large; a judgement about complexity is a verdict, not a missing fact.
+- Count what Tier 0 reports: `workbookStats.totalOffsetCount`, `fscoreDist` High and Critical, and name the sheets
+  and rows where the long nested formulas sit (quote at least two cells and the construct, for example OFFSET
+  inside MATCH inside IF).
+- Fail when High or Critical complexity formulas exist, or when volatile OFFSET/INDIRECT is used in core
+  calculation rows. Say how many and where. A model that is documented as built this way is still a
+  maintainability weakness; rate it as a design weakness, not a calculation error.
+- Pass only when formulas are short and no High or Critical complexity formula exists.
+- Return uncertain only when no formula text for the named rows was given to you.
 
 ### test: single_formula_per_row
 Formula consistency per row requires formula text inspection.
@@ -670,6 +676,10 @@ Look for evidence of peer or independent review on cover sheet or change log.
 Check Dashboard or cover sheet for model purpose documentation.
 - If purpose, audience, and reliance level are visible → pass
 - If no cover sheet in extract → uncertain
+- If a cover sheet or front sheet is in the extract and it gives only a title, version or contents list, with no
+  statement of what the model is for, who it is intended for, or what reliance is appropriate, that is a plain
+  absence: return fail, name the cover sheet and cell, and say what is missing. Do not return uncertain on the
+  ground that "a reader cannot confirm"; the cover was read and the statement is not there.
 
 ### test: dashboard_kpis
 Check Dashboard for core KPIs: revenue, EBITDA, cash, leverage,

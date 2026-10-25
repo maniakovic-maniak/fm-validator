@@ -372,3 +372,16 @@ Unproven until a paid run: whether the reviewer now passes T2-S5-004 on the ESO 
 ## Patch 21 - master-finding counts use Confirmed Findings only
 
 Fm-00050 logged "Master findings: P1 5 of 7" while the report showed 0 P1. `f.priority` is also set from severity on Queries, Critical Queries and Observations, and the master count included them. Per the framework those sit outside the P1/P2/P3 hierarchy. `master-findings.js` now ignores non-confirmed records, and the server.js log line counts confirmed findings only. Report content is unchanged. Test: `test-patch21.js`.
+
+## Patch 22 - Fm-00050 Uncertain procedures
+
+Fm-00050 ended with 19 Uncertain procedures and 3 mandatory procedures not concluded.
+
+| Change | Why |
+|---|---|
+| Tier `R9_scope_decision_regulated_network_ppp_economic_not_applicable`: T2-S10-362, 375, 452, 492, 776 | Each answered "the subject does not exist here" (notional net debt, no economic appraisal, no resettlement, standard price control). 362 and 375 were reported as Critical Queries with "None / No action required". T2-S10-336, 369 and 468 stay in scope. |
+| `validator-tier1.js` T1-006 reads the label from the first text cell in the first six columns; aliases "closing rav", "regulatory asset base" | The check only read column A. RIIO licence models put labels in column E, so a fatal-gate check never ran. Checked on four real models (ESO, ET, The Bend, Railways Toolkit): all were Uncertain before and Pass now; none produced a false failure. |
+| `skill.md` fast_principles; `checklist.json` T2-S1-002 `manual_only` false | The reviewer had concrete evidence (354 OFFSETs, nested formulas, a High-complexity formula) and still returned Uncertain. It is told to conclude. |
+| `skill.md` purpose_documented; `finding-class.json` adds T2-S1-001 to the regulated profile's governance cap | The ESO Cover has a title and version but no purpose or audience. That is a plain absence, rated P3 for this profile. |
+
+Not changed, awaiting a decision: T2-S13-008 (fatal; whether an external submission file was pasted over cannot be seen in the workbook) and T2-S10-468. Test: `test-patch22.js`.

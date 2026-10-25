@@ -12,7 +12,8 @@
   "profiles": {
     "regulated_network_utility": {
       "governanceImprovement": {
-        "ruleIds": ["T2-S9-001", "T2-S9-002", "T2-S13-001", "T2-S13-002", "T2-S13-009"],
+        "ruleIds": ["T2-S1-001",
+    "T2-S9-001", "T2-S9-002", "T2-S13-001", "T2-S13-002", "T2-S13-009"],
         "maxSeverity": "low",
         "note": "Rated as a governance improvement (P3) for a regulated-network model: release, version and issue governance is normally kept in a controlled record outside the workbook, and the workbook's own check rows count as controls. The absence is real; it is not evidence of a calculation error."
       },
