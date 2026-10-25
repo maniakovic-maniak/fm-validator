@@ -58,6 +58,25 @@ function mentionsKeyOutputArea(finding) {
   return KEY_OUTPUT_CATEGORY_HINTS.some(term => haystack.includes(term));
 }
 
+// Patch 12: a missing confidence is unknown, not 100. Tier 2 stores a missing confidence as 0 already. The one place
+// a missing value reached this file was Tier 1 (code checks that report no confidence). A Tier 1 check that reads a fact
+// straight off the file (a hidden row, a sheet name, an external link, a circular reference, a calc setting) is exact.
+// A Tier 1 check that decides by matching sheet or row NAMES (is there a sheet called Timing or Flags; is there a
+// negative closing cash row) can be wrong about a model that names things differently, so it is held at 65: below the
+// 80 a fatal/critical finding needs to be a P1, so it becomes a Critical Query, which still blocks reliance.
+// Anything else with no confidence is unknown and is never confirmed on that basis.
+const TIER1_NAME_MATCHING = new Set(['T1-002', 'T1-004', 'T1-005', 'T1-006', 'T1-008', 'T1-009', 'T1-012']);
+const TIER1_ASSUMED_NAME_MATCH = 65;
+function resolveConfidence(finding) {
+  if (typeof finding.confidence === 'number' && !Number.isNaN(finding.confidence)) return { confidence: finding.confidence, basis: null };
+  const id = String(finding.id || '');
+  const t1 = /^(T1-\d+)/.exec(id);
+  if (t1) return TIER1_NAME_MATCHING.has(t1[1])
+    ? { confidence: TIER1_ASSUMED_NAME_MATCH, basis: 'check-type: matches names' }
+    : { confidence: 100, basis: 'check-type: exact file fact' };
+  return { confidence: 0, basis: 'unknown' };
+}
+
 /** Classifies a single finding, returning its record_type. Respects an
  * already-set, explicit record_type unconditionally — this function
  * only fills in a default when a check hasn't opted to set one itself. */
@@ -111,7 +130,8 @@ function classifyRecordType(finding) {
   if (screening) return screening;
   if (isLowConfidenceWorkbookWideAbsence(finding)) return 'Observation';
 
-  const confidence = typeof finding.confidence === 'number' ? finding.confidence : 100;
+  const { confidence, basis } = resolveConfidence(finding);
+  if (basis) finding.confidence_basis = basis;
   const urgency = (finding.urgency || '').toLowerCase();
   const severity = (finding.severity || '').toLowerCase();
 
@@ -129,6 +149,9 @@ function classifyRecordType(finding) {
   // demote to an ordinary Query — per the memo, this stays a Critical
   // Query specifically because it COULD be material even though nothing
   // is confirmed yet.
+  // Unknown confidence on a fatal or critical finding: serious if true, unproven. It blocks reliance as a Critical Query.
+  if (basis === 'unknown' && (severity === 'fatal' || severity === 'critical')) return 'Critical Query';
+
   if (confidence < 60) {
     // A disclosure-type absence ("no deferred tax line", "no change log") on a medium or low severity rule is a
     // question about documentation, not a possible misstatement of a key output. An ESO run raised "no deferred tax
@@ -185,4 +208,4 @@ function assignRecordTypes(findings) {
   return findings;
 }
 
-module.exports = { classifyRecordType, assignRecordTypes, screeningRecordType };
+module.exports = { classifyRecordType, assignRecordTypes, screeningRecordType, resolveConfidence };

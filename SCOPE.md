@@ -255,3 +255,15 @@ Not in this patch: keeping several issues per rule through the chunk merge (Patc
 
 Known edge: `consolidateTier2Duplicates` keys on finding id, so a "same as T2-X" cross-reference on a rule that now has several results applies to the id, not one cell. Not changed.
 Not in this patch: asking later chunks for additional problems under an already-raised rule, and the prompt line asking for one object per distinct problem (both add Tier 2 cost; measure on a paid run first).
+
+## Patch 12: a missing confidence is unknown, not 100 (2026-10-25)
+
+| Change | Detail |
+|---|---|
+| Classifier | `classifyRecordType` no longer defaults a missing confidence to 100. Tier 2 already stores a missing value as 0, so it was unaffected. The one place it bit was Tier 1, whose code checks report no confidence. |
+| Tier 1 | Checks that read a fact off the file (errors, external links, circularity, hidden rows, sheet names, calc settings, white text, array formulas, data validation) are treated as exact (100). Checks that decide by matching sheet or row names (T1-002, 004, 005, 006, 008, 009, 012) are assumed 65. |
+| Effect | A fatal name-matching check, such as T1-009 (a sheet called Timing or Flags) that was a P1 on the ESO model, becomes a Critical Query. It still blocks reliance. A non-fatal name-matching check is unchanged. |
+| Anything else | A finding with no confidence and not Tier 1 is unknown: a Query, or a Critical Query when fatal or critical. In the 2 Oct ESO report every Tier 0 finding carried a confidence, so none were affected. |
+| Record | `confidence_basis` is set on the finding when the value was assumed. An explicit `record_type` set by a check is still respected. |
+
+Not changed: a detector that sets `record_type: Confirmed Finding` itself. That needs the detector list reviewed one by one.
