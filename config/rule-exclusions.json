@@ -57,6 +57,12 @@
           "decision": "Scope decision recorded 2026-10-19 on Mik Riazanov's go-ahead after Fm-00046: the reviewer answered each of these procedures by saying the subject matter does not exist in the workbook (IRR/NPV valuation range, construction-phase equity bridge, Public Sector Comparator, economic cost-benefit, tiered promote distributions, pumped storage). They are valuation, PPP and generation procedures with no equivalent in a licence allowed-revenue model. Two of them (T2-S7-005, T2-S10-353) were raised as Critical Queries at 30-40% confidence only because the topic words (return, equity) are on the key-output list. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
           "ruleIds": ["T2-S7-005", "T2-S10-353", "T2-S10-425", "T2-S10-451", "T2-S10-493", "T2-S10-709"]
         },
+        "R8_scope_decision_regulated_network_exploration_not_applicable": {
+          "enabled": true,
+          "allowFatal": false,
+          "decision": "Scope decision recorded 2026-10-25 on Mik Riazanov's go-ahead after Fm-00047: exploration picked these domain procedures and the reviewer answered each with 'Not applicable to this model type' (IFRIC 12 / PPP concession classification, technology-project maturity and downside, managed energy service agreements, retrofit avoided capex, generation PPA tariff reverse-solve, hydro run-of-river). They are conditional project or generation-asset procedures with no equivalent in a licence allowed-revenue model, and each ended as Uncertain, which does not count towards completion. T2-S10-336 (revenue control classification), T2-S10-508 (covenants) and T2-S10-369 (technical-to-financial bridge) stay in scope. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
+          "ruleIds": ["T2-S10-383", "T2-S10-532", "T2-S10-574", "T2-S10-665", "T2-S10-689", "T2-S10-700", "T2-S10-708"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]

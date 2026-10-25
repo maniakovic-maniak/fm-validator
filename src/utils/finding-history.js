@@ -77,6 +77,13 @@ const V_VERSION_RE = /\bv\d+\b/gi; // v1, v2 -- needs a real \b, checked after s
 // stage word immediately before the number avoids that.
 const STAGE_NUMBER_RE = /\b(ready|version|ver|rev|revision|release|draft|build)\s+\d+\b/gi;
 
+// Patch 15: the upload pipeline appends the upload time in epoch
+// milliseconds (12-13 digits) to the stored file name, e.g.
+// "...ESO_Licence_Model-1792921491941.xlsm". Left in, every upload of
+// the same model looked like a new model, so "since last run" always
+// said first run. A 12-13 digit run cannot be a version or a date.
+const EPOCH_SUFFIX_RE = /\b\d{12,13}\b/g;
+
 function normalizeModelIdentity(filename) {
   let s = String(filename || '');
   s = s.replace(/\.(xlsx|xlsm|xls|csv)$/i, ''); // drop the file extension first, so it never survives into the identity
@@ -92,6 +99,7 @@ function normalizeModelIdentity(filename) {
   // normalized to real spaces FIRST, so the boundary-based regexes
   // below then match against genuine word boundaries.
   s = s.replace(/[_\-.()]+/g, ' ');
+  s = s.replace(EPOCH_SUFFIX_RE, ' ');
   s = s.replace(DATE_PATTERN_RE, ' ');
   s = s.replace(V_VERSION_RE, ' ');
   s = s.replace(STAGE_NUMBER_RE, '$1');

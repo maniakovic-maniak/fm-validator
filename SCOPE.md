@@ -292,3 +292,16 @@ Diagnosis on the real ESO model. T2-S10-788 (iteration-state integrity) is corre
 | checklist.json | T2-S13-004 manual_only set to false: its test text is decidable from the VBA scan. |
 
 On ESO: 31 modules, 7 with real code, 24 stubs; macros set calculation and write values; none records a date or time. Unproven until a paid ESO run: whether the reviewer now concludes these two rules.
+
+## Patch 15: model identity and a further scope tier (2026-10-25)
+
+Findings from Fm-00047. (1) "Since last run" always said first run: the stored file name ends in the upload time in epoch milliseconds (12-13 digits), so every upload looked like a new model. (2) Exploration picked procedures the reviewer itself called not applicable to this model type; each ended Uncertain, which does not count, and completion fell to 80%.
+
+| Change | Detail |
+|---|---|
+| `normalizeModelIdentity` | Strips a 12-13 digit run. Version numbers and years are shorter and unaffected. History saved before this patch is keyed by the old identity, so the first run after deploy still shows as first run. |
+| Tier R8 (regulated_network_utility) | T2-S10-383, 532, 574, 665, 689, 700, 708: IFRIC 12, technology maturity and downside, managed energy service agreements, avoided capex, generation PPA tariff, hydro. All medium severity, not fatal-gate. A rule still counts whenever a run reaches a Pass or Issue verdict on it. |
+| Kept in scope | T2-S10-336 (revenue control classification), 508 (covenants), 369 (technical-to-financial bridge): the reviewer said "not present", not "not applicable". |
+
+Effect on Fm-00047: 126 planned becomes 119, completion about 85% (101 of 119) with no change to the definition.
+Not changed: the Critical Query cap for uncertain results on medium rules (T2-S10-336), left for later at Mik's instruction.
