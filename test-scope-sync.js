@@ -205,7 +205,7 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
   });
   test('validator-tier2.js applies the policy only when the reviewer got every formula, all static text and every named range in one chunk', () => {
     const src = fs.readFileSync(path.join(__dirname, 'src', 'validator-tier2.js'), 'utf8');
-    assert.ok(/complete: _absEnforce && useFullParse && fullParseCoverage === 'complete_workbook' && allDataSingleChunk/.test(src));
+    assert.ok(/_absComplete = _absEnforce && useFullParse && fullParseCoverage === 'complete_workbook' && allDataSingleChunk/.test(src));
     assert.strictEqual(scopeCfg.absencePolicy.enforce, true);
     assert.ok(/if \(dataChunks\.length > 1\) allDataSingleChunk = false;/.test(src));
   });

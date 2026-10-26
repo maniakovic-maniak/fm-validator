@@ -1,12 +1,12 @@
 const { annotateMasterFindings, countMasters } = require('./src/utils/master-findings');
 let fail=0; const ok=(c,m)=>{ if(!c){fail++;console.log('FAIL:',m);} else console.log('PASS:',m); };
 const fs=[
- {id:'a',priority:'P1',record_type:'Query'},
- {id:'b',priority:'P1',record_type:'Critical Query'},
- {id:'c',priority:'P2',record_type:'Confirmed Finding'},
- {id:'d',priority:'P3',record_type:'Confirmed Finding',related_group_id:'g'},
- {id:'e',priority:'P1',record_type:'Observation',related_group_id:'g'},
- {id:'f',priority:'P2'}
+ {id:'a',priority:'P1',severity:'critical',record_type:'Query'},
+ {id:'b',priority:'P1',severity:'critical',record_type:'Critical Query'},
+ {id:'c',priority:'P2',severity:'high',record_type:'Confirmed Finding'},
+ {id:'d',priority:'P3',severity:'low',record_type:'Confirmed Finding',related_group_id:'g'},
+ {id:'e',priority:'P1',severity:'critical',record_type:'Observation',related_group_id:'g'},
+ {id:'f',priority:'P2',severity:'high'}
 ];
 annotateMasterFindings(fs);
 const m=countMasters(fs);

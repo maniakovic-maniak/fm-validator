@@ -10,7 +10,7 @@ const { CHARS_PER_TOKEN: FORMULA_CHARS_PER_TOKEN } = require('./utils/formula-to
 const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-results');
 const { buildVisibilityRecord } = require('./utils/build-visibility-record');
 const { buildSheetFacts } = require('./utils/sheet-facts');
-const { applyAbsencePolicy } = require('./utils/absence-policy');
+const { applyAbsencePolicy, isConfirmedAbsence, keptUncertainReason } = require('./utils/absence-policy');
 const { buildVbaDigest } = require('./utils/vba-digest');
 const promptCache = require('./utils/prompt-cache');
 const dataChunker = require('./utils/data-chunker');
@@ -1206,7 +1206,20 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     try {
       const _ruleById = new Map([...(checklist.tier1 || []), ...(checklist.tier2 || [])].map(x => [x.id, x]));
       const _absEnforce = (() => { try { return (JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'rule-scope.json'), 'utf8')).absencePolicy || {}).enforce !== false; } catch (_) { return true; } })();
-      const _abs = applyAbsencePolicy(normalised, { complete: _absEnforce && useFullParse && fullParseCoverage === 'complete_workbook' && allDataSingleChunk, ruleById: _ruleById });
+      const _absComplete = _absEnforce && useFullParse && fullParseCoverage === 'complete_workbook' && allDataSingleChunk;
+      // Diagnostic only: say why absence-shaped uncertain answers were or were not converted.
+      try {
+        const _held = [];
+        if (!_absComplete) {
+          const _why = !_absEnforce ? 'policy switched off in rule-scope.json' : !useFullParse ? 'not a full-parse run' : fullParseCoverage !== 'complete_workbook' ? `coverage is ${fullParseCoverage}` : 'the workbook was sent in more than one data chunk';
+          const _n = normalised.filter(r => isConfirmedAbsence(r)).map(r => r.id);
+          if (_n.length) console.log(`   ℹ️  Absence policy not applied (${_why}): ${_n.length} uncertain answer(s) read as plain absences and stay uncertain: ${_n.join(', ')}`);
+        } else {
+          for (const r of normalised) { const why = keptUncertainReason(r); if (why) _held.push(`${r.id} (${why})`); }
+          if (_held.length) console.log(`   ℹ️  Absence policy: ${_held.length} absence-shaped uncertain answer(s) kept uncertain: ${_held.join(', ')}`);
+        }
+      } catch (_) { /* diagnostic only */ }
+      const _abs = applyAbsencePolicy(normalised, { complete: _absComplete, ruleById: _ruleById });
       if (_abs.converted.length) {
         console.log(`   ℹ️  Absence policy: ${_abs.converted.length} "uncertain" answer(s) were plain absences in a complete workbook and are recorded as "Not present in the workbook": ${_abs.converted.join(', ')}`);
       }

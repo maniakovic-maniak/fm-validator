@@ -465,11 +465,6 @@
             <span class="check-label muted">Building validation report…</span>
             <span class="badge badge-run">Waiting</span>
           </div>
-          <div class="check-row" id="step-drive">
-            <i class="ti ti-clock check-icon"></i>
-            <span class="check-label muted">Uploading report and sending notification…</span>
-            <span class="badge badge-run">Waiting</span>
-          </div>
         </div>
       </div>
     </div>
@@ -515,26 +510,15 @@
           <i class="ti ti-file-spreadsheet report-icon"></i>
           <div>
             <div class="report-name" id="report-filename">—</div>
-            <div class="report-meta">Generated · Validation Report tab included</div>
-          </div>
-          <div class="report-actions">
-            <a class="btn-secondary btn-sm" id="download-btn" href="#" style="text-decoration:none">
-              <i class="ti ti-download" style="font-size:14px"></i>Download
-            </a>
+            <div class="report-meta">Generated · you will receive the report by email once it has been reviewed</div>
           </div>
         </div>
 
 
         <div class="actions-row">
-          <a class="btn-primary" id="download-validated-btn" href="#" style="text-decoration:none;display:none">
-            <i class="ti ti-download" style="font-size:15px"></i>Download validated file
-          </a>
           <button class="btn-secondary" onclick="resetToUpload()">
             <i class="ti ti-refresh" style="font-size:15px"></i>Resubmit after fixing
           </button>
-          <a class="btn-secondary" id="open-drive-btn" href="#" target="_blank" style="text-decoration:none;display:none">
-            <i class="ti ti-external-link" style="font-size:15px"></i>Open in Drive
-          </a>
         </div>
       </div>
     </div>
@@ -702,7 +686,7 @@
   function resetToUpload() { clearFile(); showScreen('upload'); }
 
   // ── Progress animation ────────────────────────────────────────────────────
-  const stepIds    = ['step-pre','step-t1','step-t2','step-fix','step-drive'];
+  const stepIds    = ['step-pre','step-t1','step-t2','step-fix'];
   const stepLabels = [
     'Pre-validation gate',
     'Tier 1 — structural checks',
@@ -884,22 +868,9 @@
     riskEl.style.fontSize = '14px';
 
     // Download card
-    if (result.driveLink || result.outputName) {
+    if (result.outputName || result.reportName) {
       document.getElementById('report-download-card').style.display = 'flex';
-      document.getElementById('report-filename').textContent = result.outputName || 'VALIDATED.xlsx';
-      const fileIdMatch = result.driveLink && result.driveLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      const downloadUrl = fileIdMatch
-        ? `https://drive.google.com/uc?export=download&id=${fileIdMatch[1]}`
-        : result.driveLink || '#';
-      document.getElementById('download-btn').href = downloadUrl;
-      // Main download CTA
-      const dlBtn = document.getElementById('download-validated-btn');
-      dlBtn.href = downloadUrl;
-      dlBtn.style.display = 'inline-flex';
-      if (result.driveLink) {
-        document.getElementById('open-drive-btn').href = result.driveLink;
-        document.getElementById('open-drive-btn').style.display = 'inline-flex';
-      }
+      document.getElementById('report-filename').textContent = result.outputName || result.reportName;
     }
 
     showScreen('report');

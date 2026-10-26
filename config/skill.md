@@ -1201,6 +1201,19 @@ Look for roll-forward rows for major balance sheet accounts: PP&E, debt, retaine
 Check if opening + movements = closing for visible periods.
 If roll-forwards are visible and appear to close: pass. If gaps or discontinuities visible: fail.
 
+### test: opening_forecast_equals_closing_actual
+Find the first forecast period's opening balance for each balance sheet
+account and compare it with the last actual period's closing balance.
+- Use the formula link first: if the opening cell is a direct reference to
+  the prior closing cell (for example opening = prior-column closing), it
+  equals it by construction → pass for that account.
+- Otherwise compare the stored values for the two cells and quote both.
+- A difference explained by a transfer or adjustment shown on its own row
+  is disclosed, not a break → pass, naming the row.
+- An unexplained difference → fail, quoting the accounts, cells and amounts.
+- Name the accounts you compared. If a balance sheet is not in the workbook
+  → not present in the workbook, fail.
+
 ### test: opening_equals_prior_closing
 Check each balance sheet account: does the opening balance in period N equal the closing balance in period N-1?
 If discontinuity visible in any material account: fail with sheet, account row, and period.
@@ -1876,9 +1889,8 @@ requires).
     index or unit factor must not apply the same factor again;
   - a ratio of two figures in the same units (cover, gearing, margin) is
     unit-free and must not be divided or multiplied by a price index.
-  Quote the cell, the factor and the inputs that already carry it. If
-  Tier 0 has reported "scaling factor applied twice" (T0-DOUBLESCALE),
-  use it as the evidence and conclude fail; do not return uncertain.
+  Quote the cell, the factor and the inputs that already carry it. If the
+  factor is applied twice, conclude fail; do not return uncertain.
 - "No mismatch found in the area checked" is not a pass. Say which rows
   you compared. If you did not compare a row, name it as not compared.
 

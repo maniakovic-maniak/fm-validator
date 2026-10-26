@@ -414,3 +414,15 @@ Decision (Mik Riazanov, 2026-10-26): treat it as work needing source documents o
 | `test-scope-sync.js` | Expected category counts now include tiers that record `evidence_required`. |
 
 Any other fatal rule left Uncertain still holds a run. Test: `test-patch24.js`.
+
+## Patch 25 - priority counts follow the report, Google Drive step removed
+
+| Change | Why |
+|---|---|
+| `master-findings.js` takes the priority from record type and severity (fatal/critical P1, high/medium P2, else P3), the same rule as `build_report.py priority()` | Fm-00051 logged "P1 4 of 5" while the report showed 0 P1: the log used the reviewer's own `priority` label. |
+| `config/skill.md`: the sentence telling the reviewer to rely on T0-DOUBLESCALE removed | Tier 2 runs before Tier 0 findings exist, so the reviewer could never see it. |
+| `config/skill.md`: new section `opening_forecast_equals_closing_actual` (T2-S2-009) | The rule had no method, so it returned Uncertain although the opening is a direct link to the prior closing. |
+| `validator-tier2.js`: log line when absence-shaped answers stay uncertain, and why (not a complete single-chunk run, limitation wording, not-applicable wording) | T2-S12-009 and T2-S11-004 were converted in Fm-00050 but not in Fm-00051; the log could not say why. |
+| Google Drive removed: no upload, no Drive link, no Drive retention sweep, `src/writer.js` deleted | Reports are stored on the server. The built report stays in `processed/` (no longer deleted after the run) and is swept after `REPORT_RETENTION_DAYS` (default 30), not 48h. The owner notification no longer has a download button; the client email already attaches the file from the server. The browser page no longer shows download or Open in Drive. |
+
+`index.js` still reads its input from Drive (legacy CLI), so `src/auth.js` and the Google packages stay. Test: `test-patch25.js`.

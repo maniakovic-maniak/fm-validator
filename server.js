@@ -60,7 +60,7 @@ const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes } = require('./src/utils/record-type-classifier');
 const { linkRelatedFindings } = require('./src/utils/related-findings');
-const { annotateMasterFindings, countMasters } = require('./src/utils/master-findings');
+const { annotateMasterFindings, countMasters, priorityOf } = require('./src/utils/master-findings');
 const { applyFindingClasses, groupSameRemediation } = require('./src/utils/finding-class');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
@@ -112,7 +112,6 @@ const { buildScopePlan, summarizeScopeForReport, computeCompletion, plannedRules
 const { checkDuplicateCalculationLogic: _checkDupLogicEarly } = require('./src/utils/duplicate-calculation-logic-check');
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
-const { uploadBothFiles }                        = require('./src/writer');
 const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail, sendOrderStatusUpdateEmail } = require('./src/notifier');
 const { createOrder, getOrder, updateOrder }      = require('./src/utils/order-store');
 const { createDemoRequest, listDemoRequests }     = require('./src/utils/demo-store');
@@ -120,7 +119,6 @@ const { chargeViaEway }                           = require('./src/utils/eway-pa
 
 const app       = express();
 const PORT      = process.env.PORT || 3000;
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 // Ensure required directories exist on startup
 ['uploads', 'processed'].forEach(dir => {
@@ -624,17 +622,7 @@ app.get('/api/download-report/:orderId', requireApiKey, (req, res) => {
   if (fs.existsSync(reportPath)) {
     return res.download(reportPath, safeFilename);
   }
-  // Local disk is a working directory only - the pipeline deliberately
-  // removes the local copy once it's safely delivered to Drive, which
-  // is the real, retained artefact. Fall back to that link instead of
-  // a dead-end 404. Returned as JSON, not a raw HTTP redirect - the
-  // admin's own fetch() proxy would otherwise follow it automatically
-  // and try to stream Drive's HTML preview page as if it were the
-  // binary file, which is not what a download button should do.
-  if (order.driveWebViewLink) {
-    return res.status(200).json({ driveWebViewLink: order.driveWebViewLink });
-  }
-  return res.status(404).json({ error: 'Report file no longer exists on disk, and no Drive link was recorded for this order.' });
+  return res.status(404).json({ error: 'Report file no longer exists on disk (local reports are removed after the 30-day retention period).' });
 });
 
 app.post('/api/send-report-email/:orderId', requireApiKey, async (req, res) => {
@@ -3284,7 +3272,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     try {
       annotateMasterFindings(allFlagged);
       const _m = countMasters(allFlagged);
-      const _c = { P1: 0, P2: 0, P3: 0 }; allFlagged.forEach(f => { if ((f.record_type || 'Confirmed Finding') === 'Confirmed Finding' && _c[f.priority] !== undefined) _c[f.priority]++; });
+      const _c = { P1: 0, P2: 0, P3: 0 }; allFlagged.forEach(f => { const _p = priorityOf(f); if (_p) _c[_p]++; });
       console.log(`   \u2139\ufe0f  Master findings (one per root cause): P1 ${_m.P1} of ${_c.P1}, P2 ${_m.P2} of ${_c.P2}, P3 ${_m.P3} of ${_c.P3}`);
     } catch (e) { console.error('   \u26a0\ufe0f  Master-finding step failed:', e.message); }
 
@@ -3423,29 +3411,23 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       tier2Evidence:     t2Results._evidence || null
     });
 
-    let driveResult = null;
+    // Reports are stored on the server (processed/, 30-day local retention)
+    // and reach the client by email attachment after review - there is no
+    // external upload step.
     try {
-      const { reportResult } = await uploadBothFiles(reportPath, reportName, FOLDER_ID);
-      driveResult = reportResult;
       await sendNotification({
         originalName,
-        outputName:     driveResult.fileName,
-        webViewLink:    driveResult.webViewLink,
+        outputName:     reportName,
         totalIssues:    allFlagged.length,
         autoFixed:      0,
         needsAttention: allFlagged.length,
         modelType,
         modelIndustry:  modelSummary.industry
       });
-      // Local disk is a working directory only — the Drive copy (with its
-      // own retention sweep) is the retained artefact. Remove the local
-      // copy now that delivery succeeded; keep it on failure so nothing
-      // is silently lost.
-      fs.unlink(reportPath, () => {});
       logAuditEvent({ event: 'report_delivered', originalName, reportName, ip: clientIp, issueCount: allFlagged.length, runLog: runLog.filename });
-    } catch (driveErr) {
-      console.error('   ❌ Drive/notify error:', driveErr.message);
-      logAuditEvent({ event: 'drive_upload_failed', originalName, reportName, ip: clientIp, error: driveErr.message, runLog: runLog.filename });
+    } catch (notifyErr) {
+      console.error('   ❌ Notification error:', notifyErr.message);
+      logAuditEvent({ event: 'report_notify_failed', originalName, reportName, ip: clientIp, error: notifyErr.message, runLog: runLog.filename });
     }
     runLog.stop();
     if (slot) slot.release();
@@ -3488,7 +3470,6 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       const completedOrder = updateOrder(req.body.orderId, {
         runLogFilename: runLog.filename,
         reportName,
-        driveWebViewLink: driveResult ? driveResult.webViewLink : null,
         // Genuinely captured from this real run's own curated-route
         // selection - never recomputed later, since keySheets itself
         // comes from an earlier, non-deterministic LLM call
@@ -3561,7 +3542,6 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         tier0Stats: tier0.stats,
         duration
       },
-      driveLink:  driveResult ? driveResult.webViewLink : null,
       runLogFilename: runLog.filename,
       reportName,
       completion: completion.counts,
@@ -3603,9 +3583,9 @@ app.use((req, res) => res.status(404).json({ status: 'error', message: 'Not foun
 // ── Retention sweep — hourly, plus once on startup ─────────────────────────
 const uploadsDir   = path.join(__dirname, 'uploads');
 const processedDir = path.join(__dirname, 'processed');
-runRetentionSweep({ uploadsDir, processedDir, folderId: FOLDER_ID }).catch(e => console.error('Startup retention sweep failed:', e.message));
+runRetentionSweep({ uploadsDir, processedDir }).catch(e => console.error('Startup retention sweep failed:', e.message));
 cron.schedule('0 * * * *', () => {
-  runRetentionSweep({ uploadsDir, processedDir, folderId: FOLDER_ID }).catch(e => console.error('Retention sweep failed:', e.message));
+  runRetentionSweep({ uploadsDir, processedDir }).catch(e => console.error('Retention sweep failed:', e.message));
 });
 
 app.listen(PORT, () => console.log(`FM Validator running on http://localhost:${PORT}`));

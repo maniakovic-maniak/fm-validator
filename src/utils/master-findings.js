@@ -12,11 +12,14 @@ const { cellsOf } = require('./related-findings');
 
 const RANK = { P1: 1, P2: 2, P3: 3 };
 // Only a Confirmed Finding has a P1/P2/P3 (framework: Query, Critical Query and Observation sit outside the hierarchy).
-// f.priority is also set on those records from severity, so it is ignored for them here.
+// The priority comes from severity, exactly as build_report.py priority() does: fatal/critical -> P1, high/medium -> P2,
+// anything else -> P3. f.priority is the reviewer's own label and does not always agree with that rule, so it is not used.
 function prio(f) {
   if ((f.record_type || 'Confirmed Finding') !== 'Confirmed Finding') return null;
-  const p = String(f.priority || '');
-  return RANK[p] ? p : null;
+  const sev = String(f.severity || '').toLowerCase();
+  if (sev === 'fatal' || sev === 'critical') return 'P1';
+  if (sev === 'high' || sev === 'medium') return 'P2';
+  return 'P3';
 }
 
 function annotateMasterFindings(findings) {
@@ -55,4 +58,4 @@ function countMasters(findings) {
   return { P1: seen.P1.size, P2: seen.P2.size, P3: seen.P3.size };
 }
 
-module.exports = { annotateMasterFindings, countMasters };
+module.exports = { annotateMasterFindings, countMasters, priorityOf: prio };

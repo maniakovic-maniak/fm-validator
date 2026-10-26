@@ -45,6 +45,18 @@ function isConfirmedAbsence(r) {
   return true;
 }
 
+// Why an uncertain answer that reads like an absence was NOT converted (null when it was not absence-shaped at all,
+// or when it would be converted). Used for the run log so a missed conversion can be explained from the log alone.
+function keptUncertainReason(r) {
+  if (!r || r.status !== 'uncertain') return null;
+  const text = textOf(r);
+  if (!STRICT_START_RE.test(text) || !isAbsenceFinding(text)) return null;
+  if (/^\s*not present in the workbook/i.test(text)) return null;
+  if (LIMITATION_RE.test(text)) return 'reviewer limitation wording';
+  if (NOT_APPLICABLE_RE.test(contextOf(r))) return 'not-applicable wording';
+  return null;
+}
+
 // Priority for a finding that rests on absence alone (no wrong number was seen). The reviewer's own P1-P3 is kept;
 // "Query" style or missing priorities become P3, or P2 where the rule is critical or fatal.
 function priorityFor(r, rule) {
@@ -77,4 +89,4 @@ function applyAbsencePolicy(results, { complete = false, ruleById = new Map() } 
   return { applied: true, converted };
 }
 
-module.exports = { applyAbsencePolicy, isConfirmedAbsence, PREFIX };
+module.exports = { applyAbsencePolicy, isConfirmedAbsence, keptUncertainReason, PREFIX };

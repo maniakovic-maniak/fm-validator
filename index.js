@@ -90,7 +90,6 @@ const { runTier0 }                                 = require('./src/validator-ti
 const { shouldUseFullParseRoute }                  = require('./src/utils/formula-token-estimator');
 const { runTier2, resolveDeepAccountingSheets }    = require('./src/validator-tier2');
 const { buildReportFile }                          = require('./src/report-tab');
-const { uploadBothFiles }                          = require('./src/writer');
 const { sendNotification }                         = require('./src/notifier');
 const path = require('path');
 const fs   = require('fs');
@@ -99,7 +98,6 @@ const { runRetentionSweep } = require('./src/utils/cleanup');
 const { startRunLog }      = require('./src/utils/run-logger');
 
 const FILE_ID   = process.argv[2];
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 if (!FILE_ID) {
   console.error('Usage: node index.js <google-drive-file-id>');
@@ -2941,13 +2939,11 @@ async function run() {
   });
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────
-  console.log('\n[6/6] Uploading report and notifying...');
-  const { reportResult } = await uploadBothFiles(reportPath, reportName, FOLDER_ID);
+  console.log('\n[6/6] Saving report and notifying...');
 
   await sendNotification({
     originalName,
     outputName:     reportName,
-    webViewLink:    reportResult.webViewLink,
     totalIssues:    allFlagged.length,
     autoFixed:      0,
     needsAttention: allFlagged.length,
@@ -2955,9 +2951,6 @@ async function run() {
     modelIndustry:  modelSummary.industry
   });
 
-  // Local disk is a working directory only — Drive (with its own retention
-  // sweep) is the retained artefact.
-  fs.unlink(reportPath, () => {});
   logAuditEvent({ event: 'report_delivered', originalName, reportName, source: 'cli', issueCount: allFlagged.length, runLog: runLog.filename });
   runLog.stop();
 
@@ -2965,8 +2958,7 @@ async function run() {
   // hourly cron isn't running in this process.
   await runRetentionSweep({
     uploadsDir:   path.join(process.cwd(), 'uploads'),
-    processedDir: path.join(process.cwd(), 'processed'),
-    folderId:     FOLDER_ID
+    processedDir: path.join(process.cwd(), 'processed')
   }).catch(e => console.error('Retention sweep failed:', e.message));
 
   console.log('\n─────────────────────────────────────');

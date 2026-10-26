@@ -31,13 +31,12 @@ async function sendNotification(outcome) {
   // configured — logs a clear, one-line reason rather than an
   // unhandled exception with a stack trace pointing into node_modules.
   if (!process.env.RESEND_API_KEY) {
-    console.log('   (Skipping email notification — RESEND_API_KEY not set in .env. The report itself was still built and uploaded normally.)');
+    console.log('   (Skipping email notification — RESEND_API_KEY not set in .env. The report itself was still built and saved normally.)');
     return;
   }
   const {
     originalName,
     outputName,
-    webViewLink,
     totalIssues,
     needsAttention
   } = outcome;
@@ -57,12 +56,6 @@ async function sendNotification(outcome) {
   const attentionBlock = needsAttention > 0
     ? `<p style="color:#F5A623"><strong>⚠️ ${needsAttention} item${needsAttention > 1 ? 's' : ''} flagged for your review — nothing in your file has been changed.</strong><br>Open the Processed Report tab in the file for exact cell locations and suggested actions.</p>`
     : `<p style="color:#5DCAA5"><strong>✅ No issues were flagged. Your file has not been modified.</strong></p>`;
-
-  let downloadUrl = webViewLink;
-  const fileIdMatch = webViewLink && webViewLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if (fileIdMatch) {
-    downloadUrl = `https://drive.google.com/uc?export=download&id=${fileIdMatch[1]}`;
-  }
 
   const html = `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -138,7 +131,7 @@ async function sendNotification(outcome) {
               <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;"><strong class="text-primary" style="color:#eef1f8;">Needs attention:</strong> ${needsAttention}</p>
               <hr class="border-hair" style="border:none;border-top:1px solid rgba(233,237,245,0.14);margin:18px 0">
               <div style="font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6;">${attentionBlock}</div>
-              <a href="${downloadUrl}" style="display:inline-block;margin-top:20px;background-color:#5DCAA5;color:#05070d;padding:12px 24px;border-radius:6px;text-decoration:none;font-family: Arial, Helvetica, sans-serif;font-weight:bold;font-size:14px;">Download Processed File</a>
+              <p class="text-secondary" style="margin:20px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size:14px; line-height:1.6; color:#a9b1c4;">The report is stored on the server. Download it from the admin dashboard.</p>
             </td>
           </tr>
         </table>

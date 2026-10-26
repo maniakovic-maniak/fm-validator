@@ -113,7 +113,7 @@ function wbWith(rows, sheet = 'OutputSummary') {
   await test('label_matches_formula_behaviour tells the reviewer to check units and not to pass on "no mismatch found"', () => {
     const s = fs.readFileSync(path.join(__dirname, 'config', 'skill.md'), 'utf8'); const i = s.indexOf('### test: label_matches_formula_behaviour');
     const sec = s.slice(i, s.indexOf('### test:', i + 10));
-    assert.ok(/already divided/.test(sec) && /T0-DOUBLESCALE/.test(sec) && /not a pass/.test(sec));
+    assert.ok(/already divided/.test(sec) && /not a pass/.test(sec));
   });
   console.log(`\n${passed} passed`);
 })();

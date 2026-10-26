@@ -33,7 +33,7 @@ function run() {
       try {
         await sendNotification({
           originalName: 'test.xlsx', outputName: 'test_VALIDATED.xlsx',
-          webViewLink: 'https://drive.google.com/x', totalIssues: 5, needsAttention: 3,
+          totalIssues: 5, needsAttention: 3,
         });
         check('sendNotification() with no key configured gracefully skips instead of throwing', true);
       } catch (e) {
@@ -80,7 +80,7 @@ function run() {
     process.env.RESEND_API_KEY = 're_fake_test_key';
     const baseArgs = {
       originalName: 'test.xlsx', outputName: 'test_VALIDATED.xlsx',
-      webViewLink: 'https://drive.google.com/x', totalIssues: 5, needsAttention: 3,
+      totalIssues: 5, needsAttention: 3,
     };
 
     // Case A: Resend throws (a genuine network/API-level failure) —

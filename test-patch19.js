@@ -10,7 +10,8 @@ const { annotateMasterFindings, countMasters } = require('./src/utils/master-fin
 const { linkRelatedFindings } = require('./src/utils/related-findings');
 let passed = 0;
 function test(name, fn) { try { fn(); passed++; console.log(`  ok  ${name}`); } catch (e) { console.error(`  FAIL ${name}\n       ${e.message}`); process.exitCode = 1; } }
-const F = (id, priority, extra) => Object.assign({ id, priority, sheet: 'S', cell: 'A1', condition: '' }, extra);
+const SEV = { P1: 'critical', P2: 'high', P3: 'low' };
+const F = (id, priority, extra) => Object.assign({ id, priority, severity: SEV[priority], sheet: 'S', cell: 'A1', condition: '' }, extra);
 
 console.log('Master findings');
 test('findings in one group share a master id, the best priority and a combined occurrence count', () => {
