@@ -40,7 +40,8 @@ test('it is listed by name with the work needing source documents in the report 
   const s = scope.summarizeScopeForReport(eng.record, p, scopeCfg);
   const item = s.evidenceRequired.find(x => x.id === 'T2-S13-008');
   assert.ok(item && /tied to audited model/i.test(item.label), JSON.stringify(s.evidenceRequired.slice(-2)));
-  assert.strictEqual(s.evidenceRequired.length, scopeCfg.evidenceRequired.ruleIds.length + 1);
+  const tierEv = Object.values(exclCfg.profiles.find(x => x.id === 'regulated_network_utility').tiers).filter(t => t && t.enabled && t.category === 'evidence_required').reduce((n, t) => n + t.ruleIds.length, 0);
+  assert.strictEqual(s.evidenceRequired.length, scopeCfg.evidenceRequired.ruleIds.length + tierEv);
 });
 test('an unrelated model keeps T2-S13-008 in scope', () => {
   const p = plan('toll road concession project finance');

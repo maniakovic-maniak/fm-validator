@@ -285,6 +285,12 @@ explicitly modelled as credit balances.
   row for a balance this test names, say which balance you could not see and
   return uncertain. Do not say that no values are available: the digest is
   the values you were given.
+- If the model has none of the balances this test names (for example no
+  inventory, receivables or payables because the model type does not carry
+  them), that is not uncertainty. Test the balances the model does have
+  (cash, debt, fixed assets, equity, net debt) and conclude on those: pass
+  when none is impossible, fail when one is. Say in one sentence which
+  balances the model does not carry.
 
 ### test: tax_reconciliation
 Calculate effective tax rate from visible NPBT, tax expense, and NPAT rows.

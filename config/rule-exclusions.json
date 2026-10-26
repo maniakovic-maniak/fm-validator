@@ -76,6 +76,19 @@
           "decision": "Scope decision recorded 2026-10-26 on Mik Riazanov's go-ahead after Fm-00050. T2-S13-008 (outputs sent to lenders, investors or management are tied to the audited model, with no manual overwriting) asks whether an external submission file has had values pasted over formulas. That file is not in the workbook, and the reviewer correctly found the workbook's own LiveResults and SavedResults snapshots are macro-written by design. The workbook alone cannot settle it, so it is listed as work needing source documents or live testing (the submitted file and the model owner's confirmation) and no longer holds the run. It is a fatal-gate rule: this is an explicit decision, not a default.",
           "ruleIds": ["T2-S13-008"]
         },
+        "R11_scope_decision_regulated_network_owner_evidence": {
+          "enabled": true,
+          "allowFatal": false,
+          "category": "evidence_required",
+          "decision": "Scope decision recorded 2026-10-26 on Mik Riazanov's go-ahead after Fm-00052. T2-S1-007 (every key assumption has reasonable support) ends Uncertain because the cost of capital, gearing and inflation inputs in NGESO (Scenarios) rows 137-230 carry no source reference, and the Ofgem determination that supports them is not in the workbook. T2-S12-009 (off-model adjustments and judgemental overlays are listed) ends Uncertain because only the model owner can say whether any overlay is applied outside the workbook. Neither can be settled from the workbook alone, so both are listed as work needing source documents or the owner's confirmation and no longer hold the run. Both are critical, not fatal, so allowFatal is not needed.",
+          "ruleIds": ["T2-S1-007", "T2-S12-009"]
+        },
+        "R12_scope_decision_regulated_network_domain_not_applicable": {
+          "enabled": true,
+          "allowFatal": false,
+          "decision": "Scope decision recorded 2026-10-26 on Mik Riazanov's go-ahead after Fm-00052. Four medium-severity domain procedures ended Uncertain with the reviewer stating the subject does not exist in a licence allowed-revenue model (no availability payments, no concession handback, no investor-IRR distress case, no Sharia-compliant financing); the Partner Review independently classed all four as outside agreed scope. T2-S10-369 (technical model to financial bridge) stays in scope. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
+          "ruleIds": ["T2-S10-287", "T2-S10-388", "T2-S10-554", "T2-S10-586"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]

@@ -50,6 +50,7 @@ const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distribu
 const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check');
 const { checkNestedSubtotals } = require('./src/utils/nested-subtotal-check');
 const { checkDoubleScaling } = require('./src/utils/double-scaling-check');
+const { scanSumRanges } = require('./src/utils/sum-range-scan');
 const { checkPlaceholderText } = require('./src/utils/placeholder-text-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
@@ -2057,6 +2058,54 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     });
   }
 
+  // ── SUM / SUMIFS range scan: every simple range, grouped by row, with the odd one out named ──
+  // The reviewer sees a sample, so it cannot say whether totals cover the whole time series. This reads every
+  // range from the formulas. It reports what the ranges look like (fixed, running total, rolling) so a reader can
+  // see that an expanding range such as a cumulative allowance was examined, and flags a period whose range
+  // differs from the rest of its row. It cannot see a range that is wrong in every period.
+  const sumRangeScan = (() => { try { return scanSumRanges(parsed._raw); }
+    catch (e) { console.error('   ⚠️  SUM-range scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[], runningRows:[], kinds:{} }; } })();
+  if (sumRangeScan.applicable) {
+    console.log(`   ℹ️  SUM-range scan: ${sumRangeScan.cellsScanned} SUM/SUMIFS cell(s) in ${sumRangeScan.rowsScanned} row(s) read - ${sumRangeScan.kinds.running} running-total row(s), ${sumRangeScan.kinds.rolling} rolling, ${sumRangeScan.kinds.fixed} fixed, ${sumRangeScan.flaggedCount} row(s) with a period that differs`);
+  }
+  if (sumRangeScan.applicable && sumRangeScan.findings.length > 0) {
+    const _sr = sumRangeScan.findings;
+    const _srSample = _sr.slice(0, 4).map(f => `${f.sheet}!${f.cell} (${f.different.split(' ')[1]} where the rest of the row uses ${f.usual.split(' ')[1]}${f.instanceCount > 1 ? `; ${f.instanceCount} periods` : ''})`).join('; ');
+    allFlagged.push({
+      id: 'T0-SUMRANGE-002',
+      label: `${_sr.length} row(s) have a SUM range that differs in one period from the rest of the row`,
+      severity: 'medium', status: 'fail',
+      sheet: _sr[0].sheet, cell: _sr[0].cell, category: 'Structure',
+      condition: `${_srSample}${_sr.length > 4 ? ' and others' : ''}. ${sumRangeScan.note}`,
+      reason: `${_sr.length} row(s) where a period's total points at different cells from its neighbours`,
+      corrective_action: 'Open each cell and confirm the different range is intended. If not, copy the neighbouring period\'s formula across so every period totals the same rows or columns.',
+      workstream: 'Structure', issue_type: 'SUM range differs from its row',
+      model_risk: 'A total that covers one row too few or points at the wrong column in a single period understates or misstates that period while every other period looks right.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'SUM range inconsistent within a row', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 55, record_type: 'Query',
+      ...buildRootCauseFields('T0-SUMRANGE-002', sumRangeScan, { commonRemediationAction: 'Confirm the range or copy the neighbouring formula across.' })
+    });
+  }
+  if (sumRangeScan.applicable && sumRangeScan.runningRows.length > 0) {
+    const _rr = sumRangeScan.runningRows;
+    const _rrSample = _rr.slice(0, 6).map(r => `${r.sheet} row ${r.row} (${r.sample})`).join('; ');
+    allFlagged.push({
+      id: 'T0-SUMRANGE-001',
+      label: `${sumRangeScan.kinds.running} row(s) use an expanding SUM range that adds up every earlier period`,
+      severity: 'low', status: 'fail',
+      sheet: _rr[0].sheet, cell: 'A' + _rr[0].row, category: 'Structure',
+      condition: `${_rrSample}${_rr.length > 6 ? ' and others' : ''}. Each of these starts at a fixed column and ends at the current period, so the first period sums one cell and later periods sum more. That is correct for a cumulative figure (for example an allowance worked out on cumulative cost) and wrong for a one-period figure. ${sumRangeScan.cellsScanned} SUM/SUMIFS cell(s) in ${sumRangeScan.rowsScanned} row(s) were read; ${sumRangeScan.flaggedCount} row(s) have a period that differs. ${sumRangeScan.note}`,
+      reason: `${sumRangeScan.kinds.running} expanding-range row(s) listed for a reader to confirm each is a cumulative figure`,
+      corrective_action: 'For each listed row, confirm the label or the calculation it feeds is cumulative. No change is needed where it is.',
+      workstream: 'Structure', issue_type: 'Expanding SUM range',
+      model_risk: 'An expanding range that was meant to be a one-period total grows with time and overstates later periods.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+      root_cause: 'Expanding SUM range', escalation_flag: false,
+      urgency: 'Next review cycle', confidence: 70, record_type: 'Observation'
+    });
+  }
+
   // ── Placeholder note standing in for a missing calculation ──
   const placeholderTextCheck = (() => { try { return checkPlaceholderText(parsed._raw); }
     catch (e) { console.error('   ⚠️  Placeholder-text check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
@@ -3319,8 +3368,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
 
     // ── Step 6: Build report + upload + notify ─────────────────────────
-    console.log('[6/6] Building report, uploading, notifying...');
-    setProgress(runId, 6, 'Building report, uploading, notifying');
+    console.log('[6/6] Building report, notifying...');
+    setProgress(runId, 6, 'Building report, notifying');
     const baseName   = path.parse(originalName).name;
     const reportName = `${baseName}_PROCESSED.xlsx`;
     const reportPath = path.join(__dirname, 'processed', reportName);

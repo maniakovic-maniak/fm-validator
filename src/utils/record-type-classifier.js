@@ -89,7 +89,7 @@ function resolveConfidence(finding) {
 const SCREENING_RECORD_TYPES = [
   ['T0-FMLPATTERN', 'Query'], ['T0-COLPATTERN', 'Query'], ['T0-REGIMECHANGE', 'Query'],
   ['T0-MIXEDREF', 'Observation'], ['T0-DAISYCHAIN', 'Observation'], ['T0-NESTEDIF', 'Observation'],
-  ['T0-COMPLEXFML', 'Observation'], ['T0-HIDDEN-002', 'Observation'],
+  ['T0-COMPLEXFML', 'Observation'], ['T0-HIDDEN-002', 'Observation'], ['T0-LINK-002', 'Observation'],
 ];
 
 function screeningRecordType(id) {

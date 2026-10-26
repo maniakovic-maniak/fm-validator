@@ -426,3 +426,18 @@ Any other fatal rule left Uncertain still holds a run. Test: `test-patch24.js`.
 | Google Drive removed: no upload, no Drive link, no Drive retention sweep, `src/writer.js` deleted | Reports are stored on the server. The built report stays in `processed/` (no longer deleted after the run) and is swept after `REPORT_RETENTION_DAYS` (default 30), not 48h. The owner notification no longer has a download button; the client email already attaches the file from the server. The browser page no longer shows download or Open in Drive. |
 
 `index.js` still reads its input from Drive (legacy CLI), so `src/auth.js` and the Google packages stay. Test: `test-patch25.js`.
+
+## Patch 26 - evidence tier for two critical rules, four domain rules not applicable, SUM-range scan
+
+After Fm-00052 four critical-severity rules were Uncertain, which holds a run (two or more). Decision (Mik Riazanov, 2026-10-26): act on all of them.
+
+| Change | Why |
+|---|---|
+| Tier `R11_scope_decision_regulated_network_owner_evidence` (`evidence_required`): T2-S1-007, T2-S12-009 | The cost-of-capital inputs carry no source reference (the Ofgem determination is not in the workbook), and only the model owner can say whether an off-model overlay exists. Same treatment as T2-S13-008. |
+| Tier `R12_scope_decision_regulated_network_domain_not_applicable`: T2-S10-287, 388, 554, 586 | The reviewer said the subject does not exist in a licence model, and the Partner Review independently classed all four as outside agreed scope. T2-S10-369 stays in scope. |
+| `config/skill.md` `no_impossible_balances` | T2-S5-006 returned Uncertain because the model carries no receivables, payables or inventory. The reviewer is now told to conclude on the balances the model does have. |
+| `src/utils/sum-range-scan.js`, `T0-SUMRANGE-001` (Observation) and `T0-SUMRANGE-002` (Query), wired in server.js and index.js | Reads every simple SUM/SUMIFS range from the formulas, groups by row, names the usual shape (fixed, running total, rolling), lists expanding ranges so a reader can see they were examined (SystemOperator rows 365 and 375 on the ESO model: cumulative cost x rate, correct), and flags a middle period whose range differs in the same direction as the rest. It cannot see a range wrong in every period. It does not change T2-S4-007: that rule stays Uncertain until you decide otherwise. |
+| `record-type-classifier.js`: `T0-LINK-002` is an Observation | The finding's own text says a terminal consumer sheet is normal. T0-DAISYCHAIN, T0-NESTEDIF and T0-HIDDEN-002 were already Observations. |
+| Log text "Building report, notifying" | Left over from the Drive step. |
+
+With R11 and T2-S5-006 concluding, only T2-S4-007 stays Uncertain among the four, which is below the two-rule threshold. Test: `test-patch26.js`.
