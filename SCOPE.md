@@ -400,3 +400,17 @@ The Fm-00050 Partner Review (an independent second reader) found one real defect
 | `src/utils/full-parse-visibility.js`; `export-for-partner-review.js`; server.js stores `reviewCoverage` | A full-parse run with complete workbook coverage showed the reviewer every cell but recorded nothing, so Partner Review labelled nine findings "Missed entirely - no visibility record" and counted no genuine misses. The export now writes a record covering every exported cell (same shape as the curated route's). Older orders are recognised from their run log. |
 
 Test: `test-patch23.js`.
+
+## Patch 24 - T2-S13-008 recorded as needing source documents
+
+After Fm-00050 the run was held for one reason only: the fatal-gate rule T2-S13-008 ("outputs sent to lenders, investors or management are tied to the audited model, with no manual overwriting") ended Uncertain. It asks whether an external submission file has had values pasted over formulas. That file is not in the workbook, so the answer cannot come from it, and the run would have been held every time.
+
+Decision (Mik Riazanov, 2026-10-26): treat it as work needing source documents or live testing.
+
+| Change | Why |
+|---|---|
+| New tier `R10_scope_decision_regulated_network_external_evidence` in the regulated-network profile: `allowFatal: true`, `category: "evidence_required"`, rule T2-S13-008 | An explicit, recorded decision on a fatal-gate rule. It applies to regulated-network models only; every other model keeps the rule in scope. The rule is removed before the run, so it no longer reaches the hold gate. The report lists it by name with the work needing source documents or live testing (the submitted file and the model owner's confirmation). |
+| `rule-exclusions.js` and `rule-scope.js`: a profile tier may carry `category: "evidence_required"` (default `not_applicable`) | Without this the decision would have been recorded as "not applicable", which is not what was decided and is shown differently in the report. All earlier tiers are unchanged. |
+| `test-scope-sync.js` | Expected category counts now include tiers that record `evidence_required`. |
+
+Any other fatal rule left Uncertain still holds a run. Test: `test-patch24.js`.

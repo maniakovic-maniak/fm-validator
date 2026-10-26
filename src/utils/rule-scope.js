@@ -112,7 +112,7 @@ function buildScopePlan({ checklist, domainFile, modelText = '', runKey = '', fu
     for (const id of t.ruleIds) {
       if (!t2Ids.has(id)) continue;
       if (sev[id] === 'fatal' && !t.allowFatal) continue;
-      take(id, 'not_applicable', t.tierName, t.decision);
+      take(id, t.category === 'evidence_required' ? 'evidence_required' : 'not_applicable', t.tierName, t.decision);
     }
   }
 

@@ -65,15 +65,17 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
 
   console.log('Scope plan');
   const eso = plan();
+  // Patch 24: an explicit profile tier may record its rules as evidence_required (needs records outside the workbook).
+  const tierEvidenceIds = Object.values(exclCfg.profiles[0].tiers).filter(t => t.enabled && t.category === 'evidence_required' && Array.isArray(t.ruleIds)).flatMap(t => t.ruleIds);
   const cat = (p, c) => p.preExcluded.filter(x => x.category === c).map(x => x.id);
   test('regulated model: scope decisions + evidence + extended are removed before the run', () => {
     const na = cat(eso, 'not_applicable');
     // every enabled tier that names rule ids; a fatal rule only counts where its tier allows fatal
     const expected = Object.values(exclCfg.profiles[0].tiers)
-      .filter(t => t.enabled && Array.isArray(t.ruleIds))
+      .filter(t => t.enabled && Array.isArray(t.ruleIds) && t.category !== 'evidence_required')
       .flatMap(t => t.ruleIds.filter(i => i.startsWith('T2-') && (byId.get(i).severity !== 'fatal' || t.allowFatal === true)));
     assert.deepStrictEqual(na.sort(), expected.sort());
-    assert.deepStrictEqual(cat(eso, 'evidence_required').sort(), [...scopeCfg.evidenceRequired.ruleIds].sort());
+    assert.deepStrictEqual(cat(eso, 'evidence_required').sort(), [...scopeCfg.evidenceRequired.ruleIds, ...tierEvidenceIds].sort());
     assert.ok(cat(eso, 'extended_not_run').length > 0, 'expected an extended tier from the seeded history');
   });
   test('extended tier never contains a fatal, critical or high rule, or a rule that has concluded before', () => {
@@ -319,7 +321,7 @@ const plan = (extra = {}) => scope.buildScopePlan(Object.assign({
     for (const p of eso.preExcluded) assert.ok(eng.isExcluded(p.id), `${p.id} not excluded`);
     assert.ok(eng.isExcluded('T1-008') && eng.isExcluded('T1-012'), 'explicit T1 scope decisions still applied after the run');
     const cats = eng.record.byCategory;
-    assert.strictEqual(cats.evidence_required, scopeCfg.evidenceRequired.ruleIds.length);
+    assert.strictEqual(cats.evidence_required, scopeCfg.evidenceRequired.ruleIds.length + tierEvidenceIds.length);
     assert.ok(cats.not_applicable >= 23 && cats.extended_not_run > 0);
     const sum = Object.values(cats).reduce((a, b) => a + b, 0);
     assert.strictEqual(sum, eng.record.excludedCount);

@@ -71,7 +71,9 @@ function matchProfile(cfg, domainFile, modelText) {
 function explicitScopeTiers(profile) {
   return Object.entries((profile && profile.tiers) || {})
     .filter(([, t]) => t && t.enabled && Array.isArray(t.ruleIds) && t.ruleIds.length > 0)
-    .map(([tierName, t]) => ({ tierName, ruleIds: t.ruleIds, allowFatal: t.allowFatal === true, decision: t.decision || null }));
+    // category: a tier may record its rules as 'evidence_required' (the workbook cannot settle them) instead of the
+    // default 'not_applicable'; the two are shown differently in the report.
+    .map(([tierName, t]) => ({ tierName, ruleIds: t.ruleIds, allowFatal: t.allowFatal === true, decision: t.decision || null, category: t.category === 'evidence_required' ? 'evidence_required' : 'not_applicable' }));
 }
 
 // preExcluded: rules removed from scope BEFORE the run (not applicable to the model type, needs evidence

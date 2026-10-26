@@ -69,6 +69,13 @@
           "decision": "Scope decision recorded 2026-10-26 on Mik Riazanov's go-ahead after Fm-00050: five procedures ended Uncertain with the reviewer stating the subject does not exist in a licence allowed-revenue model (net debt is a notional regulatory construct with no refinancing tenor or lender direct agreements; no economic appraisal structure; no resettlement or land-access obligations; Ofgem's standard price control rather than a negotiated PPP). Two of them (T2-S10-362, T2-S10-375) were reported as Critical Queries with 'None / No action required'. T2-S10-336, T2-S10-369, T2-S10-468 stay in scope. A rule still counts whenever a run reaches a Pass or Issue verdict on it.",
           "ruleIds": ["T2-S10-362", "T2-S10-375", "T2-S10-452", "T2-S10-492", "T2-S10-776"]
         },
+        "R10_scope_decision_regulated_network_external_evidence": {
+          "enabled": true,
+          "allowFatal": true,
+          "category": "evidence_required",
+          "decision": "Scope decision recorded 2026-10-26 on Mik Riazanov's go-ahead after Fm-00050. T2-S13-008 (outputs sent to lenders, investors or management are tied to the audited model, with no manual overwriting) asks whether an external submission file has had values pasted over formulas. That file is not in the workbook, and the reviewer correctly found the workbook's own LiveResults and SavedResults snapshots are macro-written by design. The workbook alone cannot settle it, so it is listed as work needing source documents or live testing (the submitted file and the model owner's confirmation) and no longer holds the run. It is a fatal-gate rule: this is an explicit decision, not a default.",
+          "ruleIds": ["T2-S13-008"]
+        },
         "A_physical_sector_mismatch": {
           "enabled": true,
           "families": ["tollroad", "road", "airport", "port", "hospital", "rail", "water", "wastewater", "waste", "heat", "geothermal", "realestate", "social", "userpay", "bess"]
