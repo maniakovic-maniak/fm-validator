@@ -385,3 +385,18 @@ Fm-00050 ended with 19 Uncertain procedures and 3 mandatory procedures not concl
 | `skill.md` purpose_documented; `finding-class.json` adds T2-S1-001 to the regulated profile's governance cap | The ESO Cover has a title and version but no purpose or audience. That is a plain absence, rated P3 for this profile. |
 
 Not changed, awaiting a decision: T2-S13-008 (fatal; whether an external submission file was pasted over cannot be seen in the workbook) and T2-S10-468. Test: `test-patch22.js`.
+
+## Patch 23 - the same factor applied twice; complete visibility on full-parse runs
+
+The Fm-00050 Partner Review (an independent second reader) found one real defect the audit had missed and was wrong about another. Checked on the workbook:
+
+- **Confirmed.** `OutputSummary!AP125` and `AP126` are already divided by `ESOpf` (18/19 prices). `AP127` (Profit/(Loss) After Dividends) is `=(AP125+AP126)/ESOpf`, which divides by the price index a second time (-4.13 shown, -4.41 correct). `AP128` (Dividend Cover) is `=(-AP125/AP126)/ESOpf`, which deflates a ratio of two figures that are already deflated. T2-S4-012 had answered "no mismatch found in the area checked".
+- **Rejected.** The review's P1 "expanding-range" defect in the Structures and Buildings and Deferred Revenue pools (`-SUM($AO363:AP363)*rate`) is a straight-line allowance (cumulative cost times rate) and is correct. The Intangibles pool, which is reducing-balance, correctly uses `-(opening + additions) * rate`. Do not adopt the review's ME-TAX-001 / ME-RIIO-004 as written.
+
+| Change | Why |
+|---|---|
+| `src/utils/double-scaling-check.js`, finding `T0-DOUBLESCALE-001` (medium, P2), wired in server.js and index.js | Needs no labels. A cell whose whole formula is `<operand> / NAME` (or `* NAME`) is flagged when an input it reads is already scaled by the same NAME with the same operator. A divide followed by the matching multiply, two different names, ranges and any other formula shape are skipped. Findings group by (sheet, row, name). One pass over the formula cells, keeping only the scaled ones. On the ESO file it flags exactly AP127 and AP128 (5 periods each); on seven other real models (ET, The Bend, Railways Toolkit, GT1, a GT financial model and others) it flags nothing. |
+| `config/skill.md` `label_matches_formula_behaviour` | The reviewer is told to check the unit in the label (price base, ratio) against the formula, to use T0-DOUBLESCALE as evidence, and that "no mismatch found in the area checked" is not a pass. |
+| `src/utils/full-parse-visibility.js`; `export-for-partner-review.js`; server.js stores `reviewCoverage` | A full-parse run with complete workbook coverage showed the reviewer every cell but recorded nothing, so Partner Review labelled nine findings "Missed entirely - no visibility record" and counted no genuine misses. The export now writes a record covering every exported cell (same shape as the curated route's). Older orders are recognised from their run log. |
+
+Test: `test-patch23.js`.

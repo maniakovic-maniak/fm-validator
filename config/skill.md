@@ -1868,6 +1868,19 @@ requires).
   used, and the quantified impact if material (e.g. "factor understated
   by 28.5x vs a genuine straight-line calculation").
 - If the formula cannot be traced from the data provided → uncertain
+- Check the units the label states against the formula. The label's unit
+  is part of its meaning: "£m 18/19 prices" means a money amount already
+  deflated once; "x", "scaler" or "%" means a ratio. For every line whose
+  label carries a price base or a unit:
+  - a line that reads cells already divided (or multiplied) by a price
+    index or unit factor must not apply the same factor again;
+  - a ratio of two figures in the same units (cover, gearing, margin) is
+    unit-free and must not be divided or multiplied by a price index.
+  Quote the cell, the factor and the inputs that already carry it. If
+  Tier 0 has reported "scaling factor applied twice" (T0-DOUBLESCALE),
+  use it as the evidence and conclude fail; do not return uncertain.
+- "No mismatch found in the area checked" is not a pass. Say which rows
+  you compared. If you did not compare a row, name it as not compared.
 
 ### test: switch_relabel_disclosed
 Check whether a line item's own displayed label and calculation change

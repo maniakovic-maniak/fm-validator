@@ -28,6 +28,7 @@ const { checkBalanceNeverNegative } = require('./src/utils/balance-never-negativ
 const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distributions-check');
 const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check');
 const { checkNestedSubtotals } = require('./src/utils/nested-subtotal-check');
+const { checkDoubleScaling } = require('./src/utils/double-scaling-check');
 const { checkPlaceholderText } = require('./src/utils/placeholder-text-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
@@ -1342,6 +1343,31 @@ async function run() {
       root_cause: 'SUM range covers a subtotal and its components', escalation_flag: false,
       urgency: 'Before next reliance', confidence: 85,
       ...buildRootCauseFields('T0-NESTEDSUM-001', nestedSubtotalCheck, { commonRemediationAction: 'Remove the double count and reconcile the total.' })
+    });
+  }
+
+  // ── Double scaling: the same factor applied twice along a calculation chain ──
+  // Found by an independent review of a licence model and confirmed on the workbook (OutputSummary Profit After
+  // Dividends divided by the price index twice; Dividend Cover, a ratio, divided by it again). Needs no labels.
+  const doubleScalingCheck = (() => { try { return checkDoubleScaling(parsed._raw); }
+    catch (e) { console.error('   ⚠️  Double-scaling check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+  if (doubleScalingCheck.applicable && doubleScalingCheck.findings.length > 0) {
+    const _ds = doubleScalingCheck.findings;
+    const _dsSample = _ds.slice(0, 5).map(f => `${f.sheet}!${f.cell} (${f.name} applied twice${f.instanceCount > 1 ? `; ${f.instanceCount} periods` : ''}${f.ratio ? '; a ratio' : ''})`).join('; ');
+    allFlagged.push({
+      id: 'T0-DOUBLESCALE-001',
+      label: `${_ds.length} line(s) apply the same scaling factor twice`,
+      severity: 'medium', status: 'fail',
+      sheet: _ds[0].sheet, cell: _ds[0].cell, category: 'Structure',
+      condition: `${_dsSample}${_ds.length > 5 ? ' and others' : ''}. ${_ds[0].note}`,
+      reason: `${_ds.length} formula(s) divide or multiply by a factor their own inputs were already scaled by`,
+      corrective_action: 'Remove the second application of the factor (or, for a ratio, apply it to neither side), then reconcile the line to the sum or quotient of the lines it reads.',
+      workstream: 'Structure', issue_type: 'Scaling factor applied twice',
+      model_risk: 'A value that is deflated, inflated or converted twice is wrong by the factor in every period it is copied to, and the error grows with the factor. A ratio of two already-scaled figures changes when it is scaled again, so a trend in the line is produced by the index, not by the business.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Scaling factor applied to inputs that are already scaled', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 85,
+      ...buildRootCauseFields('T0-DOUBLESCALE-001', doubleScalingCheck, { commonRemediationAction: 'Remove the repeated scaling and reconcile the line.' })
     });
   }
 

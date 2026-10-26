@@ -16,6 +16,8 @@
 
 const { buildFullExport, batchExport } = require('../src/utils/partner-review-export');
 const { getOrder } = require('../src/utils/order-store');
+const path = require('path');
+const { ranAsCompleteFullParse, buildCompleteVisibility } = require('../src/utils/full-parse-visibility');
 
 const filePath = process.argv[2];
 const orderId = process.argv[3];
@@ -35,6 +37,11 @@ if (!filePath) {
     if (order && order.visibilityRecord) {
       visibilityRecord = order.visibilityRecord;
       console.error(`Included the real visibility record from order ${orderId}'s own run.`);
+    } else if (ranAsCompleteFullParse(order, path.join(__dirname, '..', 'logs', 'runs'))) {
+      // The full-parse route showed the reviewer every formula, all static text and every named range, so nothing
+      // was out of sight: record that, so a miss on this run is counted as a genuine miss.
+      visibilityRecord = buildCompleteVisibility(fullExport.sheets);
+      console.error(`Order ${orderId} ran on the full-parse route with complete workbook coverage: recorded every exported cell as visible (${Object.keys(visibilityRecord).length} sheets).`);
     } else {
       console.error(`\u26a0\ufe0f  No visibility record found for order ${orderId} - either it predates this feature, or ran on the full-parse route (which has nothing to record a gap for). Proceeding without one.`);
     }
