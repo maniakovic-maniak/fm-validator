@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseResponse } = require('./validator-tier2');
 const { dumpFailedResponse } = require('./utils/dump-failed-response');
+const { reconcileDeepDive, describeReconciliation } = require('./utils/deepdive-reconcile');
 const {
   selectHighRiskFormulas, attachLabels, buildReviewItems, estimateInputTokens
 } = require('./utils/formula-deepdive-select');
@@ -88,16 +89,33 @@ async function runFormulaDeepDive(parsed, tier0Result, opts = {}) {
     throw err;
   }
 
-  const results = parsed_response.results || [];
-  const findings = results.filter(r => r.status === 'fail' || r.status === 'uncertain');
+  const rec = reconcileDeepDive(items, parsed_response.results || [], { stopReason });
+  console.log(`   Formula Deep Dive: ${describeReconciliation(rec)}`);
+
+  // Patch 29: only valid, requested, non-duplicate answers count. The ledger gives the report one row per requested
+  // formula, so a formula that was asked for and not answered shows as not completed instead of vanishing.
+  const answeredById = new Map(rec.valid.map(r => [r.ufi, r]));
+  const reviewLedger = items.map(it => {
+    const r = answeredById.get(it.ufi);
+    return r
+      ? { ufi: it.ufi, outcome: r.status, id: r.id || null, reason: String(r.reason || r.condition || r.label || '').slice(0, 400) }
+      : { ufi: it.ufi, outcome: 'not_completed', id: null, reason: '' };
+  });
 
   return {
     applicable: true,
-    reviewed: items.length,
-    passed: results.filter(r => r.status === 'pass').length,
-    findings,
-    allResults: results,
-    note: `Deep individual review of the ${items.length} highest-complexity formula patterns (Tier 0 F-score ranked). This is a targeted sample, not full coverage — see the Scope and Reliance tab.`
+    requested: rec.requested,
+    completed: rec.completed,
+    reviewed: rec.completed,                 // kept for existing readers: the number of valid answers, not the number sent
+    passed: rec.passed,
+    findings: rec.findings,
+    allResults: rec.valid,
+    notCompleted: rec.notCompleted,
+    rejected: { unknown: rec.unknown.length, duplicates: rec.duplicates.length, malformed: rec.malformed.length },
+    truncated: rec.truncated,
+    reconciled: rec.reconciled,
+    reviewLedger,
+    note: `Deep individual review of the ${rec.requested} highest-complexity formula patterns (Tier 0 F-score ranked): ${describeReconciliation(rec)}. This is a targeted sample, not full coverage — see the Scope and Reliance tab.`
   };
 }
 

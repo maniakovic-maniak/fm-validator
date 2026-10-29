@@ -685,7 +685,10 @@ def build_report(data_path, output_path):
         _formula_grounded = _mode_counts.get('llm_with_partial_formulas', 0) + _mode_counts.get('llm_full_parse', 0) + _mode_counts.get('llm_with_formulas', 0)
         if _formula_grounded > 0:
             _pct = round(100 * _formula_grounded / _total_t2)
-            _depth_text = f'{_formula_grounded} of {_total_t2} Tier 2 finding(s) ({_pct}%) grounded in direct formula-text inspection; the remainder from values and labels alone.'
+            _depth_text = (f'{_formula_grounded} of {_total_t2} Tier 2 finding(s) ({_pct}%) were produced with formula text supplied to the reviewer; '
+                           f'the remainder from values and labels alone. This counts what the reviewer was given, not what was checked: '
+                           f'the cells and references a finding cites are not validated against the workbook, and no formula behaviour is tested by this review. '
+                           f'Behaviour testing is the recalculation check (see Scope and Reliance).')
             _depth_bg = PANEL_GREY
         else:
             _depth_text = f'All {_total_t2} Tier 2 finding(s) this run were based on values and labels alone (no formula-text-grounded findings) — see the Mode A+ section of skill.md for when direct formula inspection is expected to apply.'
@@ -1180,7 +1183,14 @@ def build_report(data_path, output_path):
         ws3.cell(r3,c1).border=B(col=WHITE)
     set_row(ws3,r3,16); r3+=1
     _fdd_performed = formulaDeepIn.get('applicable', False)
-    _fdd_summary = (f"Individually reviewed the {formulaDeepIn.get('reviewed',0)} highest-complexity formulas in this model (Tier 0 F-score ranked), not sampled — a targeted, not exhaustive, set. {len(formulaDeepIn.get('findings',[]))} finding(s) resulted."
+    _fdd_req = formulaDeepIn.get('requested', formulaDeepIn.get('reviewed',0))
+    _fdd_done = formulaDeepIn.get('completed', formulaDeepIn.get('reviewed',0))
+    _fdd_nc = len(formulaDeepIn.get('notCompleted', []) or [])
+    _fdd_cov_text = (f"Selected the {_fdd_req} highest-complexity formulas (Tier 0 F-score ranked) for individual review; "
+                     f"{_fdd_done} of {_fdd_req} came back with a usable result"
+                     + (f", {_fdd_nc} did not complete and are listed on the Formula Risk Review tab" if _fdd_nc else "")
+                     + ". A targeted, not exhaustive, set.")
+    _fdd_summary = (f"{_fdd_cov_text} {len(formulaDeepIn.get('findings',[]))} finding(s) resulted."
                      if _fdd_performed else 'Best-effort via Tier 0 only')
     # A4 — cell-level dependency-chain tracing for key output cells (EBITDA,
     # IRR, DSCR, MOIC and similar), checking whether the formula chain
@@ -1365,7 +1375,7 @@ def build_report(data_path, output_path):
          'None — opt-in deep review was performed for this run' if _fdd_performed else 'Enable the Formula Deep Dive opt-in for individual review of the highest-risk formulas, or provide direct Excel/formula access for full coverage'),
         ('Source document review','Not performed','This review has no access to contracts, invoices, bank statements or other source records — only the Excel file itself. An assumption can look internally consistent without being independently verified against reality.','Provide source documents for Mode C review'),
         ('Cell-by-cell audit', 'Partial',
-         (f"The {formulaDeepIn.get('reviewed',0)} highest-risk formulas received individual review this run — not full coverage of every cell, but not merely pattern-based either."
+         (f"{_fdd_cov_text} Not full coverage of every cell."
           if _fdd_performed else 'Formula logic inspection requires formula text access for full individual review.') + _chain_summary,
          'Enable the Formula Deep Dive opt-in for individual review of the highest-risk formulas, in addition to the chain tracing already performed' if not _fdd_performed else 'None for the reviewed set — engage a manual reviewer for full coverage beyond the targeted set'),
         ('Assumption and output reasonableness', 'Performed (targeted)' if _reason_performed else 'Not performed',
@@ -2135,13 +2145,15 @@ def build_report(data_path, output_path):
     # TAB 6 — FORMULA ANALYSIS
     # ════════════════════════════════════════════════════════════════════════
     ws6=wb.create_sheet('Formula Risk Review'); ws6.sheet_view.showGridLines=False
-    for col,w in [(1,3),(2,10),(3,12),(4,8),(5,10),(6,14),(7,20),(8,26),(9,16),(10,32)]:
+    for col,w in [(1,3),(2,10),(3,12),(4,8),(5,10),(6,14),(7,20),(8,26),(9,14),(10,34),(11,16),(12,32)]:
         set_col(ws6,col,w)
     uf_headers=['','UFI','Sheet','Cell','F-Score','Complexity Band','Formula Class','Key Risk',
-                'Status','Reviewer Comment','Formula Text','F-Score Explanation','External Link',
+                'Review Result','Review Detail','Status','Reviewer Comment','Formula Text','F-Score Explanation','External Link',
                 'Volatile','Hardcode','IFERROR','Cross-Sheet Refs','Precedent Sheets','']
     n_fa_cols = len(uf_headers)
-    n_fa_visible = 10  # UFI..Reviewer Comment (column NUMBER of last visible field, not a count)
+    n_fa_visible = 12  # UFI..Reviewer Comment (column NUMBER of last visible field, not a count)
+    FA_DISPLAY_CAP = 1000
+    _ledger = {str(x.get('ufi')): x for x in (formulaDeepIn.get('reviewLedger') or [])}
     uf_idx = {h.replace('\n',' '): i for i,h in enumerate(uf_headers,1) if h}
     FA_HEADER_ROW=6
 
@@ -2152,7 +2164,7 @@ def build_report(data_path, output_path):
     ufs=t0.get('uniqueFormulas',[])
     n_high_risk = sum(1 for uf in ufs if uf.get('band') in ('High','Very High','Critical'))
     n_volatile  = sum(1 for uf in ufs if uf.get('volatileFlag'))
-    _fa_first, _fa_last = FA_HEADER_ROW+1, FA_HEADER_ROW+min(len(ufs),200)
+    _fa_first, _fa_last = FA_HEADER_ROW+1, FA_HEADER_ROW+min(len(ufs),FA_DISPLAY_CAP)
     BAND_L = get_column_letter(uf_idx['Complexity Band'])
 
     # ── Summary cards — exact 6 metrics from the brief ──────────────────────
@@ -2186,8 +2198,10 @@ def build_report(data_path, output_path):
     _band_badge={'Critical':(P1_FILL,P1_TXT),'Very High':(P1_FILL,P1_TXT),'High':(P2_FILL,P2_TXT),
                  'Moderate':(P3_FILL,P3_TXT),'Low':(OK_FILL,OK_TXT)}
     _centered5={'F-Score','Complexity Band','External Link','Volatile','Hardcode','IFERROR','Cross-Sheet Refs'}
-    _wrapped5={'Key Risk','Reviewer Comment','F-Score Explanation'}
-    for idx,uf in enumerate(ufs[:200]):
+    _wrapped5={'Key Risk','Reviewer Comment','F-Score Explanation','Review Detail'}
+    # Reviewed formulas are always shown; then highest F-score first
+    ufs = sorted(ufs, key=lambda u: (0 if str(u.get('ufi')) in _ledger else 1, -(u.get('fscore') or 0)))
+    for idx,uf in enumerate(ufs[:FA_DISPLAY_CAP]):
         row_i = FA_HEADER_ROW+1+idx
         row_bg = WHITE if idx%2==0 else 'FAFBFC'
         band=uf.get('band','Low')
@@ -2213,10 +2227,15 @@ def build_report(data_path, output_path):
             if xrefs>2: parts.append(f'references {xrefs} sheets — trace the dependency chain to confirm all source data is correct')
             auto_comment = ('Review required: '+'; '.join(parts)+'.') if parts else f'Complex formula ({band} F-score). Review the logic and confirm it produces the intended result.'
 
+        _lg = _ledger.get(str(uf.get('ufi')))
+        _rv_label = {'pass':'Reviewed - no issue','fail':'Reviewed - finding','uncertain':'Reviewed - uncertain',
+                     'not_completed':'Not completed'}.get(_lg.get('outcome'),'') if _lg else ('Not selected' if formulaDeepIn.get('applicable') else 'Not reviewed')
+        _rv_detail = ((_lg.get('id') or '') + (' ' if _lg.get('id') and _lg.get('reason') else '') + (_lg.get('reason') or '')).strip() if _lg else ''
         row_values={
             'UFI': uf.get('ufi',''), 'Sheet': uf.get('sheet',''), 'Cell': uf.get('cell',''),
             'F-Score': uf.get('fscore',0), 'Complexity Band': band, 'Formula Class': uf.get('formulaClass',''),
-            'Key Risk': key_risk, 'Status': '', 'Reviewer Comment': auto_comment,
+            'Key Risk': key_risk,
+            'Review Result': _rv_label, 'Review Detail': _rv_detail, 'Status': '', 'Reviewer Comment': auto_comment,
             'Formula Text': uf.get('formulaText',''), 'F-Score Explanation': uf.get('explanation',''),
             'External Link': 'Yes' if uf.get('externalLinkFlag') else 'No',
             'Volatile': 'Yes' if uf.get('volatileFlag') else 'No',
@@ -2237,7 +2256,7 @@ def build_report(data_path, output_path):
         badge(ws6,row_i,uf_idx['Complexity Band'],band,bf,bt,sz=8,bold=False)
         set_row(ws6,row_i,30)
 
-    _fa_last_row = FA_HEADER_ROW+min(len(ufs),200)
+    _fa_last_row = FA_HEADER_ROW+min(len(ufs),FA_DISPLAY_CAP)
 
     for col in range(n_fa_visible+1, n_fa_cols):
         ws6.column_dimensions[get_column_letter(col)].hidden = True
@@ -2253,12 +2272,22 @@ def build_report(data_path, output_path):
         ws6.add_data_validation(status_dv)
         status_dv.add(f'{get_column_letter(uf_idx["Status"])}{_fa_first}:{get_column_letter(uf_idx["Status"])}{_fa_last}')
 
-    if len(ufs) > 200:
+    if len(ufs) > FA_DISPLAY_CAP:
         _note_row = _fa_last_row + 1
         merge(ws6,f'B{_note_row}:{get_column_letter(n_fa_cols-1)}{_note_row}',
-              f'List capped at 200 unique formulas of {len(ufs):,} total — remaining formulas are represented in the summary counts above.',
+              f'Showing {FA_DISPLAY_CAP:,} of {len(ufs):,} unique formulas (reviewed formulas first, then highest F-score). '
+              f'The Formula Inventory tab lists all {len(ufs):,}.',
               sz=8,col=GREY_TXT2,italic=True)
         set_row(ws6,_note_row,16)
+        wsi=wb.create_sheet('Formula Inventory'); wsi.sheet_view.showGridLines=False
+        _inv_h=['UFI','Sheet','Cell','F-Score','Complexity Band','Formula Class','Formula Text']
+        for i,(h,w) in enumerate(zip(_inv_h,[10,16,8,10,14,20,90]),1):
+            set_col(wsi,i,w)
+            c=wsi.cell(1,i); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE); c.fill=F(DARK_BLUE)
+        for ri,uf in enumerate(ufs,2):
+            for ci,v in enumerate([uf.get('ufi',''),uf.get('sheet',''),uf.get('cell',''),uf.get('fscore',0),uf.get('band',''),uf.get('formulaClass',''),uf.get('formulaText','')],1):
+                c=wsi.cell(ri,ci); c.value=v; c.font=Font(name='Consolas',size=8) if ci==7 else Fn(sz=9)
+        wsi.freeze_panes='A2'; wsi.auto_filter.ref=f'A1:G{len(ufs)+1}'
 
     # ════════════════════════════════════════════════════════════════════════
     # TAB — ERROR-CODE ROOT CAUSE MATRIX (V11 §4)
@@ -3045,7 +3074,7 @@ def build_report(data_path, output_path):
         'Audit Output': DARK_BLUE, 'Read Me': '5B7C99', 'Scope and Reliance': '5B7C99',
         'Issue Log': AMBER, 'Remediation': AMBER,
         'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
-        'Formula Risk Review': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID, 'Named Range Audit': GREY_MID, 'Reasonableness Review': AMBER,
+        'Formula Risk Review': GREY_MID, 'Formula Inventory': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID, 'Named Range Audit': GREY_MID, 'Reasonableness Review': AMBER,
         'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
         'F-Score Rules': GREY_MID, 'Pipeline Audit Trail': GREY_MID,
     }

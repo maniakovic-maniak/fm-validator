@@ -355,3 +355,14 @@ function in `ENGINE_LIMITED_FUNCTIONS` (MATCH, IRR, XIRR); the word IFERROR alon
 A cell that calls or depends on NOW, TODAY, RAND, INFO or CELL("filename") is volatile and is counted, not raised.
 Findings: T0-RECALC-001 (numbers), -002 (circular, unchanged), -003 (held back, a Query), -004 (text or true/false, a
 Query). They are built in `src/utils/recalc-findings.js` for both pipelines.
+
+## Formula Deep Dive completion and report wording (Patch 29)
+
+`src/utils/deepdive-reconcile.js` compares what the Deep Dive sent with what came back. "Reviewed" is now the number of
+valid answers (a requested `ufi`, status pass, fail or uncertain, first answer kept); unknown, duplicate and malformed
+answers are listed and discarded, and the formulas with no valid answer are shown as Not completed. The reviewer is told
+to copy each item's `ufi` into its result. The Formula Risk Review tab gains Review Result and Review Detail columns,
+shows up to 1,000 formulas (reviewed first, then highest F-score), and adds a Formula Inventory tab with every unique
+formula when that limit is reached. The "grounded in direct formula-text inspection" sentence is replaced by a statement
+of what the reviewer was given and what was not validated. `key_output_impact` of No or Unknown no longer adds to the
+consequence score. Deferred: on the full-parse route Tier 2 still runs before the Tier 0 finding blocks are assembled.

@@ -39,14 +39,18 @@ function mentionsKeyOutputArea(finding) {
 }
 
 /** Decision consequence: does this finding touch a key-output-adjacent
- * area (valuation, debt, tax, covenants, etc.), and does it name a
- * SPECIFIC key output (key_output_impact other than the 'Unknown'
- * default) rather than an unspecified one? */
+ * area (valuation, debt, tax, covenants, etc.), and does it say it affects
+ * a key output (a "Yes" or a named impact, not "No" or "Unknown")? */
+const NO_KEY_OUTPUT_IMPACT = new Set(['unknown', 'no', 'none', 'n/a', 'na', 'not applicable', 'false', 'nil', '-']);
+
 function scoreDecisionConsequence(finding) {
   let score = 2; // baseline: a real defect, but not shown to touch a named key area
   if (mentionsKeyOutputArea(finding)) score += 2;
-  const kOut = (finding.key_output_impact || '').trim();
-  if (kOut && kOut.toLowerCase() !== 'unknown') score += 1;
+  // Patch 29: key_output_impact is "Yes", "No", "Unknown" or a named impact ("Total Revenue understated"). A named
+  // impact or "Yes" says a key output is affected and earns the point; "No", "Unknown", "None" and blank do not.
+  // Before this, "No" scored the same as "Yes" because both differ from "Unknown".
+  const kOut = String(finding.key_output_impact || '').trim().toLowerCase();
+  if (kOut && !NO_KEY_OUTPUT_IMPACT.has(kOut)) score += 1;
   return Math.min(5, score);
 }
 

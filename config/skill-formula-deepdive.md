@@ -77,6 +77,11 @@ actually reasoning about each formula's logic.
 
 ## Output
 
+**Copy each item's `ufi` into its result as a `ufi` field, unchanged.** The
+report matches your answers to the formulas by this value; an answer without
+it, or with a `ufi` that was not in the list, is discarded and the formula is
+recorded as not reviewed.
+
 Use the exact same JSON schema and field-length conventions documented
 above for the standard review (`results` array, one object per formula
 reviewed — include every item, even the ones that pass, so completeness of

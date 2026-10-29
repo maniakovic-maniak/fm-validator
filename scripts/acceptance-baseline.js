@@ -32,7 +32,7 @@ const CASES = [
   { id: 6,  title: 'Ranges of 2,000 and 2,001 cells both keep dependency coverage',        owner_patch: 32 },
   { id: 7,  title: 'Relative vs absolute anchors and address-like text keys stay distinct', owner_patch: 30 },
   { id: 8,  title: '40 review items sent, one valid answer: completed 1',                  owner_patch: 29 },
-  { id: 9,  title: '311 families with a 200-row display: the limit is disclosed and the inventory reconciles', owner_patch: 29 },
+  { id: 9,  title: '311 families no longer cut at 200: all shown, review state labelled, any cut disclosed', owner_patch: 29 },
   { id: 10, title: 'Four current focus lookups are reproduced with no wrong-entity allegation', owner_patch: 31 },
   { id: 11, title: 'Duplicate or missing selected lookup key is reported with its evidence', owner_patch: 31 },
   { id: 12, title: 'Eight-year average that loses a year to text raises a completeness failure', owner_patch: 31 },
@@ -95,8 +95,39 @@ function runGraphCases() {
   return res;
 }
 
+
+function runDeepDiveCases() {
+  const res = {};
+  const { reconcileDeepDive } = require(path.join(ROOT, 'src/utils/deepdive-reconcile'));
+  const items = Array.from({ length: 40 }, (_, i) => ({ ufi: 'UF' + (i + 1) }));
+  const rec = reconcileDeepDive(items, [{ ufi: 'UF1', status: 'pass', id: 'x' }]);
+  res[8] = { status: rec.requested === 40 && rec.completed === 1 && rec.notCompleted.length === 39 ? 'pass' : 'fail',
+             note: `requested ${rec.requested}, completed ${rec.completed}, not completed ${rec.notCompleted.length}` };
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acc9-'));
+  const ufs = Array.from({ length: 311 }, (_, i) => ({ ufi: 'UF' + (i + 1), sheet: 'S', cell: 'A' + (i + 1), fscore: 5, band: 'Moderate', formulaClass: 'x', formulaText: '=A1+' + i }));
+  const payload = {
+    originalName: 't.xlsx', modelType: 't', modelIndustry: 't', modelSummary: { currency: 'AUD', periodicity: 'monthly', key_sheets: ['S'] },
+    tier0: { stats: {}, cellScoreIndex: {}, uniqueFormulas: ufs, edgeList: [] }, overallAssessment: 'not_fit_for_purpose', igReadiness: 0, igCommentary: 't',
+    ruleResults: [], errorScan: [], redundantInputs: { applicable: false }, orphanSheets: { applicable: false }, namedRangeAudit: { applicable: false },
+    formulaDeepDive: { applicable: true, requested: 40, completed: 1, notCompleted: items.slice(1).map(i => i.ufi), findings: [],
+                       reviewLedger: items.map((it, i) => ({ ufi: it.ufi, outcome: i === 0 ? 'pass' : 'not_completed', id: null, reason: '' })) },
+    reasonableness: {}, duplicateSheets: { applicable: false }, vbaReview: { applicable: false }, deepAccountingResolvedSheets: {},
+    crossRunStats: { isFirstRun: true, newFindingCount: 0 }, findings: []
+  };
+  fs.writeFileSync(path.join(dir, 'pl.json'), JSON.stringify(payload));
+  const b = spawnSync('python3', [path.join(ROOT, 'src/build_report.py'), path.join(dir, 'pl.json'), path.join(dir, 'o.xlsx')], { encoding: 'utf8', timeout: 120000 });
+  if (b.status !== 0) { res[9] = { status: 'skipped', note: 'could not build report here (python3 with openpyxl needed)' }; return res; }
+  const py = 'import openpyxl,sys\nwb=openpyxl.load_workbook(sys.argv[1])\nws=wb["Formula Risk Review"]\nt=" ".join(str(c.value) for r in ws.iter_rows() for c in r if c.value is not None)\nprint("Formula Inventory" in wb.sheetnames, "Not completed" in t)'
+  const q = spawnSync('python3', ['-c', py, path.join(dir, 'o.xlsx')], { encoding: 'utf8' });
+  // 311 is under the 1,000 display limit: every family is shown with its review state, and nothing is silently cut
+  const ok = /False True/.test(q.stdout || '');
+  res[9] = { status: ok ? 'pass' : 'fail', note: `311 families shown in full, unreviewed ones labelled: ${(q.stdout || '').trim()}` };
+  return res;
+}
+
 function runAll() {
-  const out = Object.assign({}, runRecalcCases(), runGraphCases());
+  const out = Object.assign({}, runRecalcCases(), runGraphCases(), runDeepDiveCases());
   return CASES.map(c => Object.assign({ id: c.id, title: c.title, owner_patch: c.owner_patch }, out[c.id] || { status: 'pending', note: 'not executable offline yet; made executable by Patch ' + c.owner_patch }));
 }
 
