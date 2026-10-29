@@ -585,4 +585,4 @@ function buildEmptyResult() {
   };
 }
 
-module.exports = { runTier0, scoreFormula, complexityBand, complexityExplanation, sheetNameMatchesKeyword };
+module.exports = { runTier0, scoreFormula, complexityBand, complexityExplanation, sheetNameMatchesKeyword, normalizeFormula };

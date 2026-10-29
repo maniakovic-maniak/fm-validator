@@ -1134,6 +1134,23 @@ def build_report(data_path, output_path):
         r3 = kv_row(r3,label,val)
     set_row(ws3,r3,10); r3+=1
 
+    # ── Panel 1b: Run provenance (Patch 27) ─────────────────────────────────
+    # Which input, which code and which rule set produced this report, so two reports can be compared
+    # and a dispute about "which file was audited" can be settled from the report itself.
+    _prov = d.get('runProvenance') or {}
+    if _prov:
+        r3 = panel_header(r3,'RUN PROVENANCE')
+        _pv = lambda k: (_prov.get(k) if _prov.get(k) not in (None,'') else 'unknown')
+        _short = lambda v: (str(v)[:12] if v and v!='unknown' else 'unknown')
+        _bytes = _prov.get('input_bytes')
+        for label,val in [('Input file hash (SHA-256)',str(_pv('input_sha256'))),
+                           ('Input size',(f'{int(_bytes):,} bytes' if isinstance(_bytes,(int,float)) else 'unknown')),
+                           ('Validator code version',_short(_prov.get('code_commit'))),
+                           ('Rule set version',_short(_prov.get('rule_version'))),
+                           ('Reviewer model(s)',', '.join(_prov.get('model_ids') or []) or 'unknown')]:
+            r3 = kv_row(r3,label,val)
+        set_row(ws3,r3,10); r3+=1
+
     # ── Panel 2: Work Performed ──────────────────────────────────────────────
     r3 = panel_header(r3,'WORK PERFORMED')
     # FIX: found via systematic checking after the gap-analysis rule

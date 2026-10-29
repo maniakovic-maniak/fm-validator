@@ -30,6 +30,7 @@ const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check'
 const { checkNestedSubtotals } = require('./src/utils/nested-subtotal-check');
 const { checkDoubleScaling } = require('./src/utils/double-scaling-check');
 const { scanSumRanges } = require('./src/utils/sum-range-scan');
+const { buildRunProvenance, writeProvenance } = require('./src/utils/run-provenance');
 const { checkPlaceholderText } = require('./src/utils/placeholder-text-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
@@ -2958,6 +2959,7 @@ async function run() {
   // runTier2 itself did internally.
   const deepAccountingResolvedSheets = resolveDeepAccountingSheets(parsed.sheetNames);
 
+  const runProvenance = await buildRunProvenance({ filePath: parsed._filePath, originalName });
   await buildReportFile(reportPath, allFlagged, allFixes, {
     originalName,
     modelType,
@@ -2984,8 +2986,10 @@ async function run() {
     vbaReview,
     deepAccountingResolvedSheets,
     recalcCheckResult,
-    ownerDecisionChecklist
+    ownerDecisionChecklist,
+    runProvenance
   });
+  writeProvenance(reportPath, runProvenance);
 
   // ── Step 7: Upload + notify ────────────────────────────────────────────────
   console.log('\n[6/6] Saving report and notifying...');

@@ -330,3 +330,16 @@ pm2 logs fm-validator --err
 
 ## License
 ISC
+
+## Run provenance and baselines (Patch 27)
+
+Every report now carries a RUN PROVENANCE panel on the Scope and Reliance tab (input SHA-256, size, validator commit,
+rule-set version, reviewer model), and a `<report>.provenance.json` file is written beside the report in `processed/`
+(removed by the same 30-day sweep). The commit is read from `.git`, or from `GIT_COMMIT` if the deploy sets it.
+
+- `node scripts/acceptance-baseline.js` runs the 16 acceptance cases from the 29 Oct 2026 independent review against the
+  current code and compares them with `acceptance/baseline.json`. A patch that makes a case pass runs it with `--update`
+  and commits the new baseline in the same patch.
+- `node scripts/baseline-run.js "<workbook>"` is a timed, no-cost pass (parse, Tier 0, SUM-range scan, recalculation)
+  that records seconds and peak memory per stage in `baseline/`. Run it once on the VPS for Hidden Gem before Patches 30
+  and 32.

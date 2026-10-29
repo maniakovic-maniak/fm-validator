@@ -107,6 +107,8 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     // minimal and realistic scale); the actual gap was this one missing
     // line, silently dropping the field between the two.
     ownerDecisionChecklist: meta.ownerDecisionChecklist || null,
+    // Patch 27: what was audited and by what (input hash, code commit, rule set), shown in Scope and Reliance.
+    runProvenance:   meta.runProvenance || null,
     auditLog:        auditLog || []
   };
 

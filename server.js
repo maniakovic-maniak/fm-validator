@@ -51,6 +51,7 @@ const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check'
 const { checkNestedSubtotals } = require('./src/utils/nested-subtotal-check');
 const { checkDoubleScaling } = require('./src/utils/double-scaling-check');
 const { scanSumRanges } = require('./src/utils/sum-range-scan');
+const { buildRunProvenance, writeProvenance } = require('./src/utils/run-provenance');
 const { checkPlaceholderText } = require('./src/utils/placeholder-text-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
@@ -3426,6 +3427,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     const deepAccountingResolvedSheets = resolveDeepAccountingSheets(parsed.sheetNames);
 
+    const runProvenance = await buildRunProvenance({ filePath: parsed._filePath, originalName });
     await buildReportFile(reportPath, allFlagged, [], {
       originalName,
       modelType,
@@ -3455,10 +3457,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       excludedRuleIds: ruleExclusions.excludedIds,
       scopeSummary: summarizeScopeForReport(ruleExclusions.record, scopePlan),
       ownerDecisionChecklist,
+      runProvenance,
       batchFailures:     t2Results._batchFailures || [],
       partialCoverage:   t2Results._partialCoverage || [],
       tier2Evidence:     t2Results._evidence || null
     });
+    writeProvenance(reportPath, runProvenance);
 
     // Reports are stored on the server (processed/, 30-day local retention)
     // and reach the client by email attachment after review - there is no

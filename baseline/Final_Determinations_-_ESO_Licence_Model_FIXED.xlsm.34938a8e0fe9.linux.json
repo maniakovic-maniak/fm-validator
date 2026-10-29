@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "provenance": {
+    "schema": 1,
+    "created_at": "2026-10-29T22:50:00.461Z",
+    "input_name": "Final_Determinations_-_ESO_Licence_Model_FIXED.xlsm",
+    "input_sha256": "34938a8e0fe93a771bb7219e259e24641e2c3f43404c58e23d1c1a76f00698ee",
+    "input_bytes": 4218507,
+    "code_commit": "edf892b25999f782d76e6d2296e9c9ac15bab1ec",
+    "rule_version": "67debb8e94bd",
+    "config_files": {
+      "checklist.json": "15578bdfa5f3",
+      "rule-exclusions.json": "9ef45177b3e9",
+      "rule-scope.json": "a3f50341b0c2",
+      "skill-corporate.md": "efda046ef405",
+      "skill-formula-deepdive.md": "b402188a93fc",
+      "skill-generic.md": "9016ee85f6ca",
+      "skill-infrastructure.md": "b0ac286277af",
+      "skill-mining.md": "8b5582e50851",
+      "skill-property.md": "9284d0fe6036",
+      "skill-riio-pcfm.md": "03a72af5d53f",
+      "skill.md": "946005c9f08a"
+    },
+    "model_ids": [
+      "claude-sonnet-5"
+    ],
+    "node": "v22.22.0"
+  },
+  "platform": "linux",
+  "stages": {
+    "parse": {
+      "seconds": 4.5,
+      "node_rss_mb_after": 928,
+      "error": null
+    },
+    "tier0": {
+      "seconds": 0.8,
+      "node_rss_mb_after": 951,
+      "error": null
+    },
+    "sum_range_scan": {
+      "seconds": 0.1,
+      "node_rss_mb_after": 952,
+      "error": null
+    },
+    "recalc": {
+      "seconds": 35.7,
+      "python_peak_rss_mb": 1176
+    }
+  },
+  "counts": {
+    "formula_cells": 8203,
+    "unique_formulas": 311,
+    "sheets": 21,
+    "sum_range": {
+      "cells_scanned": 1311,
+      "rows_scanned": 143,
+      "flagged": 0
+    },
+    "recalc": {
+      "status": "success",
+      "formula_cells_checked": 2960,
+      "mismatch_count": 0,
+      "mismatches_likely_masked_upstream_error_count": 0,
+      "unresolved_error_count": 29,
+      "unconverged_circular_groups": 0,
+      "converged_circular_groups": 0,
+      "offset_cells_excluded": 354,
+      "multicell_named_range_cells_excluded": 611,
+      "external_reference_cells_excluded": 0,
+      "tainted_downstream_cells_excluded": 4278
+    }
+  },
+  "node_peak_rss_mb": 952
+}
