@@ -343,3 +343,15 @@ rule-set version, reviewer model), and a `<report>.provenance.json` file is writ
 - `node scripts/baseline-run.js "<workbook>"` is a timed, no-cost pass (parse, Tier 0, SUM-range scan, recalculation)
   that records seconds and peak memory per stage in `baseline/`. Run it once on the VPS for Hidden Gem before Patches 30
   and 32.
+
+## Recalculation ledger (Patch 28)
+
+`src/recalc_check.py` now returns a `ledger`: every formula cell in exactly one outcome (matched, differ, held back by a
+known engine limitation, volatile, engine error, no saved value, type not judged, set aside before comparison, not run),
+and the categories are reconciled to the workbook's formula-cell count. The comparison rules live in
+`src/recalc_compare.py`: numbers within 0.1% (absolute floor 0.01, or 0.0001 for saved values of size 10 or less); text,
+Boolean and error values exact; dates to within one second. An IFERROR/IFNA formula is held back only when it calls a
+function in `ENGINE_LIMITED_FUNCTIONS` (MATCH, IRR, XIRR); the word IFERROR alone no longer hides a difference.
+A cell that calls or depends on NOW, TODAY, RAND, INFO or CELL("filename") is volatile and is counted, not raised.
+Findings: T0-RECALC-001 (numbers), -002 (circular, unchanged), -003 (held back, a Query), -004 (text or true/false, a
+Query). They are built in `src/utils/recalc-findings.js` for both pipelines.

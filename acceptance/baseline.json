@@ -1,14 +1,14 @@
 {
   "1": {
-    "status": "fail",
+    "status": "pass",
     "owner_patch": 28
   },
   "2": {
-    "status": "fail",
+    "status": "pass",
     "owner_patch": 28
   },
   "3": {
-    "status": "partial",
+    "status": "pass",
     "owner_patch": 28
   },
   "4": {

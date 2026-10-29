@@ -61,7 +61,7 @@ function runRecalcCases() {
   const r3 = pythonRecalc(path.join(dir, 'case3_result_types.xlsx'));
   if (!r1 || !r2 || !r3 || r1.status !== 'success') { for (const id of [1, 2, 3]) res[id] = { status: 'skipped', note: 'recalculation engine unavailable here' }; return res; }
 
-  const listed = (r, cell) => ['mismatches', 'unresolved_errors', 'mismatches_likely_masked_upstream_error'].some(k => (r[k] || []).some(m => m.cell === cell));
+  const listed = (r, cell) => ['mismatches', 'unresolved_errors', 'mismatches_held_back', 'missing_cache_sample', 'unsupported_sample', 'volatile_sample'].some(k => (r[k] || []).some(m => m.cell === cell));
   res[1] = { status: r1.mismatch_count >= 1 ? 'pass' : 'fail', note: `C1 saved 1.35, recomputed 0.50: mismatch_count=${r1.mismatch_count}` };
   res[2] = { status: r2.mismatch_count >= 2 ? 'pass' : 'fail', note: `B1 and C1 stale: mismatch_count=${r2.mismatch_count}, held back as masked=${r2.mismatches_likely_masked_upstream_error_count}` };
   // case 3: each of the four non-matching cells must appear somewhere in the result, as the explicit state it is in

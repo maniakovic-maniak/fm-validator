@@ -1313,6 +1313,33 @@ def build_report(data_path, output_path):
             _recalc_status = _perf_label
             _recalc_summary = (f"A genuine, independent full-workbook recalculation checked {_cells_checked:,} formula cell(s) and found {_mismatch_count} cell(s) where the displayed, cached value differs from what the formula actually computes — see the Issue Log for the specific cells.{_sanitized_note}{_cov_note}")
             _recalc_next = 'Investigate each mismatch — see Issue Log'
+        # Patch 28: when the recalculation returned its outcome ledger, say exactly where every formula cell ended up
+        # (the old figure counted cells attempted, which is not the same as cells matched).
+        _led = recalcIn.get('ledger') or {}
+        if _led:
+            _pop = _led.get('population', 0)
+            _cmp = _led.get('compared', 0)
+            _held = _led.get('held_back', 0)
+            _set_aside = (_led.get('excluded_external_reference', 0) + _led.get('excluded_offset', 0)
+                          + _led.get('excluded_bare_multicell_name', 0) + _led.get('excluded_downstream_of_excluded', 0))
+            _bits = [f"{_led.get('matched', 0):,} matched", f"{_led.get('mismatched', 0):,} differ"]
+            if _held: _bits.append(f"{_held:,} differ but trace to an engine limitation (not settled)")
+            if _led.get('volatile'): _bits.append(f"{_led['volatile']:,} differ but depend on NOW, TODAY, RAND or a file-name function, so a value saved on another day or under another file name is not comparable")
+            if _led.get('unresolved'): _bits.append(f"{_led['unresolved']:,} returned an engine error (unresolved)")
+            if _led.get('missing_cache'): _bits.append(f"{_led['missing_cache']:,} have no saved value")
+            if _led.get('unsupported'): _bits.append(f"{_led['unsupported']:,} are of a type this comparison does not judge")
+            if _set_aside: _bits.append(f"{_set_aside:,} set aside before comparison (OFFSET, external-reference, bare named-range cells and their dependents)")
+            if _led.get('not_run'): _bits.append(f"{_led['not_run']:,} not run")
+            _recon = ('These categories add up to the workbook\'s formula-cell count.' if _led.get('reconciles')
+                      else f"These categories differ from the workbook's formula-cell count of {_pop:,} by {abs(_pop - _led.get('accounted', 0)):,}.")
+            _pol = recalcIn.get('comparison_policy', '')
+            _recalc_summary = (f"A genuine, independent full-workbook recalculation (via Formualizer, not a comparison against Excel's own cached values) accounted for {_pop:,} formula cell(s), correctly resolving {_circular_groups} genuine circular dependency group(s) via iterative calculation: " + "; ".join(_bits) + f". {_recon} "
+                               + ("A match proves only that the saved and recalculated results agree; it does not show that the formula expresses the correct financial rule. " )
+                               + (f"Comparison policy: {_pol}. " if _pol else '') + _sanitized_note.strip())
+            _partial = _pop > 0 and (_cmp / _pop) < 0.9
+            _recalc_status = 'Performed (partial coverage)' if _partial else 'Performed'
+            _recalc_next = ('Investigate each difference listed in the Issue Log' if (_led.get('mismatched') or _held)
+                            else ('None for the cells compared. Cells set aside, unresolved or without a saved value rely on cached values only and remain unverified' if (_pop - _cmp) > 0 else 'None for the cells checked'))
     # B1 — 7 mining-specific commercial omission patterns (revenue-to-Ops
     # linkage, capex post-commissioning, tax shield, debt sculpting,
     # rehabilitation provision, royalty treatment, FX consistency) were

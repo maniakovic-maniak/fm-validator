@@ -52,6 +52,7 @@ const { checkNestedSubtotals } = require('./src/utils/nested-subtotal-check');
 const { checkDoubleScaling } = require('./src/utils/double-scaling-check');
 const { scanSumRanges } = require('./src/utils/sum-range-scan');
 const { buildRunProvenance, writeProvenance } = require('./src/utils/run-provenance');
+const { buildRecalcFindings } = require('./src/utils/recalc-findings');
 const { checkPlaceholderText } = require('./src/utils/placeholder-text-check');
 const { checkPmtSignConsistency } = require('./src/utils/pmt-sign-convention-check');
 const { checkTerminalPeriodCompleteness } = require('./src/utils/terminal-period-completeness-check');
@@ -907,40 +908,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       if (recalcCheckResult.sanitized_defined_names_count > 0) {
         console.log(`   \u2139\ufe0f  Recalculation check succeeded after removing ${recalcCheckResult.sanitized_defined_names_count} defined name(s) containing "?" that this workbook's recalculation engine cannot parse (${recalcCheckResult.sanitized_defined_names.join(', ')}) \u2014 ${recalcCheckResult.sanitized_formula_cells_affected} formula cell(s) referencing them may show as unresolved rather than compared; every other cell was recalculated and compared normally.`);
       }
-      if (recalcCheckResult.mismatch_count > 0) {
-        const sample = recalcCheckResult.mismatches.slice(0, 8)
-          .map(m => `${m.sheet}!${m.cell} (shows ${m.cached.toLocaleString()}, recalculates to ${m.recalculated.toLocaleString()})`).join(', ');
-        allFlagged.push({
-          id: 'T0-RECALC-001',
-          label: `${recalcCheckResult.mismatch_count} formula cell(s) recalculate to a different value than their cached result`,
-          severity: 'high', status: 'fail',
-          sheet: '', cell: 'A1', category: 'Structure',
-          condition: `A genuine, full-workbook recalculation (${recalcCheckResult.formula_cells_checked.toLocaleString()} formula cells checked, correctly resolving ${recalcCheckResult.genuine_circular_groups} genuine circular dependency group(s) via iterative calculation) found ${recalcCheckResult.mismatch_count} cell(s) whose displayed, cached value doesn't match what the formula actually computes: ${sample}. This means either the file wasn't recalculated and saved with calculation enabled before delivery, or a genuine formula error exists.`,
-          reason: `${recalcCheckResult.mismatch_count} cell(s) show a cached value inconsistent with a fresh recalculation`,
-          corrective_action: 'Open the file in Excel, force a full recalculation (Ctrl+Alt+F9), and re-save. If mismatches persist after recalculation, investigate each flagged cell\'s formula directly.',
-          workstream: 'Structure', category: 'Structure', issue_type: 'Stale or incorrect cached formula result',
-          model_risk: 'Every displayed figure in this model is only as trustworthy as its cached value — this check found cells where that trust is misplaced.',
-          key_output_impact: 'Yes', method: 'automated', needs_retest: true,
-          root_cause: 'Cached formula result does not match a genuine recalculation', escalation_flag: true,
-          urgency: 'Before next reliance', confidence: 95
-        });
-      }
-      if (recalcCheckResult.unconverged_circular_groups > 0) {
-        allFlagged.push({
-          id: 'T0-RECALC-002',
-          label: `${recalcCheckResult.unconverged_circular_groups} circular calculation group(s) did not converge`,
-          severity: 'high', status: 'fail',
-          sheet: '', cell: 'A1', category: 'Structure',
-          condition: `${recalcCheckResult.unconverged_circular_groups} circular dependency group(s) were still changing after the maximum iteration count, rather than settling to a stable value — a genuine, unresolved circularity, not the common and usually-benign interest-on-average-balance pattern that normally converges cleanly.`,
-          reason: `${recalcCheckResult.unconverged_circular_groups} circular group(s) failed to converge`,
-          corrective_action: 'Investigate the specific formulas involved — an unstable circularity can mean the underlying logic is genuinely unbounded or oscillating, not just slow to settle.',
-          workstream: 'Structure', category: 'Structure', issue_type: 'Unconverged circular calculation',
-          model_risk: 'A circular calculation that never settles means the model\'s displayed values may depend on exactly how many iterations Excel happened to run, not on a stable, well-defined answer.',
-          key_output_impact: 'Yes', method: 'automated', needs_retest: true,
-          root_cause: 'Circular calculation did not converge within the iteration limit', escalation_flag: true,
-          urgency: 'Before next reliance', confidence: 90
-        });
-      }
+      // Patch 28: the findings are built in one place (src/utils/recalc-findings.js) for both pipelines.
+      allFlagged.push(...buildRecalcFindings(recalcCheckResult));
     } else {
       console.log(`   \u26a0\ufe0f  Recalculation check did not complete: ${recalcCheckResult.status}${recalcCheckResult.error ? ' — ' + recalcCheckResult.error : ''}`);
       if (recalcCheckResult.reason) {

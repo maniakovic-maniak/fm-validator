@@ -449,6 +449,16 @@ def _sheets_in_span(sheet1, sheet2, sheet_order):
     return [sheet1, sheet2] if sheet1 != sheet2 else [sheet1]
 
 
+def _jsonable(v):
+    """A cell value in a form json.dumps accepts (dates become ISO text; everything else is passed through)."""
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    try:
+        return v.isoformat()
+    except Exception:
+        return str(v)
+
+
 def _extract_refs(formula, current_sheet, sheet_order=None, max_range_cells=2000):
     """Best-effort cell/range reference extraction — doesn't need to be a
     complete Excel-grammar parser, just reliable enough to catch real
@@ -614,7 +624,21 @@ def _progress(msg):
     print(f"[recalc_check] {msg}", file=sys.stderr, flush=True)
 
 
-def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
+try:
+    import recalc_compare as rc
+except ImportError:  # run as a script from another directory
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import recalc_compare as rc
+
+
+def run(path, relative_tolerance=None, absolute_tolerance=None):
+    # Patch 28: the comparison policy lives in recalc_compare.POLICY (0.1% relative; absolute floor 0.01, or 0.0001
+    # for saved values of size 10 or less; text, Boolean and error values exact). The arguments override it for tests.
+    policy = dict(rc.POLICY)
+    if relative_tolerance is not None:
+        policy["relative"] = relative_tolerance
+    if absolute_tolerance is not None:
+        policy["absolute"] = absolute_tolerance
     t_start = time.time()
     global _CURRENT_WORKBOOK_PATH
     _CURRENT_WORKBOOK_PATH = path
@@ -884,38 +908,44 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
 
     mismatches = []
     unresolved_errors = []
+    counts = {"matched": 0, "unresolved": 0, "missing_cache": 0, "unsupported": 0}
+    missing_cache_sample = []
+    unsupported_sample = []
+    epoch = getattr(wb_cached, "epoch", None)
 
+    # Patch 28: every compared cell lands in exactly one outcome (matched, mismatch, unresolved, missing cache,
+    # unsupported type). Text, Boolean and date results are judged too; previously only number-against-number pairs
+    # reached a verdict and every other combination passed without one.
     for key, cached_val, recalced_val in zip(target_keys, cached_values, recalculated_values):
         sheet_name, cell_addr = key.split('!', 1)
-
-        is_string_error = isinstance(recalced_val, str) and recalced_val.startswith('#')
-        is_dict_error = isinstance(recalced_val, dict) and recalced_val.get('type') == 'Error'
-        if is_string_error or is_dict_error:
-            error_repr = recalced_val if is_string_error else f"{recalced_val.get('kind', 'Unknown')} error"
-            unresolved_errors.append({"sheet": sheet_name, "cell": cell_addr, "recalculated_error": error_repr})
-            continue
-
-        cached_is_nan = isinstance(cached_val, float) and math.isnan(cached_val)
-        recalced_is_nan = isinstance(recalced_val, float) and math.isnan(recalced_val)
-        if cached_is_nan or recalced_is_nan:
-            # IEEE-754 NaN comparisons are always False in Python (nan > x
-            # is never true), so the normal mismatch check below would
-            # silently treat this as "no mismatch" — but a formula
-            # genuinely producing NaN is itself usually a real problem
-            # (e.g. an invalid statistical operation), not something to
-            # hide by falling through the tolerance check.
-            unresolved_errors.append({"sheet": sheet_name, "cell": cell_addr,
-                                       "cached_is_nan": cached_is_nan, "recalculated_is_nan": recalced_is_nan})
-            continue
-
-        if isinstance(cached_val, (int, float)) and isinstance(recalced_val, (int, float)):
-            tolerance = max(absolute_tolerance, abs(cached_val) * relative_tolerance)
-            if abs(cached_val - recalced_val) > tolerance:
-                mismatches.append({
-                    "sheet": sheet_name, "cell": cell_addr,
-                    "cached": cached_val, "recalculated": recalced_val,
-                    "diff": recalced_val - cached_val,
-                })
+        verdict = rc.classify(cached_val, recalced_val, policy, epoch)
+        outcome = verdict["outcome"]
+        if outcome == "unresolved":
+            entry = {"sheet": sheet_name, "cell": cell_addr}
+            if verdict.get("reason") == "engine_error":
+                is_string_error = isinstance(recalced_val, str) and recalced_val.startswith('#')
+                entry["recalculated_error"] = recalced_val if is_string_error else f"{recalced_val.get('kind', 'Unknown')} error"
+            else:
+                entry["cached_is_nan"] = isinstance(cached_val, float) and not math.isfinite(cached_val)
+                entry["recalculated_is_nan"] = isinstance(recalced_val, float) and not math.isfinite(recalced_val)
+            unresolved_errors.append(entry)
+            counts["unresolved"] += 1
+        elif outcome == "mismatch":
+            mismatches.append({
+                "sheet": sheet_name, "cell": cell_addr,
+                "cached": _jsonable(cached_val), "recalculated": _jsonable(recalced_val),
+                "diff": verdict.get("diff"), "type": verdict.get("type", "number"),
+            })
+        elif outcome == "missing_cache":
+            counts["missing_cache"] += 1
+            if len(missing_cache_sample) < 50:
+                missing_cache_sample.append({"sheet": sheet_name, "cell": cell_addr, "recalculated": _jsonable(recalced_val)})
+        elif outcome == "unsupported":
+            counts["unsupported"] += 1
+            if len(unsupported_sample) < 50:
+                unsupported_sample.append({"sheet": sheet_name, "cell": cell_addr})
+        else:
+            counts["matched"] += 1
 
     # Separate genuinely clean mismatches from a chain of IFERROR/IFNA-
     # masked upstream failures. Found via real testing against Hidden
@@ -942,7 +972,6 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
     # mismatch's own formula uses. Runs entirely on data already in
     # memory (formula text, the mismatches/unresolved_errors just
     # built) — no need to re-run the expensive Formualizer evaluation.
-    _IFERROR_IFNA_RE = re.compile(r'\bIFERROR\s*\(|\bIFNA\s*\(', re.IGNORECASE)
     mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
 
     formula_by_key = {key: formula_texts[i] for i, key in enumerate(target_keys)}
@@ -984,6 +1013,7 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
                f"({round(time.time()-t_start,1)}s elapsed).")
 
     tainted_by_error = set()
+    root_label_of = {}
     for key in target_keys:
         formula = formula_by_key.get(key)
         if not formula:
@@ -991,12 +1021,20 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         # Directly references a confirmed-broken cell, or uses an
         # explicit error-masking function as a supplementary signal
         # (still valid — just no longer the ONLY signal).
-        if _IFERROR_IFNA_RE.search(formula):
+        # Patch 28: the word IFERROR alone no longer holds a mismatch back. A cell is linked to an engine limitation
+        # only through a specific root: an IFERROR/IFNA formula that itself calls a function this engine is known to
+        # evaluate differently (recalc_compare.ENGINE_LIMITED_FUNCTIONS), or a reference to a cell the engine could
+        # not resolve. Anything else that differs stays a clean mismatch.
+        _limited = rc.engine_limited_function(formula)
+        if _limited:
             tainted_by_error.add(key)
+            root_label_of[key] = f"{_limited}() inside IFERROR/IFNA"
             continue
         refs = refs_by_key.get(key, ())
-        if any(f"{rsheet}!{rcol}{rrow}" in root_seeds for (rsheet, rcol, rrow) in refs):
+        _hit = next((f"{rsheet}!{rcol}{rrow}" for (rsheet, rcol, rrow) in refs if f"{rsheet}!{rcol}{rrow}" in root_seeds), None)
+        if _hit:
             tainted_by_error.add(key)
+            root_label_of[key] = f"unresolved cell {_hit}"
     _progress(f"  initial seeding pass complete: {len(tainted_by_error):,} cell(s) tainted "
                f"({round(time.time()-t_start,1)}s elapsed).")
 
@@ -1015,6 +1053,8 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
             for dep_key in dependents_of.get(tkey, ()):
                 if dep_key not in tainted_by_error:
                     newly_tainted.add(dep_key)
+                    if dep_key not in root_label_of:
+                        root_label_of[dep_key] = root_label_of.get(tkey, "an engine limitation")
         _progress(f"  masking wave {_wave}: {len(newly_tainted):,} newly tainted, "
                   f"{len(tainted_by_error)+len(newly_tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
         if not newly_tainted:
@@ -1022,10 +1062,39 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         tainted_by_error |= newly_tainted
         frontier = newly_tainted
 
+    # Patch 28: a mismatch that calls, or depends on, NOW/TODAY/RAND or a file-name function is volatile, not an error:
+    # its saved value was calculated on another day or under another file name. Reported in the ledger, not as a defect.
+    volatile_tainted = {k for k in target_keys if rc.is_volatile(formula_by_key.get(k))}
+    _vfront = set(volatile_tainted)
+    while _vfront:
+        _vnew = set()
+        for _k in _vfront:
+            for _d in dependents_of.get(_k, ()):
+                if _d not in volatile_tainted:
+                    _vnew.add(_d)
+        volatile_tainted |= _vnew
+        _vfront = _vnew
+    volatile_mismatches = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" in volatile_tainted]
+    mismatches = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" not in volatile_tainted]
+    mismatch_keys = {f"{m['sheet']}!{m['cell']}" for m in mismatches}
+
     masked = tainted_by_error & mismatch_keys
 
     mismatches_clean = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" not in masked]
-    mismatches_likely_masked_upstream_error = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" in masked]
+    mismatches_likely_masked_upstream_error = []
+    for m in mismatches:
+        _k = f"{m['sheet']}!{m['cell']}"
+        if _k in masked:
+            m = dict(m)
+            m["root_label"] = root_label_of.get(_k, "an engine limitation")
+            mismatches_likely_masked_upstream_error.append(m)
+
+    ledger = rc.build_ledger(
+        formula_count,
+        {"matched": counts["matched"], "mismatched": len(mismatches_clean), "held_back": len(mismatches_likely_masked_upstream_error), "volatile": len(volatile_mismatches),
+         "unresolved": counts["unresolved"], "missing_cache": counts["missing_cache"], "unsupported": counts["unsupported"]},
+        {"external_reference": len(external_ref_cells), "offset": len(offset_cells),
+         "bare_multicell_name": len(multicell_range_cells), "downstream_of_excluded": tainted_downstream_count if tainted_downstream_count > 0 else 0})
 
     return {
         "status": "success",
@@ -1042,6 +1111,16 @@ def run(path, relative_tolerance=0.001, absolute_tolerance=1.0):
         "mismatch_count": len(mismatches_clean),
         "mismatches_likely_masked_upstream_error": mismatches_likely_masked_upstream_error,
         "mismatches_likely_masked_upstream_error_count": len(mismatches_likely_masked_upstream_error),
+        # Patch 28: the same list under the name that says what it is, now shown in the report instead of dropped.
+        "mismatches_held_back": mismatches_likely_masked_upstream_error,
+        "mismatches_held_back_count": len(mismatches_likely_masked_upstream_error),
+        "formula_cells_compared": ledger["compared"],
+        "ledger": ledger,
+        "volatile_dependent_count": len(volatile_mismatches),
+        "volatile_sample": volatile_mismatches[:20],
+        "missing_cache_sample": missing_cache_sample,
+        "unsupported_sample": unsupported_sample,
+        "comparison_policy": rc.policy_text(policy),
         "unresolved_errors": unresolved_errors,
         "unresolved_error_count": len(unresolved_errors),
         "sanitized_defined_names": sanitized_names,

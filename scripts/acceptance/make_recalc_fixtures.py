@@ -36,4 +36,12 @@ make(os.path.join(out, 'case2_iferror_stale.xlsx'),
 make(os.path.join(out, 'case3_result_types.xlsx'),
      {'A1': 1, 'B1': '=A1&"x"', 'C1': '=A1>0', 'D1': '=A1+1', 'E1': '=1/0'},
      {'B1': ('str', 'zz'), 'C1': ('bool', 0), 'D1': ('none', None), 'E1': ('num', 5)})
+# volatile: TODAY() saved on another day, and a cell that depends on it
+make(os.path.join(out, 'volatile.xlsx'), {'A1': '=TODAY()', 'B1': '=A1+1', 'C1': 5, 'D1': '=C1*2'},
+     {'A1': ('num', 44000), 'B1': ('num', 44001), 'D1': ('num', 10)})
+# held back: an IFERROR over IRR (a documented engine limitation) whose saved value differs
+make(os.path.join(out, 'heldback.xlsx'), {'A1': -100, 'A2': 60, 'A3': 60, 'B1': '=IFERROR(IRR(A1:A3),0)', 'C1': '=B1*2'},
+     {'B1': ('num', 0.9), 'C1': ('num', 1.8)})
+# a clean file: everything matches
+make(os.path.join(out, 'clean.xlsx'), {'A1': 2, 'B1': '=A1*3', 'C1': '=B1+1'}, {'B1': ('num', 6), 'C1': ('num', 7)})
 print('ok')
