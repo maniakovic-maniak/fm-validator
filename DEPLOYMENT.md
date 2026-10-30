@@ -381,3 +381,36 @@ only their offsets are held in memory (Hidden Gem: 388 formulas). Read formulas 
 key, info)`; the circular-reference detector, the dependency tracer, the NPV and nested-IF checks, the range checks and
 the Formula Deep Dive now do. The 300-character field stays for display. Measured on Hidden Gem on a 2-core 8 GB
 sandbox: Tier 0 64.9 s to 67.4 s, peak 1,808 MB to 1,822 MB. The VPS run is still the gate.
+
+## Focused path checks (Patch 31)
+
+Four deterministic checks that read saved values and formula text (no recalculation), run in both pipelines through
+`runPathChecks` and shown on a new Path Checks tab with one verdict per tested item (passed, defect, query, control
+weakness, not completed).
+
+- **Lookup contract** (`lookup-contract.js`, T0-LOOKUP-001 missing key, high; T0-LOOKUP-002 duplicate key, medium):
+  `MATCH(key, array, 0)` with `&` keys and `INDEX(NamedBlock,,col)` parts. The key is built from saved values and the
+  source rows that match are counted. A key that is blank, a wildcard, an invalid saved date, a repeated 0, or sits in
+  an `IF` branch that may not run is counted Not completed, never judged.
+- **Average completeness** (`average-completeness.js`, T0-AVGCOMP-001 high, -002 low): an `AVERAGE` over one row or
+  column (direct or `OFFSET`) is compared with the numeric cells it was given; a formula cell returning text is a
+  defect, blanks a query, an `IFERROR`/`IFNA` text fallback in a feeder a control weakness. The sensitivity figure is
+  arithmetic on saved values.
+- **Fallback propagation** (`fallback-propagation.js`, T0-FALLBACK-001 low): `IFERROR(lookup, "text")` families, one
+  budgeted pass to classify direct readers as error, omitted, handled or other.
+- **Bypassed checks** (`bypassed-checks.js`): for a nested-subtotal finding, names the check cells in the same column
+  that cannot reach the cell, and the ones that can.
+- Nested-subtotal and double-scaling findings now carry a `quantification` (reported, expected, difference) from saved
+  values; a ratio of two scaled figures is separated from a scaled amount.
+
+Each scan is time-boxed and says "stopped after N seconds" when it is. Measured in the sandbox on Hidden Gem: path
+checks 5.3 s on top of Tier 0; Bend, Sydney Airport, riio, Carlsberg, Port Melbourne and the ESO model raise no lookup
+defects. Acceptance cases 10 to 14 run on synthetic fixtures (`scripts/path-fixtures.js`) because the ESO file is not in
+the repository. Not yet done: Bend has 785 lookups Not completed because ExcelJS returns some saved dates as invalid
+Date objects; reading the raw serial would recover them.
+
+**Output registry (draft only).** `scripts/propose-output-registry.js <model>` writes
+`config/output-registries/<model>.proposed.json` from sheet and row labels. It is `proposed` with `approved_by` and
+`approved_on` empty, is not read by the pipeline and holds no report. Approval storage and the verdict ceiling arrive in
+Patch 33. Deep Dive selection by consequence waits for the Patch 32 reference service (Tier 0 holds sheet-level links
+only). Tier 0 still runs after Tier 2 on the full-parse route.

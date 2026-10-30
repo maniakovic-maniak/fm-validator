@@ -2290,6 +2290,50 @@ def build_report(data_path, output_path):
         wsi.freeze_panes='A2'; wsi.auto_filter.ref=f'A1:G{len(ufs)+1}'
 
     # ════════════════════════════════════════════════════════════════════════
+    # TAB — PATH CHECKS (Patch 31): every tested criterion on the paths that feed outputs, with its verdict
+    # ════════════════════════════════════════════════════════════════════════
+    pcIn = d.get('pathChecks') or {}
+    if pcIn.get('rows'):
+        wpc=wb.create_sheet('Path Checks'); wpc.sheet_view.showGridLines=False
+        for i,w in enumerate([3,22,30,18,100],1): set_col(wpc,i,w)
+        merge(wpc,'B1:E1','PATH CHECKS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
+        fill_range(wpc,1,2,1,5,DARK_BLUE); set_row(wpc,1,26)
+        merge(wpc,'B2:E2','Each criterion is tested on its own: a formula can reproduce its saved value (passed) and still carry a control weakness. Saved values only; nothing here is a recalculation. Passed results raise no finding.',
+              sz=9,col=GREY_TXT2,italic=True,wrap=True)
+        set_row(wpc,2,28)
+        r_pc=4
+        for sm in pcIn.get('summary',[]):
+            cnt=sm.get('counts',{}) or {}
+            label={'passed':'passed','defect':'defect','query':'query','control_weakness':'control weakness','not_applicable':'not applicable'}
+            bits=[f"{v} {label.get(k,k)}" for k,v in cnt.items() if v]
+            line=f"{sm['criterion']}: {sm.get('tested',0)} tested" + (f" ({', '.join(bits)})" if bits else '')
+            if sm.get('notCompleted'):
+                why='; '.join(f"{n} {k}" for k,n in (sm.get('reasons') or {}).items())
+                line += f". {sm['notCompleted']} not completed" + (f" ({why})" if why else '')
+            if sm.get('stopped'): line += f". Scan {sm['stopped']}"
+            merge(wpc,f'B{r_pc}:E{r_pc}',line,sz=9,col=CHARCOAL,bg=PANEL_GREY,wrap=True,v='center')
+            set_row(wpc,r_pc,30 if len(line)>150 else 18); r_pc+=1
+        r_pc+=1
+        pc_hdr=r_pc
+        for col,h in enumerate(['','Criterion','Location','Verdict','Evidence'],1):
+            c=wpc.cell(pc_hdr,col); c.value=h; c.font=Fn(bold=True,sz=9,col=WHITE); c.fill=F(DARK_BLUE)
+            c.alignment=A(h='center',v='center',wrap=True); c.border=B(col=WHITE)
+        set_row(wpc,pc_hdr,22)
+        vfill={'Defect':(P1_FILL,P1_TXT),'Control weakness':(P2_FILL,P2_TXT),'Query':(P3_FILL,P3_TXT),'Passed':(OK_FILL,OK_TXT)}
+        for i,row in enumerate(pcIn['rows']):
+            rr=pc_hdr+1+i; bg=WHITE if i%2==0 else 'FAFBFC'
+            for col,key in [(2,'criterion'),(3,'location'),(4,'verdict'),(5,'evidence')]:
+                c=wpc.cell(rr,col); c.value=row.get(key,''); c.font=Fn(sz=9); c.fill=F(bg)
+                c.alignment=A(h='center' if col==4 else 'left',v='top',wrap=True); c.border=B(col=PANEL_BORDER)
+            vf=vfill.get(row.get('verdict'))
+            if vf: badge(wpc,rr,4,row.get('verdict'),vf[0],vf[1],sz=8,bold=False)
+            set_row(wpc,rr,max(18,min(90,14*(1+len(str(row.get('evidence','')))//95))))
+        wpc.freeze_panes=f'B{pc_hdr+1}'
+        if pcIn.get('omitted'):
+            nr=pc_hdr+len(pcIn['rows'])+1
+            merge(wpc,f'B{nr}:E{nr}',f"{pcIn['omitted']:,} further result(s) not shown (defects, weaknesses and queries are listed first).",sz=8,col=GREY_TXT2,italic=True)
+
+    # ════════════════════════════════════════════════════════════════════════
     # TAB — ERROR-CODE ROOT CAUSE MATRIX (V11 §4)
     # ════════════════════════════════════════════════════════════════════════
     wse=wb.create_sheet('Error Matrix'); wse.sheet_view.showGridLines=False
@@ -3074,7 +3118,7 @@ def build_report(data_path, output_path):
         'Audit Output': DARK_BLUE, 'Read Me': '5B7C99', 'Scope and Reliance': '5B7C99',
         'Issue Log': AMBER, 'Remediation': AMBER,
         'Assumption Register': GREY_MID, 'Validation Matrix': GREY_MID,
-        'Formula Risk Review': GREY_MID, 'Formula Inventory': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID, 'Named Range Audit': GREY_MID, 'Reasonableness Review': AMBER,
+        'Formula Risk Review': GREY_MID, 'Path Checks': GREY_MID, 'Formula Inventory': GREY_MID, 'Redundant Inputs': GREY_MID, 'Sheet Linkage': GREY_MID, 'Named Range Audit': GREY_MID, 'Reasonableness Review': AMBER,
         'Error Matrix': GREY_MID, 'Sheet Dependency': GREY_MID,
         'F-Score Rules': GREY_MID, 'Pipeline Audit Trail': GREY_MID,
     }

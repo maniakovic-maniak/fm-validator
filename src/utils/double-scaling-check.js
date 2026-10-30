@@ -21,7 +21,8 @@ const MAX_INSTANCES = 500;
 function colName(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
 function numResult(cell) {
   const v = cell.value;
-  const r = v && typeof v === 'object' && 'result' in v ? v.result : v;
+  // cell.result also returns a saved 0, which ExcelJS leaves out of cell.value for a formula
+  const r = v && typeof v === 'object' && typeof v.formula === 'string' ? cell.result : (v && typeof v === 'object' && 'result' in v ? v.result : v);
   return typeof r === 'number' && isFinite(r) ? r : null;
 }
 const norm = s => String(s).replace(/\s+/g, '');
@@ -74,6 +75,22 @@ function refsIn(body, ownSheet) {
   return out;
 }
 
+// Evaluate the inputs of a scaled cell with their saved values: <body> with each reference replaced by its number.
+// Only digits, operators, brackets and decimal points may remain, so nothing else is ever executed.
+function evalBody(body, ownSheet, workbook) {
+  let ok = true;
+  const text = String(body).replace(/((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?\$?([A-Z]{1,3})\$?(\d+)(?![\d(])/g, (m, sh, col, row) => {
+    const sheet = sh ? sh.slice(0, -1).replace(/^'|'$/g, '').replace(/''/g, "'") : ownSheet;
+    const ws = workbook.getWorksheet(sheet);
+    const c = ws && ws.findCell(+row, col.split('').reduce((a2, ch) => a2 * 26 + ch.charCodeAt(0) - 64, 0));
+    const v = c ? numResult(c) : null;
+    if (v === null) { ok = false; return '0'; }
+    return '(' + v + ')';
+  });
+  if (!ok || !/^[0-9eE+\-*/(). ]+$/.test(text)) return null;
+  try { const r = Function('"use strict"; return (' + text + ');')(); return typeof r === 'number' && isFinite(r) ? r : null; } catch (_) { return null; }
+}
+
 function checkDoubleScaling(workbook) {
   const scaled = new Map();   // "sheet!ADDR" -> { op, name, body, cell }
   let formulaCells = 0;
@@ -102,8 +119,9 @@ function checkDoubleScaling(workbook) {
     if (e.instances.length >= MAX_INSTANCES) { e.truncated = true; continue; }
     const firstIn = inputs[0];
     const ratio = inputs.length >= 2 && /\//.test(s.body.replace(/^-\s*/, ''));
+    const expected = evalBody(s.body, s.sheet, workbook);          // the value with the factor applied once (or, for a ratio, not at all)
     e.instances.push({
-      cell: s.cell.address, formula: s.formula, value: numResult(s.cell), ratio,
+      cell: s.cell.address, formula: s.formula, value: numResult(s.cell), ratio, expected,
       inputs: inputs.map(x => ({ ref: `${x.r.sheet === s.sheet ? '' : x.r.sheet + '!'}${x.r.addr}`, formula: x.up.formula, value: numResult(x.up.cell) })),
       firstInput: firstIn.r.addr,
     });
@@ -114,12 +132,14 @@ function checkDoubleScaling(workbook) {
     const first = e.instances[0];
     const verb = e.op === '/' ? 'divided' : 'multiplied';
     const inputList = first.inputs.map(i => `${i.ref} (=${i.formula}${i.value !== null ? `, ${Math.round(i.value * 1000) / 1000}` : ''})`).join(' and ');
+    const q = (first.expected !== null && first.value !== null) ? { reported: first.value, expected: first.expected, difference: first.value - first.expected, kind: first.ratio ? 'ratio (should not be scaled at all)' : 'amount (scaled once is correct)', basis: 'saved values of the inputs' } : null;
+    const qNote = q ? ` With ${e.name} applied ${first.ratio ? 'to neither side' : 'once'}, ${first.cell} would be ${Math.round(q.expected * 1e4) / 1e4} against ${Math.round(q.reported * 1e4) / 1e4} reported (a difference of ${Math.round(q.difference * 1e4) / 1e4}).` : '';
     const ratioNote = first.ratio ? ` The result is a ratio of two figures that are both already scaled, so it is unit-free and should not be scaled by ${e.name} at all.` : '';
     findings.push({
       sheet: e.sheet, cell: first.cell, name: e.name, op: e.op, row: e.row,
       instanceCount: e.instances.length, instances: e.instances, cells: e.instances.map(i => i.cell),
-      ratio: first.ratio,
-      note: `${e.sheet}!${first.cell} (=${first.formula}) is ${verb} by ${e.name} but its input${first.inputs.length > 1 ? 's are' : ' is'} already ${verb} by ${e.name}: ${inputList}. The factor is applied twice.${ratioNote}${first.value !== null ? ` Cached value of ${first.cell}: ${Math.round(first.value * 1000) / 1000}.` : ''}`,
+      ratio: first.ratio, quantification: q,
+      note: `${e.sheet}!${first.cell} (=${first.formula}) is ${verb} by ${e.name} but its input${first.inputs.length > 1 ? 's are' : ' is'} already ${verb} by ${e.name}: ${inputList}. The factor is applied twice.${ratioNote}${first.value !== null ? ` Cached value of ${first.cell}: ${Math.round(first.value * 1000) / 1000}.` : ''}${qNote}`,
     });
   }
   findings.sort((a, b) => b.instanceCount - a.instanceCount);

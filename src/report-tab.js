@@ -3,6 +3,7 @@
 // Passes all pipeline data as JSON to the Python script.
 
 const { execFile } = require('child_process');
+const { pathCheckRows } = require('./utils/path-checks');
 const path = require('path');
 const fs   = require('fs');
 
@@ -13,7 +14,7 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     originalName, modelType, modelIndustry, modelPurpose,
     modelSummary, tier0, auditLog, overallAssessment,
     igReadiness, igCommentary, domainSkill, ruleResults, errorScan, redundantInputs, orphanSheets, namedRangeAudit, formulaDeepDive, reasonableness, duplicateSheets, vbaReview,
-    deepAccountingResolvedSheets, crossRunStats, batchFailures, partialCoverage, recalcCheckResult, excludedRuleIds, scopeSummary, tier2Evidence
+    deepAccountingResolvedSheets, crossRunStats, batchFailures, partialCoverage, recalcCheckResult, pathChecks, excludedRuleIds, scopeSummary, tier2Evidence
   } = meta;
 
   // Enrich findings with F-score using the cell-level index built by Tier 0.
@@ -82,6 +83,8 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     // even when the recalculation succeeded. Same default as build_report.py so
     // callers that do not pass it behave exactly as before.
     recalcCheckResult: recalcCheckResult || { status:'unavailable', reason:'not run for this session' },
+    // Patch 31: every tested path criterion with its verdict (passed ones included), for the Path Checks tab
+    pathChecks: pathCheckRows(pathChecks),
     // Rule ids out of scope for this model type (decided in server.js, logged and stored there).
     excludedRuleIds: excludedRuleIds || [],
     scopeSummary:    scopeSummary || null,

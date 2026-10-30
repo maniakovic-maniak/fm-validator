@@ -17,7 +17,8 @@ function colNum(c) { let n = 0; for (const ch of c.toUpperCase()) n = n * 26 + c
 function colName(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
 function numResult(cell) {
   const v = cell.value;
-  const r = v && typeof v === 'object' && 'result' in v ? v.result : v;
+  // cell.result also returns a saved 0, which ExcelJS leaves out of cell.value for a formula
+  const r = v && typeof v === 'object' && typeof v.formula === 'string' ? cell.result : (v && typeof v === 'object' && 'result' in v ? v.result : v);
   return typeof r === 'number' && isFinite(r) ? r : null;
 }
 
@@ -87,6 +88,7 @@ function checkNestedSubtotals(workbook) {
       sheet: e.sheet, cell: first.cell, innerCell: first.innerCell,
       instanceCount: e.instances.length, instances: e.instances,
       cells: e.instances.map(i => i.cell),
+      quantification: first.withoutRepeat !== null ? { reported: first.outerValue, repeatedSubtotal: first.innerValue, withoutRepeat: first.withoutRepeat, basis: 'saved values; the subtotal is counted once too many in the outer total' } : null,
       note: `${e.sheet}!${first.cell} (=${first.outerFormula}) covers ${first.innerCell} (=${first.innerFormula}) and also the cells that formula already adds up, so those cells are counted twice. Seen in ${e.instances.length} ${e.axis === 'column' ? 'column' : 'row'}(s) of ${where}.${effect}`,
     });
   }

@@ -50,6 +50,7 @@ const { checkDscrGatedDistributions } = require('./src/utils/dscr-gated-distribu
 const { checkLookupExactMatch } = require('./src/utils/lookup-exact-match-check');
 const { checkNestedSubtotals } = require('./src/utils/nested-subtotal-check');
 const { checkDoubleScaling } = require('./src/utils/double-scaling-check');
+const { runPathChecks, buildPathCheckFindings, addBypassedChecks } = require('./src/utils/path-checks');
 const { scanSumRanges } = require('./src/utils/sum-range-scan');
 const { buildRunProvenance, writeProvenance } = require('./src/utils/run-provenance');
 const { buildRecalcFindings } = require('./src/utils/recalc-findings');
@@ -1984,6 +1985,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   const nestedSubtotalCheck = (() => { try { return checkNestedSubtotals(parsed._raw); }
     catch (e) { console.error('   ⚠️  Nested-subtotal check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   if (nestedSubtotalCheck.applicable && nestedSubtotalCheck.findings.length > 0) {
+    addBypassedChecks(nestedSubtotalCheck, parsed._raw, tier0.cellScoreIndex);   // Patch 31: name the checks that could not have caught it
     const _ns = nestedSubtotalCheck.findings;
     const _nsSample = _ns.slice(0, 5).map(f => `${f.sheet}!${f.cell} (counts ${f.innerCell} and its components twice${f.instanceCount > 1 ? `; ${f.instanceCount} periods` : ''})`).join('; ');
     allFlagged.push({
@@ -2026,6 +2028,19 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       urgency: 'Before next reliance', confidence: 85,
       ...buildRootCauseFields('T0-DOUBLESCALE-001', doubleScalingCheck, { commonRemediationAction: 'Remove the repeated scaling and reconcile the line.' })
     });
+  }
+
+  // ── Patch 31: focused checks on the paths that feed outputs (lookup contract, average completeness, text fallbacks) ──
+  // Evidence for the questions an independent review asked of five focus formulas: which source row a lookup selects and
+  // whether the key is unique, whether an average is given every period, what a text fallback does downstream. Saved
+  // values only, no recalculation, time-boxed for a very large model; every result (passed ones too) goes to the Path
+  // Checks tab and only defects, queries and control weaknesses become findings.
+  const pathChecks = (() => { try { return runPathChecks(parsed._raw, tier0.cellScoreIndex); }
+    catch (e) { console.error('   ⚠️  Path checks failed:', e.message); return null; } })();
+  if (pathChecks) {
+    const _pcFindings = buildPathCheckFindings(pathChecks);
+    allFlagged.push(..._pcFindings);
+    console.log(`   ℹ️  Path checks: ${pathChecks.lookup.tested || 0} lookup(s), ${pathChecks.average.tested || 0} average(s), ${pathChecks.fallback.families || 0} fallback family(ies) examined; ${_pcFindings.length} finding(s)`);
   }
 
   // ── SUM / SUMIFS range scan: every simple range, grouped by row, with the odd one out named ──
@@ -3423,6 +3438,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       vbaReview,
       deepAccountingResolvedSheets,
       recalcCheckResult,
+      pathChecks,
       excludedRuleIds: ruleExclusions.excludedIds,
       scopeSummary: summarizeScopeForReport(ruleExclusions.record, scopePlan),
       ownerDecisionChecklist,
