@@ -64,6 +64,10 @@ const LARGE_BUFFER = 200 * 1024 * 1024; // 200MB - comfortably covers even the l
 logStep('Exporting model data');
 const exportResult = spawnSync('node', [path.join(__dirname, 'export-for-partner-review.js'), modelFilePath, orderId], { encoding: 'utf8', maxBuffer: LARGE_BUFFER });
 if (exportResult.status !== 0) failAndExit(`Export failed: ${exportResult.error || exportResult.stderr}`);
+// Patch 43: stdout must be the export JSON and nothing else. Say so plainly here instead of failing later inside the engagement.
+{ const head = String(exportResult.stdout).slice(0, 200).trimStart();
+  const tail = String(exportResult.stdout).slice(-200).trimEnd();
+  if (!head.startsWith('{') || !tail.endsWith('}')) failAndExit(`Export output is not clean JSON (it starts with: ${JSON.stringify(head.slice(0, 60))}). Something wrote to stdout besides the export.`); }
 fs.writeFileSync(exportPath, exportResult.stdout);
 console.error(exportResult.stderr);
 

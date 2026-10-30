@@ -582,3 +582,10 @@ Checks: `node test-patch39.js` (20 checks, including six simultaneous workers an
 - **ESO list.** `config/output-registries/determinations-eso-licence-model.json` holds 53 outputs, approved by Mik Riazanov on 2026-10-30 on the owner's instruction to sign by default. It was drafted from the audited file (hash b5dd90df...) with rows labelled only "Check" removed. All 53 resolve to formulas in that file. The draft is kept beside it.
 - An approval still applies only while its outputs are found in the workbook being audited.
 - No model calls. Check: `node test-patch42.js`.
+
+## Patch 43 - Partner Review export no longer corrupted by a parser log line
+
+- **Cause.** Patch 36 added a progress line, "Text results in date-formatted cells", printed with `console.log` (stdout). `export-for-partner-review.js` sends the export JSON on stdout, so the line landed at the top of `export.json` and the engagement failed with `Unexpected token 'ℹ' ... is not valid JSON`. Any model with text results in date-formatted cells hit it (Fm-00054, Fm-00055).
+- **Fix.** The export script sends all logging to stderr, so stdout is only the JSON. The pipeline script also checks that the export output starts with `{` and ends with `}` and, if not, fails with a plain message naming what came first.
+- **Re-run** the failed engagements from the admin page; nothing else is needed.
+- No model calls. Check: `node test-patch43.js` (it fails on the old code and passes on the new).

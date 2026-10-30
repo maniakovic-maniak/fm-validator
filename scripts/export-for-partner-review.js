@@ -14,6 +14,10 @@
 // matching the shared-filesystem architecture already agreed on, not a
 // direct code dependency between the two separate repos.
 
+// Patch 43: the export is the JSON on stdout. The parser prints progress lines with console.log (stdout), and one of them
+// ("Text results in date-formatted cells") landed in the JSON and broke every Partner Review run. All logging goes to stderr here.
+console.log = console.info = (...a) => console.error(...a);
+
 const { buildFullExport, batchExport } = require('../src/utils/partner-review-export');
 const { getOrder } = require('../src/utils/order-store');
 const path = require('path');
