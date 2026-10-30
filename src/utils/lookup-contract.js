@@ -16,6 +16,7 @@
 // "a"&"b"); the check reports the matches it finds on the joined text, which is what Excel itself compares.
 
 const { ancestors, splitTop, findCalls, parseRef, makeReader, namedAreas, colNum, colName, addr, isNum, isErr } = require('./path-checks-common');
+const { evalKeyExpr, deriveValue } = require('./key-expression');
 const { fullFormula } = require('./formula-store');
 
 const MAX_SOURCE_ROWS = 300000;
@@ -48,7 +49,13 @@ function lookupParts(arg, ownSheet, rd) {
     if (/^"(?:[^"]|"")*"$/.test(t)) { const tv = t.slice(1, -1).replace(/""/g, '"'); parts.push({ kind: 'text', value: tv, label: t, saved: tv }); continue; }
     if (/^-?\d+(?:\.\d+)?$/.test(t)) { parts.push({ kind: 'number', value: t, label: t, saved: Number(t) }); continue; }
     const ref = parseRef(t);
-    if (!ref || ref.isRange) return null;
+    if (!ref || ref.isRange) {
+      // Patch 36: a short calculation (YEAR($I$4) - 1, 2000 + VALUE(RIGHT(H$6,2))) is evaluated from saved values
+      const ev = !ref ? evalKeyExpr(t, ownSheet, rd) : null;
+      if (ev === null || ev === undefined) return null;
+      parts.push({ kind: 'expression', value: keyText(ev), label: t.length > 40 ? t.slice(0, 39) + '…' : t, saved: ev });
+      continue;
+    }
     const sheet = ref.sheet || ownSheet;
     const v = rd.value(sheet, ref.r1, ref.c1);
     if (v === undefined) return null;
@@ -75,9 +82,15 @@ function arrayParts(arg, ownSheet, rd, names) {
       parts.push({ sheet: block.sheet, r1: block.r1, r2: block.r2, c: block.c1 + col - 1, c1: block.c1 + col - 1, c2: block.c1 + col - 1, vertical: true, n: block.r2 - block.r1 + 1, label: `${a[0]} column ${col}` });
       continue;
     }
-    const ref = parseRef(t) || (names[t.toUpperCase()] || null);
+    // Patch 36: YEAR(range), MONTH(range) or DAY(range) as the lookup array: each element is passed through the function
+    const dv = /^(YEAR|MONTH|DAY)\s*\(([^()]*)\)$/i.exec(t);
+    const ref = dv ? parseRef(dv[2].trim()) : (parseRef(t) || (names[t.toUpperCase()] || null));
     if (!ref) return null;
-    if (ref.c1 === ref.c2) parts.push({ sheet: ref.sheet || ownSheet, r1: ref.r1, r2: ref.r2, c: ref.c1, c1: ref.c1, c2: ref.c2, vertical: true, n: ref.r2 - ref.r1 + 1, label: t });
+    if (dv && ref.isRange === false) return null;
+    const derive = dv ? dv[1].toUpperCase() : undefined;
+    if (ref.c1 === ref.c2 && derive) parts.push({ sheet: ref.sheet || ownSheet, r1: ref.r1, r2: ref.r2, c: ref.c1, c1: ref.c1, c2: ref.c2, vertical: true, n: ref.r2 - ref.r1 + 1, label: t, derive });
+    else if (ref.r1 === ref.r2 && derive) parts.push({ sheet: ref.sheet || ownSheet, r1: ref.r1, r2: ref.r2, c: ref.c1, c1: ref.c1, c2: ref.c2, vertical: false, n: ref.c2 - ref.c1 + 1, label: t, derive });
+    else if (ref.c1 === ref.c2) parts.push({ sheet: ref.sheet || ownSheet, r1: ref.r1, r2: ref.r2, c: ref.c1, c1: ref.c1, c2: ref.c2, vertical: true, n: ref.r2 - ref.r1 + 1, label: t });
     else if (ref.r1 === ref.r2) parts.push({ sheet: ref.sheet || ownSheet, r1: ref.r1, r2: ref.r2, c: ref.c1, c1: ref.c1, c2: ref.c2, vertical: false, n: ref.c2 - ref.c1 + 1, label: t });
     else return null;
   }
@@ -93,7 +106,9 @@ function checkLookupContracts(workbook, cellScoreIndex, opts = {}) {
   const indexCache = new Map();       // array signature -> { n, rows: Map(lowercase key -> [relative rows]) , first, parts }
   let candidates = 0, tested = 0, notCompleted = 0, stopped = null;
   const reasons = {};
-  const nc = r => { notCompleted++; reasons[r] = (reasons[r] || 0) + 1; };
+  const examples = {};                                  // up to 5 examples per reason, so a reader can see what was not tested
+  let cur = null;
+  const nc = r => { notCompleted++; reasons[r] = (reasons[r] || 0) + 1; if (cur && (examples[r] = examples[r] || []).length < 5) examples[r].push(cur); };
 
   for (const [key, info] of Object.entries(cellScoreIndex)) {
     const ft = info.formulaText;
@@ -106,6 +121,7 @@ function checkLookupContracts(workbook, cellScoreIndex, opts = {}) {
     for (const call of findCalls(formula, 'MATCH')) {
       if (call.args.length !== 3 || call.args[2].trim() !== '0') continue;
       candidates++;
+      cur = { cell: key, lookup: clipArg(call.args[0]) };
       if (/[*?~]/.test(call.args[0].replace(/"(?:[^"]|"")*"/g, m => (/[*?~]/.test(m) ? m : '')))) { nc('lookup text contains a wildcard character'); continue; }
       const lp = lookupParts(call.args[0], sheet, rd);
       if (!lp) { nc('lookup value not readable from saved values'); continue; }
@@ -118,14 +134,15 @@ function checkLookupContracts(workbook, cellScoreIndex, opts = {}) {
       if (typed && (lp[0].saved === null || lp[0].saved === undefined || lp[0].saved === '')) { nc('lookup value is blank'); continue; }
       if (n > MAX_SOURCE_ROWS) { nc('source block too large to scan'); continue; }
 
-      const sig = (typed ? 'T|' : 'S|') + ap.map(p => `${p.sheet}|${p.r1}|${p.r2}|${p.c1}|${p.c2}`).join('&');
+      const sig = (typed ? 'T|' : 'S|') + ap.map(p => `${p.sheet}|${p.r1}|${p.r2}|${p.c1}|${p.c2}|${p.derive || ''}`).join('&');
       let idx = indexCache.get(sig);
       if (!idx) {
         const rows = new Map(); let bad = 0;
         for (let i = 0; i < n; i++) {
           let k = '';
           for (const p of ap) {
-            const v = p.vertical ? rd.value(p.sheet, p.r1 + i, p.c1) : rd.value(p.sheet, p.r1, p.c1 + i);
+            let v = p.vertical ? rd.value(p.sheet, p.r1 + i, p.c1) : rd.value(p.sheet, p.r1, p.c1 + i);
+            if (p.derive) v = deriveValue(p.derive, v);
             const t = typed ? typedKey(v) : keyText(v);
             if (t === null) { k = null; break; }
             k += t;
@@ -167,10 +184,11 @@ function checkLookupContracts(workbook, cellScoreIndex, opts = {}) {
   const counts = { passed: 0, defect: 0, query: 0 };
   for (const r of records) counts[r.verdict] = (counts[r.verdict] || 0) + 1;
   return {
-    applicable: candidates > 0, lookupsFound: candidates, tested, notCompleted, notCompletedReasons: reasons, stopped,
+    applicable: candidates > 0, lookupsFound: candidates, tested, notCompleted, notCompletedReasons: reasons, notCompletedExamples: examples, stopped,
     counts, records: records.slice(0, 2000), recordsTruncated: records.length > 2000, ms: Date.now() - started,
     note: 'Evaluates MATCH(lookup, array, 0) keys from saved values and counts matching source rows. It does not recalculate, does not read wildcard or date keys, and does not judge whether the selected row is the right one economically.',
   };
 }
 
+const clipArg = a => (String(a).trim().length > 90 ? String(a).trim().slice(0, 89) + '…' : String(a).trim());
 module.exports = { checkLookupContracts, keyText, typedKey };

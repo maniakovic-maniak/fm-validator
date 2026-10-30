@@ -178,7 +178,8 @@ function summarizeScopeForReport(exclusionRecord, plan, scopeCfg) {
     notApplicable: by('not_applicable').length,
     evidenceRequired: by('evidence_required').map(e => ({ id: e.id, label: e.label })),
     extendedNotRun: by('extended_not_run').length,
-    fullReview: !!(plan && plan.fullScope)
+    fullReview: !!(plan && plan.fullScope),
+    tier2Sent: plan && Number.isFinite(plan.tier2ToRun) ? plan.tier2ToRun : null      // Patch 36: how many Tier 2 procedures the reviewer was asked to answer
   };
 }
 

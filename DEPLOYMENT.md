@@ -509,3 +509,16 @@ From the Partner Review of ESO run Fm-00053 (3 genuine misses of 23 independent 
 - **Timing (sandbox, Hidden Gem 1.15M cells):** independence 1.2 s, volatile stamps 0.8 s, one check not completed (size).
 
 Checks: `node test-patch35.js` (18 checks). `test-patch31.js` now accepts extra Path Checks criteria beyond the original three.
+
+## Text results in date-formatted cells, calculated lookup keys, scope figures, Hidden Gem timings (Patch 36)
+
+From the ESO and Bend runs: lookups the Path Checks tab could not test (5 on ESO, 785 on the Bend), and three scope figures that did not read as one story.
+
+- **The cause was in the Excel reader, not the model.** When a formula returns text ("FY26") in a cell with a date format, exceljs turns the saved text into an Invalid Date at load. The text is gone from the loaded workbook, so any check reading that cell, and the reviewer, saw a blank or a bad date. `src/utils/raw-result-recovery.js` (called from `parseWorkbook`, before the sheet rows are built) finds such formula cells, reads the real value from the sheet XML and puts it back as the cell's saved result. Formulas and styles are not touched. A sheet over 80M characters, or more than 20,000 cells, is skipped and reported. The run log prints "Text results in date-formatted cells: N of N read back from the file".
+- **How common it is:** ESO 109 cells, The Bend 87 (earlier Bend files 179 and 2), Railways 300, Mortgage 120, Hidden Gem 99; none on Carlsberg, Qantas or Sydney Airport. Cost 0.1-0.6 s, Hidden Gem 0.6 s.
+- **Lookup keys that are small calculations** (`src/utils/key-expression.js`): `YEAR($I$4)-1`, `2000+VALUE(RIGHT(H$6,2))`, with + - * / brackets and YEAR, MONTH, DAY, VALUE, LEFT, RIGHT, MID, LEN. Anything else, text in arithmetic or a blank returns "could not be read"; a wrong value is never produced, and each lookup is also compared with its own saved result, so a mistake shows as a disagreement. A lookup array of `YEAR(range)` is supported the same way. `notCompletedExamples` now keeps up to five examples per reason.
+- **Result on The Bend:** lookups tested 106 to 623 of 891, all passed, no false defects. ESO stays at 698 tested; its five `YEAR($I$4)-1` lookups sit in an `IF` branch that is not taken, so they are now correctly "not found inside a conditional branch" rather than "not readable".
+- **Scope figures:** the report was already consistent (122 counted = 16 Tier 1 + 106 Tier 2); the run log's 125 is the number of Tier 2 procedures put to the reviewer. The Scope tab's Tier 2 line now says so: "(125 were put to the reviewer; 19 were set aside after the run as not applicable to this model type and are in neither the counts nor the findings)". The figure comes from `scopeSummary.tier2Sent`.
+- **Hidden Gem on the VPS (Patch 33 code, measured 30 Oct 2026):** parse 18.4-18.5 s; Tier 0 128.7-133.1 s; path checks 9.9-10.7 s; cycle search 14.9-15.9 s; peak 2,029 MB under the default Node heap, whose limit is 2,096 MB (VPS has 7.4 GB RAM; pm2 sets no memory limit or node args). The margin between heap and RSS was not measured and the full pipeline on Hidden Gem was not timed end to end. Sandbox, Patches 35-36: check independence 1.2 s, volatile stamps 0.8 s, text recovery 0.6 s.
+
+Checks: `node test-patch36.js` (22 checks).

@@ -274,6 +274,13 @@ async function parseWorkbook(filePath) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(repairedPath);
 
+  // Patch 36: text results that exceljs turned into "Invalid Date" (a date-formatted cell whose formula returns text) are
+  // read back from the file, so every check and the reviewer see the real value.
+  let textRecovery = null;
+  try { textRecovery = await require('./utils/raw-result-recovery').recoverTextResults(workbook, repairedPath); }
+  catch (e) { console.error('   \u26a0\ufe0f  Text-result recovery failed (values left as loaded):', e.message); }
+  if (textRecovery && textRecovery.found) console.log(`   \u2139\ufe0f  Text results in date-formatted cells: ${textRecovery.recovered} of ${textRecovery.found} read back from the file${textRecovery.skipped ? `, ${textRecovery.skipped} could not be (${textRecovery.skippedSheets.slice(0, 3).join(', ')})` : ''}`);
+
   const sheetNames = workbook.worksheets.map(ws => ws.name);
   const sheets = {};
   for (const ws of workbook.worksheets) {
@@ -286,6 +293,7 @@ async function parseWorkbook(filePath) {
     _raw: workbook,
     _type: 'exceljs',
     _filePath: filePath,
+    _textRecovery: textRecovery,
     _calcSettings: await readCalcSettings(repairedPath)
   };
 }

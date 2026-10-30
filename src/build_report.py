@@ -1209,10 +1209,14 @@ def build_report(data_path, output_path):
     # in index.js/server.js.
     _t1_count = len([r for r in checklist_rules if r.get('_tier')=='Tier 1'])
     _t2_count = len([r for r in checklist_rules if r.get('_tier')=='Tier 2'])
+    # Patch 36: the run log says how many Tier 2 procedures the reviewer answered; the report counts the ones that apply to this
+    # model type. Say what the difference is, so the two figures read as one story.
+    _t2_sent = (d.get('scopeSummary') or {}).get('tier2Sent')
+    _t2_sent_note = (f' ({_t2_sent} were put to the reviewer; {_t2_sent - _t2_count} were set aside after the run as not applicable to this model type and are in neither the counts nor the findings)' if isinstance(_t2_sent,int) and _t2_sent > _t2_count else '')
     for label,val in [('Rules applied',(f'{len(findings)} findings from {len(checklist_rules)} procedures scheduled for this model type' if _scope_narrowed else f'{len(findings)} findings from a {len(checklist_rules)}-rule checklist')),
                        ('Tier 0 coverage',f'{t0.get("stats",{}).get("totalFormulaCells",0):,} formula cells scanned across all sheets'),
                        ('Tier 1 coverage',f'{_t1_count} deterministic structural code checks'),
-                       ('Tier 2 coverage',f'{_t2_count} Claude semantic checks across 13 sections'),
+                       ('Tier 2 coverage',f'{_t2_count} Claude semantic checks across 13 sections' + _t2_sent_note),
                        ('Accounting framework','Not confirmed in model — accrual basis assumed from statement structure'),
                        ('Audit completion',(f'{cov_conclusive_pct}% of the {cov_total_planned} procedures scheduled for this model type ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run).' + _scope_sentence + _fch_sentence if _scope_narrowed else f'{cov_conclusive_pct}% of planned procedures ({cov_pass} passed, {cov_issue} raised issues, {cov_unc} uncertain, {cov_np} not run)'))]:
         r3 = kv_row(r3,label,val)

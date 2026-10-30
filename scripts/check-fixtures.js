@@ -37,3 +37,32 @@ async function buildCheckWorkbook() {
   return file;
 }
 module.exports = { buildCheckWorkbook };
+
+// Patch 36: text labels in date-formatted formula cells (exceljs reads the saved text back as an Invalid Date), and lookups
+// whose keys are small calculations.
+async function buildLabelWorkbook() {
+  const wb = new ExcelJS.Workbook();
+  const s = wb.addWorksheet('P');
+  s.getCell('A1').value = 'Label';
+  ['FY26', 'FY27', 'FY28'].forEach((t, i) => {
+    const c = s.getCell(1, 3 + i);
+    c.value = { formula: `"FY"&(${26 + i})`, result: t };
+    c.numFmt = 'mmm-yy';                                                    // a date format on a text result
+  });
+  s.getCell('A2').value = 'Year';
+  [2026, 2027, 2028].forEach((y, i) => { s.getCell(2, 3 + i).value = y; });
+  s.getCell('A3').value = 'Date'; s.getCell('C3').value = new Date(Date.UTC(2028, 5, 30));
+  s.getCell('A4').value = 'Value';
+  [10, 20, 30].forEach((v, i) => { s.getCell(4, 3 + i).value = v; });
+  // lookups: a label key, a calculated year key, the prior year from a date
+  s.getCell('A6').value = 'by label'; s.getCell('C6').value = { formula: 'INDEX($C$4:$E$4,MATCH(D1,$C$1:$E$1,0))', result: 20 };
+  s.getCell('A7').value = 'by year from label'; s.getCell('C7').value = { formula: 'INDEX($C$4:$E$4,MATCH(2000+VALUE(RIGHT(E1,2)),$C$2:$E$2,0))', result: 30 };
+  s.getCell('A8').value = 'prior year'; s.getCell('C8').value = { formula: 'INDEX($C$4:$E$4,MATCH(YEAR($C$3)-1,$C$2:$E$2,0))', result: 20 };
+  s.getCell('A9').value = 'year of range'; s.getCell('C9').value = { formula: 'MATCH(2027,YEAR($C$11:$E$11),0)', result: 2 };
+  [new Date(Date.UTC(2026, 5, 30)), new Date(Date.UTC(2027, 5, 30)), new Date(Date.UTC(2028, 5, 30))].forEach((d, i) => { s.getCell(11, 3 + i).value = d; });
+  s.getCell('A12').value = 'wrong key'; s.getCell('C12').value = { formula: 'INDEX($C$4:$E$4,MATCH(2000+VALUE(RIGHT(E1,2))+5,$C$2:$E$2,0))', result: 10 };
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'labelfx-')), 'labels.xlsx');
+  await wb.xlsx.writeFile(file);
+  return file;
+}
+module.exports.buildLabelWorkbook = buildLabelWorkbook;
