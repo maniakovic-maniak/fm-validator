@@ -610,3 +610,6 @@ Checks: `node test-patch39.js` (20 checks, including six simultaneous workers an
 
 ## Patch 46 - npm test skips tests that need a real model file
 Nine test files read real models from /mnt/user-data/uploads, which only exists in the build sandbox. On a laptop they failed (130 passed, 9 failed). `npm test` now reports them as "skip (needs <file>)" when the file is absent; any FAIL means something is genuinely broken. No production code changed.
+
+## Patch 47 - proposed decision thresholds for The Bend (data only)
+Adds config/decision-thresholds/the-bend.proposed.json: DSCR >= 1.2x (Cashflow row 68), ICR >= 2.5x (Debt Dashboard row 12), net leverage <= 4.5x (Debt Dashboard row 13). Read from the model's own Inputs sheet, where they are labelled "Management funding assumption", so the sources say so. Not approved and not read by any code yet; the next patch wires thresholds into the recalculation once the values are confirmed.

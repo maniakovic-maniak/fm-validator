@@ -1,0 +1,12 @@
+{
+  "_status": "PROPOSED - not approved. Drafted from the model's own Inputs sheet, not from a facility agreement. Mik to confirm or replace each value and source before it is used.",
+  "_model": "Financial_Model_The_Bend_12_7_2026.xlsx (Inputs rows 119-122 and 495-497)",
+  "thresholds": [
+    {"id": "DSCR-min", "sheet": "Cashflow", "row": 68, "operator": ">=", "value": 1.2, "units": "x", "period": "all", "rounding_decimals": 2,
+     "source": "Model input Inputs!E120 (Minimum DSCR 1.2x), labelled 'Management funding assumption' in the model. Not a facility agreement term; confirm against the lender term sheet."},
+    {"id": "ICR-min", "sheet": "Debt Dashboard", "row": 12, "operator": ">=", "value": 2.5, "units": "x", "period": "all", "rounding_decimals": 2,
+     "source": "Model input Inputs!E121 (Minimum ICR 2.5x), labelled 'Management funding assumption' in the model. Not a facility agreement term; confirm against the lender term sheet."},
+    {"id": "NetLeverage-max", "sheet": "Debt Dashboard", "row": 13, "operator": "<=", "value": 4.5, "units": "x", "period": "all", "rounding_decimals": 2,
+     "source": "Model input Inputs!E122 (Maximum Net Leverage 4.5x, Net debt / EBITDA), labelled 'Management funding assumption' in the model. Not a facility agreement term; confirm against the lender term sheet."}
+  ]
+}
