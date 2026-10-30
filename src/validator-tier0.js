@@ -7,6 +7,8 @@
 //   - Formula Map (sheet dependency matrix + edge list)
 //   - Risk indicators (IFERROR, OFFSET, external links, hardcodes, #REF!)
 
+const { FormulaStore, attachStore } = require('./utils/formula-store');
+
 // ── F-Score rules (KPMG) ─────────────────────────────────────────────────────
 
 // Safe keyword match for sheet-name classification — short/ambiguous
@@ -142,16 +144,55 @@ function classifyFormula(formula) {
   return 'Other';
 }
 
-// Normalize a formula for UFI grouping —
-// strip cell address offsets so identical logic patterns share a UFI
-function normalizeFormula(formula) {
+// Normalise a formula into its family identity key (Patch 30).
+//
+// Two cells share a family only when their formulas are the same formula copied: the same functions, constants, text,
+// names and sheets, and every reference in the same place relative to the cell (R1C1 style, which is how Excel itself
+// treats a filled-across formula). So:
+//   =A1+B1 filled right          one family   (R[0]C[-1]+R[0]C[0] at every position)
+//   =A1+$B$1 and =A1+B1          two families (an absolute anchor is not a relative one)
+//   =A1+B1 and =A2+B1            two families (a different offset is a different formula)
+//   =IF(X1="AB12",1,0) and ="CD99"  two families (text constants are part of the formula; they are never read as cells)
+// Before this, every cell address became the word CELL, including text in quotes, so all of the above collapsed.
+// A family is a navigation aid. It is not evidence that every member was tested.
+//
+// `address` is the cell's own address (for example "C7"). Without it, references stay as written (upper case), which is
+// still exact: the same text gives the same key.
+const COL_CACHE = new Map();
+function colNumber(letters) {
+  let n = COL_CACHE.get(letters);
+  if (n === undefined) { n = 0; for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64); COL_CACHE.set(letters, n); }
+  return n;
+}
+const REF_RE = new RegExp(
+  '(?<![A-Z0-9_.$])(\\$?)([A-Z]{1,3})(\\$?)(\\d{1,7})(?::(\\$?)([A-Z]{1,3})(\\$?)(\\d{1,7}))?(?![A-Z0-9_(!.\\u0001])' +   // A1 or A1:B2
+  '|(?<![A-Z0-9_.$])(\\$?)([A-Z]{1,3}):(\\$?)([A-Z]{1,3})(?![A-Z0-9_(!.\\u0001])' +                                              // A:C
+  '|(?<![A-Z0-9_.$:])(\\$?)(\\d{1,7}):(\\$?)(\\d{1,7})(?![A-Z0-9_(.\\u0001])', 'g');                                           // 1:5
+function parseAddress(address) {
+  const m = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(address || '');
+  return m ? { row: parseInt(m[2], 10), col: colNumber(m[1].toUpperCase()) } : null;
+}
+function normalizeFormula(formula, address) {
   if (!formula) return '';
-  // Replace cell addresses like A1, $B$23, Sheet1!C4 with placeholders
-  return formula
-    .replace(/\$?[A-Z]{1,3}\$?[0-9]{1,7}/g, 'CELL')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
+  const lits = [];
+  const hold = m => { lits.push(m); return '\u0001' + (lits.length - 1) + '\u0001'; };
+  // text constants and quoted sheet names are set aside first, so nothing inside them is read as a reference
+  let f = String(formula).replace(/"(?:[^"]|"")*"/g, hold).replace(/'(?:[^']|'')+'/g, hold);
+  f = f.replace(/\s+/g, ' ').trim().toUpperCase();
+  const origin = parseAddress(address);
+  const rowTxt = (abs, n) => abs ? 'R' + n : 'R[' + (n - origin.row) + ']';
+  const colTxt = (abs, n) => abs ? 'C' + n : 'C[' + (n - origin.col) + ']';
+  f = f.replace(REF_RE, (m, a1, c1, a2, r1, a3, c2, a4, r2, a5, c3, a6, c4, a7, r3, a8, r4) => {
+    if (!origin) return m;
+    if (c1 !== undefined) {
+      const first = rowTxt(a2, parseInt(r1, 10)) + colTxt(a1, colNumber(c1));
+      if (c2 === undefined) return first;
+      return first + ':' + rowTxt(a4, parseInt(r2, 10)) + colTxt(a3, colNumber(c2));
+    }
+    if (c3 !== undefined) return colTxt(a5, colNumber(c3)) + ':' + colTxt(a6, colNumber(c4));
+    return rowTxt(a7, parseInt(r3, 10)) + ':' + rowTxt(a8, parseInt(r4, 10));
+  });
+  return f.replace(/\u0001(\d+)\u0001/g, (_, i) => lits[+i]);
 }
 
 // Extract sheet names referenced in a formula
@@ -228,6 +269,9 @@ async function runTier0(parsed) {
   const ufiMap = {};
   // Cell-level index: 'Sheet!Cell' -> { ufi, fscore, band, formulaText }
   const cellScoreIndex = {};
+  // Complete text of every formula cut for display (Patch 30); the index holds only offsets
+  const formulaStore = new FormulaStore();
+  attachStore(cellScoreIndex, formulaStore);
   // Risk accumulators
   let totalFormulaCells = 0;
   let totalDataTableCells = 0;
@@ -384,7 +428,7 @@ async function runTier0(parsed) {
           });
 
           // UFI grouping
-          const normalized = normalizeFormula(formula);
+          const normalized = normalizeFormula(formula, cell.address);
           if (!ufiMap[normalized]) {
             ufiCounter++;
             const fscore = scoreFormula(formula);
@@ -396,6 +440,7 @@ async function runTier0(parsed) {
               sheet:            sheetName,
               cell:             cell.address,
               formulaText:      formula.length > 500 ? formula.substring(0, 500) + '...' : formula,
+              formulaTruncated: formula.length > 500,
               fscore,
               band,
               explanation:      expl,
@@ -423,8 +468,10 @@ async function runTier0(parsed) {
             ufi:      ufiMap[normalized].ufi,
             fscore:   ufiMap[normalized].fscore,
             band:     ufiMap[normalized].band,
-            formulaText: formula.length > 300 ? formula.substring(0, 300) + '...' : formula
+            formulaText: formula.length > 300 ? formula.substring(0, 300) + '...' : formula,
+            formulaTruncated: formula.length > 300
           };
+          if (formula.length > 300) formulaStore.put(cellKey, formula);
 
         } else {
           // Value cell

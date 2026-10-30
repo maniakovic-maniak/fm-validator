@@ -366,3 +366,18 @@ shows up to 1,000 formulas (reviewed first, then highest F-score), and adds a Fo
 formula when that limit is reached. The "grounded in direct formula-text inspection" sentence is replaced by a statement
 of what the reviewer was given and what was not validated. `key_output_impact` of No or Unknown no longer adds to the
 consequence score. Deferred: on the full-parse route Tier 2 still runs before the Tier 0 finding blocks are assembled.
+
+## Exact formula identity and complete formula text (Patch 30)
+
+`normalizeFormula(formula, address)` in `src/validator-tier0.js` now gives a formula family its exact identity: text
+constants and quoted sheet names are set aside first, references become R1C1 offsets from the cell (so a formula filled
+across or down is one family), and absolute anchors, different offsets, constants, names and sheets all stay distinct.
+Family counts therefore rise (Hidden Gem 476 to 1,686; Carlsberg 171 to 385). A family is a navigation aid, not evidence
+that every member was tested.
+
+`src/utils/formula-store.js` keeps the complete text of every formula that Tier 0 shortens for display (over 300
+characters). Short formulas are complete in `cellScoreIndex`; long ones are appended to an unlinked temporary file and
+only their offsets are held in memory (Hidden Gem: 388 formulas). Read formulas through `fullFormula(cellScoreIndex,
+key, info)`; the circular-reference detector, the dependency tracer, the NPV and nested-IF checks, the range checks and
+the Formula Deep Dive now do. The 300-character field stays for display. Measured on Hidden Gem on a 2-core 8 GB
+sandbox: Tier 0 64.9 s to 67.4 s, peak 1,808 MB to 1,822 MB. The VPS run is still the gate.

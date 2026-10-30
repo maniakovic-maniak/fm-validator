@@ -14,6 +14,7 @@
 // edge extraction — same proven reference-parsing logic, no duplication.
 
 const { extractCellReferences } = require('./cell-dependency-tracer');
+const { fullFormula } = require('./formula-store');
 
 const DIVIDEND_LABEL_RE = /\b(dividend|distribution|shareholder return|equity distribution|equity payout|cash sweep|distributable cash|equity top[\s-]?up|minimum[\s-]?cash|funding gap|equity injection|capital call)\b/i;
 
@@ -68,9 +69,10 @@ function stripStructuralFunctionArgs(formula) {
 function buildDependencyGraph(cellScoreIndex, allSheetNames) {
   const graph = {};
   for (const [key, info] of Object.entries(cellScoreIndex)) {
-    if (!info.formulaText) continue;
+    const ftxt = fullFormula(cellScoreIndex, key, info);
+    if (!ftxt) continue;
     const [sheet] = key.split('!');
-    const cleanedFormula = stripStructuralFunctionArgs(info.formulaText);
+    const cleanedFormula = stripStructuralFunctionArgs(ftxt);
     const refs = extractCellReferences(cleanedFormula, sheet, allSheetNames);
     graph[key] = refs.map(r => `${r.sheet}!${r.cell}`);
   }

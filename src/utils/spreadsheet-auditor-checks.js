@@ -7,6 +7,7 @@
 // asks "does this differ from its own peers, or from an independently
 // computable expectation".
 
+const { fullFormula } = require('./formula-store');
 const AGG_RANGE_RE = /\b(SUM|AVERAGE|COUNT|COUNTA|MAX|MIN)\s*\(\s*\$?([A-Z]+)\$?(\d+)\s*:\s*\$?([A-Z]+)\$?(\d+)\s*\)/gi;
 const CHECK_LABEL_RE = /\b(total|subtotal|sum)\b/i;
 const IFERROR_RE = /\bIFERROR\s*\(/gi;
@@ -38,7 +39,8 @@ function checkOffByOneRanges(cellScoreIndex) {
   const verticalGroups = {};   // key: ownRow|SUM|startRow -> [{key, endRow, ownCol}]
 
   for (const [key, info] of Object.entries(cellScoreIndex)) {
-    if (!info.formulaText) continue;
+    const ftxt = fullFormula(cellScoreIndex, key, info);
+    if (!ftxt) continue;
     const [sheet, addr] = key.split('!');
     const ownMatch = addr.match(/^([A-Z]+)(\d+)$/);
     if (!ownMatch) continue;
@@ -47,7 +49,7 @@ function checkOffByOneRanges(cellScoreIndex) {
 
     let m;
     AGG_RANGE_RE.lastIndex = 0;
-    while ((m = AGG_RANGE_RE.exec(info.formulaText)) !== null) {
+    while ((m = AGG_RANGE_RE.exec(ftxt)) !== null) {
       const [, fn, startCol, startRowStr, endCol, endRowStr] = m;
       const startRow = parseInt(startRowStr, 10);
       const endRow = parseInt(endRowStr, 10);
@@ -171,14 +173,15 @@ function checkRangeIncludesOwnTotal(cellScoreIndex, workbook) {
   const findings = [];
 
   for (const [key, info] of Object.entries(cellScoreIndex)) {
-    if (!info.formulaText) continue;
+    const ftxt = fullFormula(cellScoreIndex, key, info);
+    if (!ftxt) continue;
     const [sheet] = key.split('!');
     const worksheet = workbook.getWorksheet(sheet);
     if (!worksheet) continue;
 
     let m;
     AGG_RANGE_RE.lastIndex = 0;
-    while ((m = AGG_RANGE_RE.exec(info.formulaText)) !== null) {
+    while ((m = AGG_RANGE_RE.exec(ftxt)) !== null) {
       const [, fn, startCol, startRowStr, endCol, endRowStr] = m;
       if (fn.toUpperCase() !== 'SUM') continue; // AVERAGE/COUNT/MAX/MIN including a subtotal isn't the same double-count risk
       const startRow = parseInt(startRowStr, 10);
@@ -214,8 +217,8 @@ function checkSuspiciousErrorMasking(cellScoreIndex) {
   const findings = [];
 
   for (const [key, info] of Object.entries(cellScoreIndex)) {
-    if (!info.formulaText) continue;
-    const formula = info.formulaText;
+    const formula = fullFormula(cellScoreIndex, key, info);
+    if (!formula) continue;
 
     for (const re of [IFERROR_RE, IFNA_RE]) {
       re.lastIndex = 0;

@@ -19,14 +19,16 @@
 // FAST-recommended alternative. Word-boundary-safe: XNPV( must NOT match
 // here, since a naive substring check on "NPV(" would also match inside
 // "XNPV(" — the negative lookbehind blocks that specifically.
+const { fullFormula } = require('./formula-store');
 const BARE_NPV_RE = /(?<![A-Za-z])NPV\s*\(/i;
 
 function checkBareNPV(cellScoreIndex) {
   const findings = [];
   for (const [key, info] of Object.entries(cellScoreIndex)) {
-    if (info.formulaText && BARE_NPV_RE.test(info.formulaText)) {
+    const ftxt = fullFormula(cellScoreIndex, key, info);
+    if (ftxt && BARE_NPV_RE.test(ftxt)) {
       const [sheet, cell] = key.split('!');
-      findings.push({ sheet, cell, formula: info.formulaText.slice(0, 120) });
+      findings.push({ sheet, cell, formula: ftxt.slice(0, 120) });
     }
   }
   return { applicable: true, flaggedCount: findings.length, findings };
@@ -66,9 +68,10 @@ function hasNestedIF(formula) {
 function checkNestedIFs(cellScoreIndex) {
   const findings = [];
   for (const [key, info] of Object.entries(cellScoreIndex)) {
-    if (hasNestedIF(info.formulaText)) {
+    const ftxt = fullFormula(cellScoreIndex, key, info);
+    if (hasNestedIF(ftxt)) {
       const [sheet, cell] = key.split('!');
-      findings.push({ sheet, cell, formula: info.formulaText.slice(0, 150) });
+      findings.push({ sheet, cell, formula: ftxt.slice(0, 150) });
     }
   }
   return { applicable: true, flaggedCount: findings.length, findings };

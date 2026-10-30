@@ -28,6 +28,8 @@ const CELL_REF_RE = /(\$?[A-Za-z]{1,3}\$?\d+)(?::\$?[A-Za-z]{1,3}\$?\d+)?/g;
  * @param {string[]} allSheetNames - real sheet names, to validate matches
  * @returns {{sheet: string, cell: string}[]} deduplicated precedent cells
  */
+const { fullFormula } = require('./formula-store');
+
 function extractCellReferences(formula, currentSheet, allSheetNames) {
   if (!formula) return [];
   const results = [];
@@ -97,8 +99,9 @@ function traceCellChain(startSheet, startCell, cellScoreIndex, getValue, allShee
 
     const indexed = cellScoreIndex[key];
     if (indexed) {
+      const ftxt = fullFormula(cellScoreIndex, key, indexed);
       chain.push({ sheet, cell, formulaText: indexed.formulaText, depth });
-      const precedents = extractCellReferences(indexed.formulaText, sheet, allSheetNames);
+      const precedents = extractCellReferences(ftxt, sheet, allSheetNames);
       for (const p of precedents) {
         walk(p.sheet, p.cell, depth + 1);
       }

@@ -7,6 +7,7 @@
 // DEEPDIVE in the entry points). It is an additional-cost review beyond
 // the standard run, not part of the default pipeline.
 
+const { fullFormula } = require('./utils/formula-store');
 const Anthropic = require('@anthropic-ai/sdk');
 const fs = require('fs');
 const path = require('path');
@@ -53,7 +54,11 @@ async function runFormulaDeepDive(parsed, tier0Result, opts = {}) {
   }
 
   const labelled = attachLabels(parsed._raw, selected);
-  const items = buildReviewItems(labelled);
+  // the reviewer gets the complete formula, not the 500-character display copy (Patch 30)
+  const fullLabelled = labelled.map(uf => (uf.formulaTruncated
+    ? { ...uf, formulaText: fullFormula(tier0Result.cellScoreIndex, `${uf.sheet}!${uf.cell}`, { formulaText: uf.formulaText, formulaTruncated: true }) || uf.formulaText }
+    : uf));
+  const items = buildReviewItems(fullLabelled);
 
   const systemPrompt = [SOUL(), taskPrompt].filter(Boolean).join('\n\n---\n\n');
   const estTokens = estimateInputTokens(items, systemPrompt.length);
