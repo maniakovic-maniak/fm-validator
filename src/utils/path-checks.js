@@ -6,6 +6,8 @@
 //   average completeness     whether an AVERAGE over a run of periods is given every period as a number
 //   fallback propagation     what a text fallback (IFERROR(lookup, "")) does in the cells that read it
 //   bypassed checks          which of the model's own checks could not have caught a given error
+//   check independence       whether a check row's two sides are built from the same calculation (Patch 35)
+//   volatile timestamp       a cell that is only NOW() or TODAY(), used as a run date (Patch 35)
 //
 // Every tested criterion gets a verdict of its own: passed, defect, query, control weakness, or not applicable. A formula
 // can pass one criterion and fail another (a saved value that reproduces, with fallback handling that is a weakness).
@@ -15,6 +17,8 @@ const { checkLookupContracts } = require('./lookup-contract');
 const { checkAverageCompleteness } = require('./average-completeness');
 const { checkFallbackPropagation } = require('./fallback-propagation');
 const { findBypassedChecks } = require('./bypassed-checks');
+const { checkIndependence } = require('./check-independence');
+const { checkVolatileTimestamps } = require('./volatile-timestamp');
 const { buildRootCauseFields } = require('./root-cause-consolidation');
 
 const VERDICT_LABEL = { passed: 'Passed', defect: 'Defect', query: 'Query', control_weakness: 'Control weakness', not_applicable: 'Not applicable', not_completed: 'Not completed' };
@@ -24,7 +28,9 @@ function runPathChecks(workbook, cellScoreIndex, opts = {}) {
   const lookup = run('Lookup contract check', () => checkLookupContracts(workbook, cellScoreIndex, opts.lookup), { records: [], counts: {} });
   const average = run('Average completeness check', () => checkAverageCompleteness(workbook, cellScoreIndex, opts.average), { records: [], counts: {} });
   const fallback = run('Fallback propagation check', () => checkFallbackPropagation(cellScoreIndex, opts.fallback), { records: [], counts: {} });
-  return { lookup, average, fallback };
+  const independence = run('Check independence', () => checkIndependence(workbook, cellScoreIndex, opts.independence), { records: [], counts: {} });
+  const timestamp = run('Volatile timestamp check', () => checkVolatileTimestamps(workbook, cellScoreIndex), { records: [], counts: {} });
+  return { lookup, average, fallback, independence, timestamp };
 }
 
 // Names the model's own checks that do not read a double-counted total (Patch 31, acceptance case 13).
@@ -122,6 +128,32 @@ function buildPathCheckFindings(pc) {
       ...common, ...buildRootCauseFields('T0-FALLBACK-001', cells(fb), { commonRemediationAction: 'Define the failed-lookup behaviour and apply it consistently.' }),
     });
   }
+  const ci = ((pc.independence && pc.independence.records) || []).filter(r => r.verdict === 'query');
+  if (ci.length) {
+    out.push({
+      id: 'T0-CHECKIND-001', label: `${ci.length} check row(s) compare two sides built from the same calculation`,
+      severity: 'medium', status: 'fail', record_type: 'Query', sheet: ci[0].sheet, cell: ci[0].cell,
+      condition: `${sample(ci, 3, r => r.evidence)}${ci.length > 3 ? ` and ${ci.length - 3} more` : ''}`,
+      reason: `${ci.length} check(s) could not show a difference caused by an error in the shared calculation`,
+      corrective_action: 'Confirm that each check is meant to compare a figure with something built from it. If the check is meant to catch errors in that calculation, rebuild one side from an independent source (the opening balance plus the movement from the statements, say).',
+      issue_type: 'Check that may not be able to fail', model_risk: 'A check that reads the same calculation on both sides stays at zero when that calculation is wrong, so the model shows assurance it has not earned.',
+      key_output_impact: 'Unknown', root_cause: 'Check built from the calculation it tests', confidence: 50,
+      ...common, ...buildRootCauseFields('T0-CHECKIND-001', cells(ci), { commonRemediationAction: 'Give each check an independent side.' }),
+    });
+  }
+  const ts = (pc.timestamp && pc.timestamp.records) || [];
+  if (ts.length) {
+    out.push({
+      id: 'T0-VOLTIME-001', label: `${ts.length} cell(s) are NOW() or TODAY() on its own, which changes on every recalculation`,
+      severity: 'low', status: 'fail', record_type: 'Observation', sheet: ts[0].sheet, cell: ts[0].cell,
+      condition: `${sample(ts, 3, r => r.text)}${ts.length > 3 ? ` and ${ts.length - 3} more` : ''}`,
+      reason: `${ts.length} volatile date cell(s) that may be read as a run date`,
+      corrective_action: 'If the cell is meant to record when a scenario was run, have the macro paste the date as a value at the end of the run, and state this beside the cell.',
+      issue_type: 'Volatile timestamp', model_risk: 'A reader of the archive sees the date of the last recalculation or save and takes it for the date the results were produced.',
+      key_output_impact: 'No', root_cause: 'Run date held as a volatile function', confidence: 75,
+      ...common, urgency: 'When convenient', ...buildRootCauseFields('T0-VOLTIME-001', cells(ts), { commonRemediationAction: 'Freeze the run date as a value.' }),
+    });
+  }
   return out;
 }
 
@@ -138,12 +170,14 @@ function pathCheckRows(pc, limitPerKind = 400) {
   const cut = [
     add('Lookup contract', pc.lookup.records || [], r => `${r.text} Keys: ${r.keyParts.map(k => `${k.part} = ${JSON.stringify(k.value)}`).join('; ')}. Source: ${r.source} (${r.sourceRows} rows).`),
     add('Average completeness', pc.average.records || [], r => r.text),
+    add('Check independence', (pc.independence && pc.independence.records || []).filter(r => r.verdict !== 'not_applicable'), r => r.evidence),
+    add('Volatile timestamp', (pc.timestamp && pc.timestamp.records) || [], r => r.text),
     add('Fallback propagation', pc.fallback.records || [], r => r.text + (r.examples && r.examples.length ? ' Readers: ' + r.examples.map(e => `${e.cell} (${e.formula})`).join('; ') + '.' : '')),
   ];
   const sum = (name, c) => ({ criterion: name, tested: c.tested ?? c.families ?? 0, counts: c.counts || {}, notCompleted: c.notCompleted || 0, reasons: c.notCompletedReasons || {}, stopped: c.stopped || null });
   return {
     rows, omitted: cut.reduce((a, b) => a + b, 0),
-    summary: [sum('Lookup contract', pc.lookup), sum('Average completeness', pc.average), sum('Fallback propagation', pc.fallback)],
+    summary: [sum('Lookup contract', pc.lookup), sum('Average completeness', pc.average), sum('Fallback propagation', pc.fallback)].concat(pc.independence && pc.independence.applicable ? [sum('Check independence', pc.independence)] : [], pc.timestamp && pc.timestamp.applicable ? [sum('Volatile timestamp', pc.timestamp)] : []),
   };
 }
 

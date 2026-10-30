@@ -7,7 +7,7 @@
 //
 // A cell counts only when (1) its text is a placeholder phrase, and (2) its row holds no other number or formula
 // while a nearby row (within two rows) does, so the note stands in for a missing calculation. A "TBC" in a notes
-// column beside a finished row is ignored. Documentation sheets (cover, notes, readme, change log) are skipped.
+// column beside a finished row is ignored. A zero does not count as content (Patch 35). Documentation sheets (cover, notes, readme, change log) are skipped.
 
 const PLACEHOLDER_RE = /\b(to be (provided|confirmed|completed|determined|updated|added|populated|advised|supplied|inserted|calculated|developed|agreed)|tbc|tbd|todo|to-do|placeholder|coming soon|not yet (provided|available|populated|built|completed|defined)|(formula|formulae|formulas|calculation)s? (to be|not (yet )?)|insert (formula|here)|under (development|construction)|xxx+)\b/i;
 const SKIP_SHEET_RE = /(^|\b)(notes?|read ?me|instructions?|change ?log|legend|version|disclaimer|cover|guide|help|glossary|about)(\b|$)/i;
@@ -21,10 +21,12 @@ function cellText(cell) {
   }
   return null;
 }
+// Patch 35: a zero is not content. In the ESO scenario archive the note sits in the first period and the other periods
+// hold 0 (a blank read as zero), so a row of a note plus zeros is as unfinished as a row of a note alone.
 function isNumberOrFormula(cell) {
   const v = cell.value;
-  if (typeof v === 'number') return true;
-  if (v && typeof v === 'object' && (v.formula || v.sharedFormula)) return true;
+  if (typeof v === 'number') return v !== 0;
+  if (v && typeof v === 'object' && (v.formula || v.sharedFormula)) return !(v.result === 0);
   return false;
 }
 
@@ -63,9 +65,12 @@ function checkPlaceholderText(workbook) {
     }
   });
 
+  const bySheet = {};
+  for (const f of findings) bySheet[f.sheet] = (bySheet[f.sheet] || 0) + 1;
   return {
     applicable: true,
     flaggedCount: findings.length,
+    bySheet,
     mentionsIgnored,
     findings,
     note: 'Flags a placeholder note ("to be provided", TBC, TODO and similar) that stands alone in its row next to finished rows. A note on a row that also holds numbers, and documentation sheets, are not flagged.',

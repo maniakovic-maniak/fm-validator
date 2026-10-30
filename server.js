@@ -2105,7 +2105,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       label: `${_pt.length} output row(s) hold only a "to be provided" note instead of a calculation`,
       severity: 'medium', status: 'fail',
       sheet: _pt[0].sheet, cell: _pt[0].cell, category: 'Structure',
-      condition: `${_ptSample}${_pt.length > 6 ? ' and others' : ''}. The rest of each row is empty while the rows beside it hold numbers or formulas, so the calculation looks unfinished. Anything that reads the row sees a blank, which behaves as zero.`,
+      condition: `${_ptSample}${_pt.length > 6 ? ' and others' : ''}${Object.keys(placeholderTextCheck.bySheet || {}).length ? ' (by sheet: ' + Object.entries(placeholderTextCheck.bySheet).map(([k, v]) => `${k} ${v}`).join(', ') + ')' : ''}. The rest of each row is empty or zero while the rows beside it hold numbers or formulas, so the calculation looks unfinished. Anything that reads the row sees a blank, which behaves as zero.`,
       reason: `${_pt.length} unfinished row(s) marked with a placeholder note`,
       corrective_action: 'Build the calculation, or state in the model that the item is out of scope and remove the row from any output that reads it. Do not leave a blank to be read as zero.',
       workstream: 'Structure', issue_type: 'Unfinished calculation',

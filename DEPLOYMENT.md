@@ -496,3 +496,16 @@ Found in the ESO run Fm-00053 (all of Patches 27-33 deployed): the remedy check 
 - Not changed: the Patch 7 rule that a fatal, critical or high-severity absence keeps its Critical Query escalation at low confidence (tested by `test-patch7.js`).
 
 Checks: `node test-patch34.js` (17 checks). Earlier suites unchanged.
+
+## Check independence, volatile run stamps, placeholder rows of zeros (Patch 35)
+
+From the Partner Review of ESO run Fm-00053 (3 genuine misses of 23 independent findings, 13 partly covered).
+
+- **Check independence** (`src/utils/check-independence.js`, part of `runPathChecks`): for each row labelled "Check" whose saved values are zero and whose formula is `A - B`, `A = B`, `ROUND(A-B,n)` or `ABS(A-B)`, the formula cells behind each side are traced. A check is a **Query** (finding `T0-CHECKIND-001`, record type Query, confidence 50) when both sides read exactly the same cells, or when everything behind the smaller side (two or more calculations) is also behind the other. Otherwise it is listed as Passed on the Path Checks tab with how many calculations sit only behind each side and how many behind both, which is the Partner's question put in numbers. It is static: it shows a check could not have failed, not that it can. Walk limit 40,000 cells per side and an 8 s budget; anything over is Not completed.
+- **Real files:** on the Bend, `Debt!H128` is `H127-H126` where `H127` is `=H126`, and `Debt!H29` tests current + non-current = closing where non-current is closing minus current; both are checks that cannot fail and are now Queries (3 on the Bend, 1 on Sydney Airport, 2 on ESO, none on Carlsberg, Qantas, Mortgage or Railways). On ESO the main statement checks pass but 99-100% of the calculations behind one side are also behind the other.
+- **Volatile run stamp** (`src/utils/volatile-timestamp.js`, `T0-VOLTIME-001`, Observation): a cell that is only `NOW()` or `TODAY()`, with the date it last held. ESO has two (`LiveResults!T17`, `ScenarioRun_AllOutputData!AY28`).
+- **Placeholder rows** (`placeholder-text-check.js`): a zero no longer counts as content, so a note followed by zeros (the ESO archive pattern) is flagged. ESO goes from 1 to 46 of 48 placeholder cells; no change on the other models. The finding lists the count by sheet.
+- **Not built, on purpose:** a fixed-range INDEX check. ESO's `INDEX($E$368:$E$390, m_ESO_modelscenario)` is a 23-slot drop-down list over 23 scenario columns, not truncated; flagging it would only record a design preference.
+- **Timing (sandbox, Hidden Gem 1.15M cells):** independence 1.2 s, volatile stamps 0.8 s, one check not completed (size).
+
+Checks: `node test-patch35.js` (18 checks). `test-patch31.js` now accepts extra Path Checks criteria beyond the original three.

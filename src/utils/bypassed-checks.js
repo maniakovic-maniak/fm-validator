@@ -90,4 +90,4 @@ function findBypassedChecks(workbook, cellScoreIndex, sheet, cell, opts = {}) {
   };
 }
 
-module.exports = { findBypassedChecks };
+module.exports = { findBypassedChecks, precedents, labelOf };

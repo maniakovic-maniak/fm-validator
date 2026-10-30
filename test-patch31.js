@@ -51,7 +51,7 @@ const ROOT = __dirname;
   const pcm = require('./src/utils/path-checks'); const { VERDICT_LABEL } = pcm;
   const rows = pcm.pathCheckRows(bad.pc);
   check('report rows carry a readable verdict and location', rows.rows.length >= 6 && rows.rows.every(r => r.location && r.verdict && r.evidence) && rows.rows.some(r => r.verdict === VERDICT_LABEL.defect));
-  check('the report summary lists the three criteria', rows.summary.length === 3 && rows.summary[0].tested >= 5);
+  check('the report summary lists the three original criteria first (later patches add more)', rows.summary.length >= 3 && rows.summary.slice(0, 3).map(s => s.criterion).join(',') === 'Lookup contract,Average completeness,Fallback propagation' && rows.summary[0].tested >= 5);
   const { proposeRegistry, slug } = require('./src/utils/output-registry');
   const reg = proposeRegistry({ getWorksheet: () => null }, {}, 'm.xlsx');
   check('a registry is only ever drafted as proposed, with no approval filled in', reg.status === 'proposed' && reg.approved_by === null && reg.approved_on === null);
