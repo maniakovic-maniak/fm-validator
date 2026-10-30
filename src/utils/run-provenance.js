@@ -51,8 +51,13 @@ function ruleFiles(root = ROOT) {
   const cfg = path.join(root, 'config');
   try {
     for (const f of fs.readdirSync(cfg).sort()) {
-      if (/^(checklist|rule-exclusions|rule-scope)\.json$/.test(f) || /^skill.*\.md$/.test(f)) out.push(path.join(cfg, f));
+      if (/^(checklist|rule-exclusions|rule-scope|rule-tiering|finding-class|chunking)\.json$/.test(f) || /^(skill.*|soul)\.md$/.test(f)) out.push(path.join(cfg, f));
     }
+  } catch (_) {}
+  // The recorded rule outcomes that seed the scope plan (rule-tiering reads them).
+  try {
+    const seed = path.join(cfg, 'rule-history-seed');
+    for (const f of fs.readdirSync(seed).sort()) if (/\.json$/.test(f)) out.push(path.join(seed, f));
   } catch (_) {}
   return out;
 }

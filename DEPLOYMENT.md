@@ -559,3 +559,13 @@ From the independent review of Patch 37 (point 3), reproduced against `finding-h
 - **No new AI calls and no extra cost.** Timing is a file read and write.
 
 Checks: `node test-patch39.js` (20 checks, including six simultaneous workers and a report build). Existing history suites pass; `test-crossrun-llm-split.js` now expects "reappeared".
+
+## Patch 40 - evidence-backed run record replaces the reviewer flag
+
+- **No compulsory human sign-off.** `reviewerApproved` is gone. Each run builds an assessment record (`src/utils/run-record.js`, written beside the report as `<report>.runrecord.json`). It binds the workbook hash, code commit, rule-set hash, config file hashes and priority-output list hash to the evidence: independent recalculation (completed, mismatches, coverage of at least 90%), path checks (any that failed to complete), review batches, and the priority-output list.
+- **The top tier follows the evidence.** "Reliance-ready - transaction execution" is issued only when the record has no gaps. Each gap is printed on the Scope and Reliance tab (new ASSESSMENT RECORD panel) and in the decision text. A record that could not be built caps the tier. A payload with no `runRecord` key behaves as before. No report is held; only the top tier moves.
+- **Priority-output list.** `loadRegistryState` validates each definition (sheet, row or cell, label), rejects an empty list and duplicates, and returns the definitions and file hash. `checkRegistryAgainstWorkbook` checks each output exists in this workbook; an approval that no longer matches the file does not carry over.
+- **Provenance** now covers soul.md, finding-class.json, rule-tiering.json, chunking.json and the rule-history seeds, so changing any of them changes the rule-set hash and the record fingerprint.
+- No extra model calls, so run price is unchanged.
+- Rollback: `git revert` the commit; no data migration.
+- Check: `node test-patch40.js`

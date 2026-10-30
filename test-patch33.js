@@ -81,7 +81,7 @@ const check = (n, ok) => { console.log((ok ? 'PASS: ' : 'FAIL: ') + n); if (!ok)
       tier0: { stats: {}, cellScoreIndex: {}, uniqueFormulas: [], edgeList: [] }, overallAssessment: 'audit_complete', igReadiness: 97, igCommentary: 't',
       ruleResults: allPass, errorScan: [], redundantInputs: { applicable: false }, orphanSheets: { applicable: false }, namedRangeAudit: { applicable: false },
       formulaDeepDive: { applicable: false }, reasonableness: {}, duplicateSheets: { applicable: false }, vbaReview: { applicable: false }, deepAccountingResolvedSheets: {},
-      crossRunStats: { isFirstRun: true, newFindingCount: 0 }, findings: [], reviewerApproved: true, outputRegistry: oreg, ...extra,
+      crossRunStats: { isFirstRun: true, newFindingCount: 0 }, findings: [], outputRegistry: oreg, ...extra,
     };
     fs.writeFileSync(path.join(d, 'p.json'), JSON.stringify(payload));
     const b = spawnSync('python3', ['src/build_report.py', path.join(d, 'p.json'), path.join(d, 'o.xlsx')], { encoding: 'utf8', timeout: 180000 });

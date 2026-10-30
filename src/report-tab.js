@@ -116,6 +116,8 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     remedyChecks:    meta.remedyChecks ? { checked: meta.remedyChecks.checked, verified: meta.remedyChecks.verified, withheld: meta.remedyChecks.withheld, unverified: meta.remedyChecks.unverified, details: (meta.remedyChecks.details || []).slice(0, 50) } : null,
     applicabilityRecord: meta.applicabilityRecord || [],
     outputRegistry:  meta.outputRegistry || null,
+    // Patch 40: the automated assessment record (evidence and gaps). Replaces the old reviewerApproved flag.
+    runRecord:       meta.runRecord || null,
     auditLog:        auditLog || []
   };
 

@@ -85,8 +85,9 @@ const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells'
 const { checkCircularReferences, buildRangeCycleFinding } = require('./src/utils/circular-reference-detector');
 const { applyRemedyChecks } = require('./src/utils/remedy-check');
 const { resolveAnswerableQueries } = require('./src/utils/query-resolver');
+const { buildRunRecord, writeRunRecord } = require('./src/utils/run-record');
 const { buildApplicabilityRecord } = require('./src/utils/applicability-record');
-const { loadRegistryState } = require('./src/utils/output-registry');
+const { loadRegistryState, checkRegistryAgainstWorkbook } = require('./src/utils/output-registry');
 const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
@@ -3429,7 +3430,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
 
     const runProvenance = await buildRunProvenance({ filePath: parsed._filePath, originalName });
     const applicabilityRecord = (() => { try { return buildApplicabilityRecord(allFlagged, { sheetNames: parsed.sheetNames, hasVba: !!(vbaReview && (vbaReview.applicable || vbaReview.hasVbaProject)) }); } catch (e) { console.error('   \u26a0\ufe0f  Applicability record failed:', e.message); return []; } })();
-    const outputRegistry = (() => { try { return loadRegistryState(originalName); } catch (e) { return { status: 'none', approved_by: null, approved_on: null, outputs: 0, file: null }; } })();
+    const outputRegistry = (() => { try { return checkRegistryAgainstWorkbook(loadRegistryState(originalName), parsed._raw, tier0.cellScoreIndex); } catch (e) { return { status: 'none', approved_by: null, approved_on: null, outputs: 0, file: null }; } })();
+    // Patch 40: the automated assessment record replaces the reviewerApproved flag (no compulsory human sign-off).
+    const runRecord = (() => { try { return buildRunRecord({ originalName, provenance: runProvenance, registryState: outputRegistry, recalcCheckResult, pathChecks, batchFailures: t2Results._batchFailures || [] }); } catch (e) { console.error('   \u26a0\ufe0f  Run record failed (the highest reliance tier will not be issued):', e.message); return null; } })();
     await buildReportFile(reportPath, allFlagged, [], {
       originalName,
       modelType,
@@ -3464,11 +3467,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       remedyChecks,
       applicabilityRecord,
       outputRegistry,
+      runRecord,
       batchFailures:     t2Results._batchFailures || [],
       partialCoverage:   t2Results._partialCoverage || [],
       tier2Evidence:     t2Results._evidence || null
     });
     writeProvenance(reportPath, runProvenance);
+    if (runRecord) writeRunRecord(reportPath, runRecord);
 
     // Reports are stored on the server (processed/, 30-day local retention)
     // and reach the client by email attachment after review - there is no

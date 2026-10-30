@@ -252,8 +252,8 @@ def build_report(data_path, output_path):
     # DSCR/MOIC-style cells for a chain that dead-ends at a blank cell.
     key_output_gap = any(str(f.get('id','')).startswith('T0-CHAIN') for f in findings)
 
-    # 4. "Required reviewer approval" — this tool cannot manufacture a
-    # human sign-off. Deliberately opt-in, defaulting to NOT approved:
+    # 4. (Patch 40) The old reviewer-approval flag is replaced by the automated
+    # assessment record below. Historical note on the earlier design: opt-in, defaulting to NOT approved:
     # an explicit reviewerApproved=true must be supplied in the payload
     # for this gate to clear. This is a genuine behaviour change, not
     # just an additive signal — the highest reliance tier becomes
@@ -261,13 +261,20 @@ def build_report(data_path, output_path):
     # confirms approval, which is exactly what the memo's own exhaustive
     # AND-clause for "Ready for Reliance" requires ("Required Reviewer
     # Approval Is Complete" is one of eight mandatory conjuncts).
-    reviewer_approved = bool(d.get('reviewerApproved', False))
-    reviewer_approval_gap = not reviewer_approved
-    # Patch 33: the highest tier also needs an approved list of priority outputs for this model. This only lowers the top
-    # tier by one level, the same way a missing reviewer approval does; it never holds or blocks a report.
+    # Patch 40: no compulsory human sign-off. The highest tier is issued by the automated review when the tests support
+    # it: the run record (run-record.js) lists the gaps in the evidence it needs, and any gap keeps the tier one level down.
+    # A payload built without the key (older callers) has no evidence gaps; a payload that carries the key as null means
+    # the record could not be built, which is itself a gap.
+    _rr = d.get('runRecord')
+    _gaps_all = list((_rr or {}).get('gaps') or [])
+    if 'runRecord' in d and _rr is None:
+        _gaps_all = [{'key': 'run_record', 'text': 'the automated assessment record could not be built for this run'}]
     _oreg = d.get('outputRegistry') or {}
-    registry_approved = (_oreg.get('status') == 'approved')
+    registry_approved = (_oreg.get('status') == 'approved') and (_oreg.get('usable', True) is not False)
     registry_gap = not registry_approved
+    # the priority-output gap is shown on its own line below, so it is not repeated among the other evidence gaps
+    evidence_gaps = [g for g in _gaps_all if g.get('key') != 'priority_outputs']
+    evidence_gap = len(evidence_gaps) > 0
 
     # ── P1/P2/P3 framework renewal, Tier 1 item 2 ────────────────────────────
     # Severity alone used to decide P1/P2/P3 for every finding. Per the
@@ -464,11 +471,11 @@ def build_report(data_path, output_path):
             verdict_short='NOT RELIANCE-READY'; verdict_bg=DARK_BLUE
             verdict_text=(f'{_blocker_desc} open and {igReadiness}% of planned procedures completed ({cov_conclusive_pct}% concluded, Uncertain/Not Run excluded). Both open reliance blockers and audit coverage prevent reliance at any level. '
                           f'Resolve these items and complete outstanding procedures before reassessment.')
-    elif igReadiness >= 95 and not reviewer_approval_gap and not registry_gap:
+    elif igReadiness >= 95 and not evidence_gap and not registry_gap:
         verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=MID_BLUE
-        verdict_text=(f'No P1 items, unresolved Critical Queries, or other reliance blockers open, reviewer approval recorded, and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
+        verdict_text=(f'No P1 items, unresolved Critical Queries, or other reliance blockers open, the evidence this tier needs is complete (independent recalculation, path checks, approved priority outputs), and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
                       f'{p2_open} P2 item(s) remain and should be resolved or formally waived as part of transaction close.')
-    elif igReadiness >= 95 and (reviewer_approval_gap or registry_gap):
+    elif igReadiness >= 95 and (evidence_gap or registry_gap):
         # ── P1/P2/P3 framework renewal, Tier 3 ─────────────────────────────
         # The memo's own exhaustive AND-clause for the highest reliance
         # tier explicitly includes "Required Reviewer Approval Is
@@ -479,8 +486,11 @@ def build_report(data_path, output_path):
         # silent one.
         verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=MID_BLUE
         _cap_why = []
-        if reviewer_approval_gap: _cap_why.append('required reviewer approval has not yet been recorded')
-        if registry_gap: _cap_why.append('no approved list of priority outputs exists for this model')
+        for _g in evidence_gaps[:3]: _cap_why.append(str(_g.get('text')))
+        if len(evidence_gaps) > 3: _cap_why.append(f'{len(evidence_gaps)-3} further evidence gap(s) listed on the Scope and Reliance tab')
+        if registry_gap:
+            _rg = [g for g in _gaps_all if g.get('key') == 'priority_outputs']
+            _cap_why.append(str(_rg[0].get('text')) if _rg else 'no approved list of priority outputs exists for this model')
         verdict_text=(f'All automated gates pass and {igReadiness}% of planned procedures completed ({cov_pass} passed), but {" and ".join(_cap_why)} — '
                       f'this caps the model one tier below Transaction Execution readiness until that is in place. {p2_open} P2 item(s) remain.')
     elif igReadiness >= 80:
@@ -580,7 +590,7 @@ def build_report(data_path, output_path):
                else 'All planned procedures completed with no open P1 findings or unresolved Critical Queries')
     _next_step = ('Close all P1 items, resolve all Critical Queries (confirming whether a defect exists either way), and clear any mandatory procedures that are not concluded or have a raised issue, unaudited critical modules, and unreconciled key outputs — then complete outstanding procedures and reassess.' if _has_blocker
                   else 'Resolve remaining P2 items and complete outstanding procedures before wider reliance.' if igReadiness<95
-                  else ('Record reviewer approval to reach Transaction Execution readiness.' if reviewer_approval_gap else 'No further action required for this reliance level.'))
+                  else ('Close the evidence gaps named on the Scope and Reliance tab to reach Transaction Execution readiness.' if (evidence_gap or registry_gap) else 'No further action required for this reliance level.'))
     merge(ws1,f'B{r}:I{r}',f'Status:   {_verdict_display}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
     fill_range(ws1,r,2,r,9,verdict_bg); set_row(ws1,r,26); r+=1
     merge_bold_prefix(ws1,f'B{r}:I{r}','Reason:   ',_reason,sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
@@ -1125,8 +1135,9 @@ def build_report(data_path, output_path):
                        if p1_open>0 else
                        f'{_verdict_display2}. Open: {_open_desc}. {p2_open} P2 item(s) remain; see Issue Log for detail.' if _reliance_blocked else
                        f'{_verdict_display2}. {p2_open} P2 item(s) remain; see Issue Log for detail.')
-    if registry_gap and igReadiness >= 95 and not _reliance_blocked and not (p1_open > 0 or critical_query_open > 0 or other_gates_open):
-        _decision_text += ' The highest tier (transaction execution) is not available because no approved list of priority outputs exists for this model.'
+    if (registry_gap or evidence_gap) and igReadiness >= 95 and not _reliance_blocked and not (p1_open > 0 or critical_query_open > 0 or other_gates_open):
+        _why_top = [str(g.get('text')) for g in _gaps_all][:3] or ['no approved list of priority outputs exists for this model']
+        _decision_text += ' The highest tier (transaction execution) is not available because ' + '; '.join(_why_top) + '.'
     merge(ws3,f'B{r3}:E{r3}',f'RELIANCE DECISION:   {_verdict_display2}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
     fill_range(ws3,r3,2,r3,5,verdict_bg); set_row(ws3,r3,24); r3+=1
     merge(ws3,f'B{r3}:E{r3+1}',_decision_text,sz=10,col=CHARCOAL,bg=PANEL_GREY,wrap=True,v='center')
@@ -1172,18 +1183,42 @@ def build_report(data_path, output_path):
             r3 = kv_row(r3,label,val)
         set_row(ws3,r3,10); r3+=1
 
+    # ── Assessment record (Patch 40): what this run's tier rests on, issued by the automated review ───────────
+    _rrec = d.get('runRecord')
+    if _rrec:
+        r3 = panel_header(r3,'ASSESSMENT RECORD')
+        r3 = kv_row(r3,'Issued by','The automated review. No manual sign-off is required; where the evidence is incomplete the tier is lowered and the gap is named.')
+        r3 = kv_row(r3,'Record fingerprint',str(_rrec.get('fingerprint',''))[:24] + ' ... (binds the file hash, rule set, code version, priority-output list and the evidence below)')
+        _ev = _rrec.get('evidence') or {}
+        _rc = _ev.get('recalculation') or {}
+        if _rc.get('status') == 'completed':
+            r3 = kv_row(r3,'Independent recalculation',f"Completed: {_rc.get('cells_checked',0):,} cells compared, {_rc.get('mismatches',0)} mismatch(es), {_rc.get('coverage_pct') if _rc.get('coverage_pct') is not None else 'n/a'}% of formula cells covered")
+        else:
+            r3 = kv_row(r3,'Independent recalculation','Not completed: ' + str(_rc.get('detail','no result')))
+        _pcs = (_ev.get('path_checks') or {})
+        r3 = kv_row(r3,'Path checks',('Did not complete: ' + ', '.join(_pcs.get('failed') or [])) if _pcs.get('failed') else f"{len(_pcs.get('criteria') or [])} criteria ran")
+        r3 = kv_row(r3,'Review batches','All completed' if not (_ev.get('batches') or {}).get('failed') else f"{(_ev.get('batches') or {}).get('failed')} failed")
+        _gp = _rrec.get('gaps') or []
+        r3 = kv_row(r3,'Evidence gaps','None. The evidence the highest tier needs is complete.' if not _gp else ' | '.join(str(g.get('text')) for g in _gp), bold_val=bool(_gp))
+        set_row(ws3,r3,10); r3+=1
+
     # ── Panel 1c: Priority outputs, remedy check and applicability record (Patch 33) ──────────
     _reg = d.get('outputRegistry') or {}
     if _reg:
         r3 = panel_header(r3,'PRIORITY OUTPUTS')
         _rs = _reg.get('status')
-        if _rs == 'approved':
-            r3 = kv_row(r3,'Approved list',f"{_reg.get('outputs',0)} outputs, approved by {_reg.get('approved_by')} on {_reg.get('approved_on')}")
+        if _rs == 'approved' and _reg.get('usable', True) is False:
+            _un = _reg.get('unresolved') or []
+            r3 = kv_row(r3,'Approved list',f"{_reg.get('outputs',0)} outputs approved by {_reg.get('approved_by')} on {_reg.get('approved_on')}, but {len(_un)} are not found in this workbook")
+            r3 = kv_row(r3,'Not found',' | '.join(f"{u.get('label')}: {u.get('reason')}" for u in _un[:4]) + (f" | and {len(_un)-4} more" if len(_un) > 4 else ''))
+            r3 = kv_row(r3,'Effect on the verdict','The approval belongs to the model revision it was made for. The highest reliance tier (Transaction Execution) is not available until the list matches this workbook. No report is held and no other result changes.')
+        elif _rs == 'approved':
+            r3 = kv_row(r3,'Approved list',f"{_reg.get('outputs',0)} outputs, approved by {_reg.get('approved_by')} on {_reg.get('approved_on')}; all found in this workbook" if _reg.get('resolved') is not None else f"{_reg.get('outputs',0)} outputs, approved by {_reg.get('approved_by')} on {_reg.get('approved_on')}")
             r3 = kv_row(r3,'Effect on the verdict','None. The highest reliance tier is not held back by this item.')
         else:
             _state = {'proposed':'A draft exists but nobody has approved it','invalid':'A file exists but is not a complete approval'}.get(_rs,'No list exists for this model')
             r3 = kv_row(r3,'Approved list',_state)
-            r3 = kv_row(r3,'Effect on the verdict','The highest reliance tier (Transaction Execution) is not available until a named person approves the list of priority outputs. No report is held and no other result changes.')
+            r3 = kv_row(r3,'Effect on the verdict','The highest reliance tier (Transaction Execution) is not available until a list of priority outputs has been approved for this model. No report is held and no other result changes.')
         set_row(ws3,r3,10); r3+=1
     _rc = d.get('remedyChecks') or {}
     if _rc and _rc.get('checked'):
