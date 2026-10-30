@@ -56,11 +56,11 @@
     "owner_patch": 31
   },
   "15": {
-    "status": "pending",
+    "status": "pass",
     "owner_patch": 33
   },
   "16": {
-    "status": "pending",
+    "status": "pass",
     "owner_patch": 33
   }
 }

@@ -45,6 +45,17 @@ function isConfirmedAbsence(r) {
   return true;
 }
 
+// An uncertain answer that reads like an absence and in which the reviewer says the structure does not belong in this
+// kind of model. Used by the applicability record (applicability-record.js).
+function isNotApplicableAbsence(r) {
+  if (!r || r.status !== 'uncertain') return false;
+  const text = textOf(r);
+  if (!STRICT_START_RE.test(text) || !isAbsenceFinding(text)) return false;
+  if (/^\s*not present in the workbook/i.test(text)) return false;
+  if (LIMITATION_RE.test(text)) return false;
+  return NOT_APPLICABLE_RE.test(contextOf(r));
+}
+
 // Why an uncertain answer that reads like an absence was NOT converted (null when it was not absence-shaped at all,
 // or when it would be converted). Used for the run log so a missed conversion can be explained from the log alone.
 function keptUncertainReason(r) {
@@ -89,4 +100,4 @@ function applyAbsencePolicy(results, { complete = false, ruleById = new Map() } 
   return { applied: true, converted };
 }
 
-module.exports = { applyAbsencePolicy, isConfirmedAbsence, keptUncertainReason, PREFIX };
+module.exports = { applyAbsencePolicy, isConfirmedAbsence, isNotApplicableAbsence, keptUncertainReason, contextOf, textOf, PREFIX };

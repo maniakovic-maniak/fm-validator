@@ -11,6 +11,7 @@ const { reconcileDataSplitResults } = require('./utils/reconcile-sub-batch-resul
 const { buildVisibilityRecord } = require('./utils/build-visibility-record');
 const { buildSheetFacts } = require('./utils/sheet-facts');
 const { applyAbsencePolicy, isConfirmedAbsence, keptUncertainReason } = require('./utils/absence-policy');
+const { markNotApplicable } = require('./utils/applicability-record');
 const { buildVbaDigest } = require('./utils/vba-digest');
 const promptCache = require('./utils/prompt-cache');
 const dataChunker = require('./utils/data-chunker');
@@ -1231,6 +1232,14 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
         console.log(`   ℹ️  Absence policy: ${_abs.converted.length} "uncertain" answer(s) were plain absences in a complete workbook and are recorded as "Not present in the workbook": ${_abs.converted.join(', ')}`);
       }
     } catch (e) { console.error('   ⚠️  Absence policy check failed (results left as returned):', e.message); }
+
+    // Applicability (Patch 33): an absence the reviewer itself says does not belong in this kind of model is a Not Applicable
+    // record, not an open item. It is listed in the Applicability Record with the reviewer's reason.
+    try {
+      const _ruleByIdNA = new Map([...(checklist.tier1 || []), ...(checklist.tier2 || [])].map(x => [x.id, x]));
+      const _na = markNotApplicable(normalised, { ruleById: _ruleByIdNA });
+      if (_na.length) console.log(`   ℹ️  Applicability: ${_na.length} absence(s) the reviewer says do not apply to this model are recorded as Not Applicable: ${_na.join(', ')}`);
+    } catch (e) { console.error('   ⚠️  Applicability step failed (results left as returned):', e.message); }
 
     // R-8 verification: log a direct, objective count of how many
     // findings this run actually used the new formula-sample

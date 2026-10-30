@@ -132,8 +132,14 @@ function runPathCases() {
   try { const lines = String(p.stdout).trim().split('\n'); return JSON.parse(lines[lines.length - 1]); } catch (e) { return { 10: { status: 'fail', note: 'path case output unreadable' } }; }
 }
 
+function runRemedyCases() {
+  const p = spawnSync(process.execPath, [path.join(ROOT, 'scripts/remedy-cases-run.js')], { encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
+  if (p.status !== 0) return { 15: { status: 'fail', note: 'remedy case runner failed: ' + String(p.stderr).slice(0, 200) } };
+  try { const lines = String(p.stdout).trim().split('\n'); return JSON.parse(lines[lines.length - 1]); } catch (e) { return { 15: { status: 'fail', note: 'remedy case output unreadable' } }; }
+}
+
 function runAll() {
-  const out = Object.assign({}, runRecalcCases(), runGraphCases(), runDeepDiveCases(), runPathCases());
+  const out = Object.assign({}, runRecalcCases(), runGraphCases(), runDeepDiveCases(), runPathCases(), runRemedyCases());
   return CASES.map(c => Object.assign({ id: c.id, title: c.title, owner_patch: c.owner_patch }, out[c.id] || { status: 'pending', note: 'not executable offline yet; made executable by Patch ' + c.owner_patch }));
 }
 

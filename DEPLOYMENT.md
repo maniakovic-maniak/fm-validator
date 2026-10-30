@@ -445,3 +445,43 @@ Measured in the sandbox: cycle search on Hidden Gem 10.8 s and 2.4 GB peak, riio
 iterative calculation switched on, so its whole-row `AVERAGEIF(...,102:102)` self-references are real references that
 Excel accepts only because of that setting. Not changed: the shared reader is not yet used by the checks that read
 single-cell references from their own patterns (lookup contract, bypassed checks); that is a later clean-up.
+
+## Remedy check, applicability record, approved priority outputs (Patch 33)
+
+**Remedy check** (`src/utils/remedy-check.js`, runs on all findings just before record types are assigned, in both
+pipelines). A suggested fix is checked against the audited file before it is published:
+- a cell cited as holding a quoted formula must hold it (`AP242 holds \`=SUM(AP10:AP19)\``). A cell that holds a different
+  formula, a constant, or nothing fails. A *proposed* formula ("change it to ...") is never compared with the existing one;
+- OFFSET arguments are read by role (reference, rows displacement, columns displacement, height, width). A remedy that
+  describes a negative width or height when the negative value is a displacement fails, because a negative displacement
+  moves the reference up or left and is valid;
+- a remedy whose only action is to wrap the formula in IFERROR/IFNA/ISERROR, or to return 0 on error, fails unless it
+  also says to find or correct the cause, restructure with an explicit test, or guard the denominator. "Do not wrap it in
+  IFERROR" is not a suppression.
+A failed remedy is replaced by a short statement of why it was withheld; the finding is never removed or re-rated, the
+original wording is kept in `finding.remedy_check.original`, and `fixable` becomes false. Remedies it cannot evaluate are
+left exactly as written and counted "could not be checked". The Scope and Reliance tab shows the counts. All 194
+remedy texts hard-coded in the pipelines were scanned; none is withheld.
+
+**Applicability record** (`src/utils/applicability-record.js`, called after the absence policy in `validator-tier2.js`).
+An absence the reviewer itself says does not belong in this kind of model ("no debt schedule ... an unlevered model") is
+recorded as Not Applicable: it stays in the Issue Log, drops out of the P1-P3 counts and the Remediation tab, and is listed
+in the Applicability Record on the Scope and Reliance tab with the reviewer's reason, so a person can overrule it. The
+procedure's status is unchanged, so coverage figures do not move. A fatal-severity rule and any statement about the
+reviewer's own limits are never set aside this way. A sheet that looks like a macro-refilled store (Saved Results and the
+like) in a workbook with a VBA project adds a separate "Freshness not tested" line; the audit reads saved values and does
+not run macros.
+
+**Approved priority outputs.** `config/output-registries/<model>.json` is an approved registry only when its status is
+`approved` and it names an approver and an ISO approval date. A draft (`.proposed.json`), a file with an empty name or
+date, or no file counts as no approval. The model name is the uploaded file name without its extension, lower-cased and
+hyphenated, so the registry belongs to a file name. Steps: `node scripts/propose-output-registry.js <model file>`, edit the
+list, then `node scripts/approve-output-registry.js <proposed.json> --by "Full Name"` (adds `--on YYYY-MM-DD`, default today;
+`--replace` to overwrite), and commit. Effect: the highest reliance tier (Transaction Execution) needs an approved list as
+well as reviewer approval; without it the report shows the tier below, says why in the decision box and in a Priority
+Outputs panel, and everything else is unchanged. A report is never held.
+
+Acceptance cases 15 and 16 run on synthetic fixtures (`scripts/remedy-fixtures.js`); `test-patch33.js` has 41 checks including
+report builds under each registry state. Not done: the remedy check reads cited cells from backtick-quoted formulas only;
+the applicability record relies on the reviewer's wording, not on the model's structure; both are noted as the next places
+to widen if the first real runs show misses.

@@ -83,6 +83,9 @@ const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
 const { checkCircularReferences, buildRangeCycleFinding } = require('./src/utils/circular-reference-detector');
+const { applyRemedyChecks } = require('./src/utils/remedy-check');
+const { buildApplicabilityRecord } = require('./src/utils/applicability-record');
+const { loadRegistryState } = require('./src/utils/output-registry');
 const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
@@ -3300,6 +3303,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     // See the matching comment in index.js for the full rationale.
     try { const _fc = applyFindingClasses(allFlagged, { profileId: ruleExclusions.profileId }); if (_fc.capped.length || _fc.observations.length) console.log(`   \u2139\ufe0f  Finding class: ${_fc.capped.length} governance absence(s) rated P3, ${_fc.observations.length} design-preference finding(s) recorded as Observations`); }
     catch (e) { console.error('   \u26a0\ufe0f  Finding-class step failed:', e.message); }
+    // Remedy check (Patch 33): a fix is published only if the workbook does not contradict it and it does not just hide an error.
+    let remedyChecks = { checked: 0, verified: 0, withheld: 0, unverified: 0, details: [] };
+    try { remedyChecks = applyRemedyChecks(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (remedyChecks.withheld) console.log(`   \u2139\ufe0f  Remedy check: ${remedyChecks.withheld} of ${remedyChecks.checked} suggested fix(es) withheld (${remedyChecks.verified} verified, ${remedyChecks.unverified} not checkable)`); }
+    catch (e) { console.error('   \u26a0\ufe0f  Remedy check failed (remedies left as written):', e.message); }
     assignRecordTypes(allFlagged);
     // Findings from different checks that name the same cells are one repair; cross-reference them (nothing is dropped).
     try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
@@ -3414,6 +3421,8 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const deepAccountingResolvedSheets = resolveDeepAccountingSheets(parsed.sheetNames);
 
     const runProvenance = await buildRunProvenance({ filePath: parsed._filePath, originalName });
+    const applicabilityRecord = (() => { try { return buildApplicabilityRecord(allFlagged, { sheetNames: parsed.sheetNames, hasVba: !!(vbaReview && (vbaReview.applicable || vbaReview.hasVbaProject)) }); } catch (e) { console.error('   \u26a0\ufe0f  Applicability record failed:', e.message); return []; } })();
+    const outputRegistry = (() => { try { return loadRegistryState(originalName); } catch (e) { return { status: 'none', approved_by: null, approved_on: null, outputs: 0, file: null }; } })();
     await buildReportFile(reportPath, allFlagged, [], {
       originalName,
       modelType,
@@ -3445,6 +3454,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       scopeSummary: summarizeScopeForReport(ruleExclusions.record, scopePlan),
       ownerDecisionChecklist,
       runProvenance,
+      remedyChecks,
+      applicabilityRecord,
+      outputRegistry,
       batchFailures:     t2Results._batchFailures || [],
       partialCoverage:   t2Results._partialCoverage || [],
       tier2Evidence:     t2Results._evidence || null

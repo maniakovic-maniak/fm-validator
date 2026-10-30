@@ -263,6 +263,11 @@ def build_report(data_path, output_path):
     # Approval Is Complete" is one of eight mandatory conjuncts).
     reviewer_approved = bool(d.get('reviewerApproved', False))
     reviewer_approval_gap = not reviewer_approved
+    # Patch 33: the highest tier also needs an approved list of priority outputs for this model. This only lowers the top
+    # tier by one level, the same way a missing reviewer approval does; it never holds or blocks a report.
+    _oreg = d.get('outputRegistry') or {}
+    registry_approved = (_oreg.get('status') == 'approved')
+    registry_gap = not registry_approved
 
     # ── P1/P2/P3 framework renewal, Tier 1 item 2 ────────────────────────────
     # Severity alone used to decide P1/P2/P3 for every finding. Per the
@@ -455,11 +460,11 @@ def build_report(data_path, output_path):
             verdict_short='NOT RELIANCE-READY'; verdict_bg=DARK_BLUE
             verdict_text=(f'{_blocker_desc} open and {igReadiness}% of planned procedures completed ({cov_conclusive_pct}% concluded, Uncertain/Not Run excluded). Both open reliance blockers and audit coverage prevent reliance at any level. '
                           f'Resolve these items and complete outstanding procedures before reassessment.')
-    elif igReadiness >= 95 and not reviewer_approval_gap:
+    elif igReadiness >= 95 and not reviewer_approval_gap and not registry_gap:
         verdict_short='RELIANCE-READY FOR TRANSACTION EXECUTION'; verdict_bg=MID_BLUE
         verdict_text=(f'No P1 items, unresolved Critical Queries, or other reliance blockers open, reviewer approval recorded, and {igReadiness}% of planned procedures completed ({cov_pass} passed). '
                       f'{p2_open} P2 item(s) remain and should be resolved or formally waived as part of transaction close.')
-    elif igReadiness >= 95 and reviewer_approval_gap:
+    elif igReadiness >= 95 and (reviewer_approval_gap or registry_gap):
         # ── P1/P2/P3 framework renewal, Tier 3 ─────────────────────────────
         # The memo's own exhaustive AND-clause for the highest reliance
         # tier explicitly includes "Required Reviewer Approval Is
@@ -469,8 +474,11 @@ def build_report(data_path, output_path):
         # is supplied — a genuine, disclosed behaviour change, not a
         # silent one.
         verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=MID_BLUE
-        verdict_text=(f'All automated gates pass and {igReadiness}% of planned procedures completed ({cov_pass} passed), but required reviewer approval has not yet been recorded — '
-                      f'this caps the model one tier below Transaction Execution readiness until a reviewer explicitly signs off. {p2_open} P2 item(s) remain.')
+        _cap_why = []
+        if reviewer_approval_gap: _cap_why.append('required reviewer approval has not yet been recorded')
+        if registry_gap: _cap_why.append('no approved list of priority outputs exists for this model')
+        verdict_text=(f'All automated gates pass and {igReadiness}% of planned procedures completed ({cov_pass} passed), but {" and ".join(_cap_why)} — '
+                      f'this caps the model one tier below Transaction Execution readiness until that is in place. {p2_open} P2 item(s) remain.')
     elif igReadiness >= 80:
         verdict_short='RELIANCE-READY FOR LENDER / INVESTOR REVIEW'; verdict_bg=MID_BLUE
         verdict_text=(f'No P1 items or unresolved Critical Queries open; {igReadiness}% of planned procedures completed. Outstanding items: {cov_unc} uncertain and {cov_np} not-run procedures, {p2_open} open P2 item(s). '
@@ -1109,6 +1117,8 @@ def build_report(data_path, output_path):
                        if p1_open>0 else
                        f'{_verdict_display2}. Open: {_open_desc}. {p2_open} P2 item(s) remain; see Issue Log for detail.' if _reliance_blocked else
                        f'{_verdict_display2}. {p2_open} P2 item(s) remain; see Issue Log for detail.')
+    if registry_gap and igReadiness >= 95 and not _reliance_blocked and not (p1_open > 0 or critical_query_open > 0 or other_gates_open):
+        _decision_text += ' The highest tier (transaction execution) is not available because no approved list of priority outputs exists for this model.'
     merge(ws3,f'B{r3}:E{r3}',f'RELIANCE DECISION:   {_verdict_display2}',bold=True,sz=12,col=WHITE,bg=verdict_bg,v='center')
     fill_range(ws3,r3,2,r3,5,verdict_bg); set_row(ws3,r3,24); r3+=1
     merge(ws3,f'B{r3}:E{r3+1}',_decision_text,sz=10,col=CHARCOAL,bg=PANEL_GREY,wrap=True,v='center')
@@ -1152,6 +1162,38 @@ def build_report(data_path, output_path):
                            ('Rule set version',_short(_prov.get('rule_version'))),
                            ('Reviewer model(s)',', '.join(_prov.get('model_ids') or []) or 'unknown')]:
             r3 = kv_row(r3,label,val)
+        set_row(ws3,r3,10); r3+=1
+
+    # ── Panel 1c: Priority outputs, remedy check and applicability record (Patch 33) ──────────
+    _reg = d.get('outputRegistry') or {}
+    if _reg:
+        r3 = panel_header(r3,'PRIORITY OUTPUTS')
+        _rs = _reg.get('status')
+        if _rs == 'approved':
+            r3 = kv_row(r3,'Approved list',f"{_reg.get('outputs',0)} outputs, approved by {_reg.get('approved_by')} on {_reg.get('approved_on')}")
+            r3 = kv_row(r3,'Effect on the verdict','None. The highest reliance tier is not held back by this item.')
+        else:
+            _state = {'proposed':'A draft exists but nobody has approved it','invalid':'A file exists but is not a complete approval'}.get(_rs,'No list exists for this model')
+            r3 = kv_row(r3,'Approved list',_state)
+            r3 = kv_row(r3,'Effect on the verdict','The highest reliance tier (Transaction Execution) is not available until a named person approves the list of priority outputs. No report is held and no other result changes.')
+        set_row(ws3,r3,10); r3+=1
+    _rc = d.get('remedyChecks') or {}
+    if _rc and _rc.get('checked'):
+        r3 = panel_header(r3,'REMEDY CHECK')
+        r3 = kv_row(r3,'Suggested fixes checked',f"{_rc.get('checked',0)}: {_rc.get('verified',0)} confirmed against the file, {_rc.get('withheld',0)} withheld, {_rc.get('unverified',0)} could not be checked")
+        if _rc.get('withheld'):
+            r3 = kv_row(r3,'What withheld means','The finding stays. Its suggested fix cited a cell the file does not support, misread a function argument, or only hid the error. The Issue Log row says which. The original wording is kept in the run data.')
+            for _d in (_rc.get('details') or [])[:10]:
+                r3 = kv_row(r3,f"{_d.get('id','')}",f"{_d.get('sheet','')}!{_d.get('cell','')}: {', '.join(_d.get('reasons') or [])}")
+        set_row(ws3,r3,10); r3+=1
+    _ap = d.get('applicabilityRecord') or []
+    if _ap:
+        r3 = panel_header(r3,'APPLICABILITY RECORD')
+        r3 = kv_row(r3,'Why this exists','An absence is a defect only if the model needs the thing that is absent. These items were set aside, with the reason given, and are outside the P1-P3 counts and the Remediation tab. A person can overrule any of them.')
+        for _a in _ap[:40]:
+            r3 = kv_row(r3,f"{_a.get('id','')} - {_a.get('decision','')}",f"{_a.get('subject','')} Basis: {_a.get('basis','')}. {_a.get('reason','')}")
+        if len(_ap) > 40:
+            r3 = kv_row(r3,'Not shown',f"{len(_ap)-40} further entries")
         set_row(ws3,r3,10); r3+=1
 
     # ── Panel 2: Work Performed ──────────────────────────────────────────────

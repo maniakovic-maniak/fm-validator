@@ -112,6 +112,10 @@ async function buildReportFile(reportPath, allFlagged, allFixes, meta) {
     ownerDecisionChecklist: meta.ownerDecisionChecklist || null,
     // Patch 27: what was audited and by what (input hash, code commit, rule set), shown in Scope and Reliance.
     runProvenance:   meta.runProvenance || null,
+    // Patch 33: remedy check result, applicability record and the state of the approved priority-output list.
+    remedyChecks:    meta.remedyChecks ? { checked: meta.remedyChecks.checked, verified: meta.remedyChecks.verified, withheld: meta.remedyChecks.withheld, unverified: meta.remedyChecks.unverified, details: (meta.remedyChecks.details || []).slice(0, 50) } : null,
+    applicabilityRecord: meta.applicabilityRecord || [],
+    outputRegistry:  meta.outputRegistry || null,
     auditLog:        auditLog || []
   };
 
