@@ -1193,6 +1193,9 @@ def build_report(data_path, output_path):
         _rc = _ev.get('recalculation') or {}
         if _rc.get('status') == 'completed':
             r3 = kv_row(r3,'Independent recalculation',f"Completed: {_rc.get('cells_checked',0):,} cells compared, {_rc.get('mismatches',0)} mismatch(es), {_rc.get('coverage_pct') if _rc.get('coverage_pct') is not None else 'n/a'}% of formula cells covered")
+            _nr = _rc.get('not_recalculated') or {}
+            _nrp = [f"{v:,} {l}" for v,l in ((_nr.get('offset',0),'OFFSET cell(s)'),(_nr.get('bare_multicell_name',0),'cell(s) using a bare multi-cell named range'),(_nr.get('external_reference',0),'external-reference cell(s)'),(_nr.get('downstream_of_those',0),'cell(s) downstream of those')) if v]
+            if _nrp: r3 = kv_row(r3,'Not recalculated',' | '.join(_nrp))
         else:
             r3 = kv_row(r3,'Independent recalculation','Not completed: ' + str(_rc.get('detail','no result')))
         _pcs = (_ev.get('path_checks') or {})
@@ -1560,8 +1563,13 @@ def build_report(data_path, output_path):
         ws3.cell(r3,cc).value=''; ws3.cell(r3,cc).fill=F(WHITE); ws3.cell(r3,cc).border=B(col=PANEL_BORDER)
         ws3.cell(r3,cc).alignment=A(h='center',v='center')
     set_row(ws3,r3,24); r3+=1
-    merge(ws3,f'B{r3}:E{r3}','Not yet signed off — this is a draft automated review, not a final reliance record.',sz=8,col=GREY_TXT2,italic=True)
-    set_row(ws3,r3,16); r3+=1
+    _rrx = d.get('runRecord')
+    if _rrx:
+        _so = f"Issued by automated review on {str(_rrx.get('created_at',''))[:10]}. Record {str(_rrx.get('fingerprint',''))[:12]}. No manual sign-off is required; the Assessment Record panel lists any evidence gap that lowers the tier."
+    else:
+        _so = 'No assessment record was built for this run, so the tier is limited. No manual sign-off is required.'
+    merge(ws3,f'B{r3}:E{r3}',_so,sz=8,col=GREY_TXT2,italic=True)
+    set_row(ws3,r3,34); r3+=1
     _scope_last_row = r3
 
 

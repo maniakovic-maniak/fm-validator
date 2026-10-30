@@ -32,8 +32,10 @@ function recalcEvidence(r) {
   const excluded = ['offset_cells_excluded', 'multicell_named_range_cells_excluded', 'external_reference_cells_excluded', 'tainted_downstream_cells_excluded'].reduce((a, k) => a + (Number(r[k]) || 0), 0);
   const checked = Number(r.formula_cells_checked) || 0;
   const total = checked + excluded;
+  const n = k => Number(r[k]) || 0;
+  const not_recalculated = { offset: n('offset_cells_excluded'), bare_multicell_name: n('multicell_named_range_cells_excluded'), external_reference: n('external_reference_cells_excluded'), downstream_of_those: n('tainted_downstream_cells_excluded') };
   return {
-    status: 'completed', cells_checked: checked, cells_excluded: excluded,
+    status: 'completed', cells_checked: checked, cells_excluded: excluded, not_recalculated,
     coverage_pct: total > 0 ? Math.round(checked / total * 100) : null,
     mismatches: Number(r.mismatch_count) || 0, unresolved_errors: Number(r.unresolved_error_count) || 0,
   };
@@ -46,6 +48,13 @@ function pathEvidence(pathChecks) {
   return { criteria: summary.map(s => ({ criterion: s.criterion, tested: s.tested || 0, failed: s.failed || null, not_completed: s.notCompleted || 0 })), failed: summary.filter(s => s.failed).map(s => s.criterion) };
 }
 
+function recalcBreakdown(rc) {
+  const nr = rc.not_recalculated || {};
+  const parts = [[nr.offset, 'OFFSET cell(s)'], [nr.bare_multicell_name, 'cell(s) using a bare multi-cell named range'], [nr.external_reference, 'external-reference cell(s)'], [nr.downstream_of_those, 'cell(s) downstream of those']]
+    .filter(([c]) => c > 0).map(([c, l]) => `${c.toLocaleString('en-US')} ${l}`);
+  return parts.length ? parts.join(', ') : 'no reason recorded';
+}
+
 /** The gaps: each is { key, text } and each keeps the highest reliance tier from being issued. */
 function evidenceGaps(ev) {
   const gaps = [];
@@ -55,7 +64,7 @@ function evidenceGaps(ev) {
   if (!rc || rc.status !== 'completed') gaps.push({ key: 'recalculation', text: `no independent recalculation was completed (${(rc && rc.detail) || 'not run'}), so the model's own saved values are not independently confirmed` });
   else {
     if (rc.mismatches > 0) gaps.push({ key: 'recalculation', text: `the independent recalculation disagreed with the saved values in ${rc.mismatches} cell(s)` });
-    if (rc.coverage_pct !== null && rc.coverage_pct < MIN_RECALC_COVERAGE_PCT) gaps.push({ key: 'recalculation_coverage', text: `the independent recalculation covered ${rc.coverage_pct}% of formula cells (at least ${MIN_RECALC_COVERAGE_PCT}% is needed)` });
+    if (rc.coverage_pct !== null && rc.coverage_pct < MIN_RECALC_COVERAGE_PCT) gaps.push({ key: 'recalculation_coverage', text: `the independent recalculation covered ${rc.coverage_pct}% of formula cells (at least ${MIN_RECALC_COVERAGE_PCT}% is needed); not recalculated: ${recalcBreakdown(rc)}` });
   }
   if (ev.path_checks.failed.length) gaps.push({ key: 'path_checks', text: `path check(s) did not complete: ${ev.path_checks.failed.join(', ')}` });
   if (ev.batches.failed > 0) gaps.push({ key: 'review_batches', text: `${ev.batches.failed} review batch(es) failed to complete` });
@@ -98,4 +107,4 @@ function writeRunRecord(reportPath, rec) {
   catch (e) { console.error('   ⚠️  Could not write run record:', e.message); return false; }
 }
 
-module.exports = { buildRunRecord, evidenceGaps, recalcEvidence, writeRunRecord, recordPathFor, MIN_RECALC_COVERAGE_PCT };
+module.exports = { recalcBreakdown, buildRunRecord, evidenceGaps, recalcEvidence, writeRunRecord, recordPathFor, MIN_RECALC_COVERAGE_PCT };

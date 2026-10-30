@@ -569,3 +569,9 @@ Checks: `node test-patch39.js` (20 checks, including six simultaneous workers an
 - No extra model calls, so run price is unchanged.
 - Rollback: `git revert` the commit; no data migration.
 - Check: `node test-patch40.js`
+
+## Patch 41 - say what was not recalculated; drop the sign-off footer
+
+- The recalculation coverage gap now names the cause (OFFSET cells, bare multi-cell named ranges, external references, cells downstream of those), in the gap text and as a "Not recalculated" line in the Assessment Record panel. On ESO this is 354 OFFSET, 611 named-range and 4,278 downstream cells (36% covered). The 90% bar is unchanged.
+- The Scope tab footer no longer says "Not yet signed off". It states that the automated review issued the assessment, with the date and record id, and that no manual sign-off is required. With no record it says so.
+- No model calls; run price unchanged. Check: `node test-patch41.js`.
