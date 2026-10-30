@@ -13,6 +13,12 @@ async function buildRemedyWorkbook() {
   s.getCell('C1').value = { formula: 'SUM(OFFSET(D1,0,0,1,A1))', result: 0 };     // A1 is a genuine negative WIDTH
   for (let r = 10; r <= 12; r++) s.getCell('AP' + r).value = 1;
   s.getCell('AP242').value = { formula: 'SUM(AP10:AP37)', result: 3 };
+  // Patch 34: a sheet whose name has a space, for remedies that cite cells in plain prose
+  const fin = wb.addWorksheet('Fin Stmts');
+  fin.getCell('AP35').value = 480;                                                    // a constant, not a formula
+  fin.getCell('AP42').value = 0;
+  fin.getCell('AP608').value = { formula: 'S!AP242*4000000', result: 12200000 };
+  fin.getCell('AP122').value = { formula: 'AP608', result: 12200000 };
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'remedyfx-')), 'fixture.xlsx');
   await wb.xlsx.writeFile(file);
   return file;
@@ -32,6 +38,18 @@ function remedyFindings() {
   };
 }
 
+// Patch 34: remedies that cite cells in prose, as the reviewer writes them.
+function proseFindings() {
+  return {
+    formulaOnConstant: F({ cell: 'AP42', sheet: 'Fin Stmts', fix_instruction: "Inspect Fin Stmts!AP35's source formula in Excel to confirm it reflects the regearing." }),
+    formulaOnFormula: F({ cell: 'AP42', sheet: 'Fin Stmts', fix_instruction: "Inspect the formula in Fin Stmts!AP122 and confirm it points at the equity line." }),
+    valueRight: F({ cell: 'AP42', sheet: 'Fin Stmts', fix_instruction: 'Fin Stmts!AP42 shows 0 while Fin Stmts!AP122 shows ~12.2m in the same period; link AP42 to AP122.' }),
+    valueWrong: F({ cell: 'AP42', sheet: 'Fin Stmts', fix_instruction: 'Fin Stmts!AP122 shows 31.5m, so AP42 should be linked to it.' }),
+    percentNotValue: F({ cell: 'AP42', sheet: 'Fin Stmts', fix_instruction: 'Fin Stmts!AP122 is 20% of the total; review the split.' }),
+    unknownSheet: F({ cell: 'B1', fix_instruction: 'Open Nowhere!Z9 formula and compare.' }),
+  };
+}
+
 // Reviewer answers for the applicability record.
 function applicabilityResults() {
   const base = { status: 'uncertain', confidence: 0.55, sheet: '', cell: 'A1' };
@@ -43,4 +61,4 @@ function applicabilityResults() {
   };
 }
 
-module.exports = { buildRemedyWorkbook, remedyFindings, applicabilityResults };
+module.exports = { buildRemedyWorkbook, remedyFindings, proseFindings, applicabilityResults };

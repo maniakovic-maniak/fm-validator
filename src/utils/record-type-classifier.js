@@ -205,6 +205,37 @@ function classifyRecordType(finding) {
   return 'Observation';
 }
 
+/**
+ * Patch 34: two Critical Queries about the same cell are one open matter. In an ESO run T2-S5-004 and T2-S10-004 both
+ * concerned FinancialStatements!AP42 and counted twice towards "unresolved Critical Queries". The stronger (higher
+ * confidence, then earlier id) stays; the other becomes a Query that names it, so nothing is dropped.
+ * Runs after assignRecordTypes. Only findings anchored to a real cell (not A1 or blank) are merged.
+ */
+function mergeDuplicateCriticalQueries(findings) {
+  const by = new Map();
+  for (const f of findings) {
+    if (!f || f.record_type !== 'Critical Query') continue;
+    const cell = String(f.cell || '').trim().toUpperCase();
+    if (!f.sheet || !cell || cell === 'A1') continue;
+    const k = `${f.sheet}!${cell}`;
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(f);
+  }
+  const merged = [];
+  for (const group of by.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => (b.confidence || 0) - (a.confidence || 0) || String(a.id).localeCompare(String(b.id)));
+    const keep = group[0];
+    for (const dup of group.slice(1)) {
+      dup.record_type = 'Query';
+      dup.merged_into = keep.id;
+      dup.record_type_note = `Same cell as Critical Query ${keep.id}; counted once.`;
+      merged.push({ id: dup.id, into: keep.id, cell: `${keep.sheet}!${keep.cell}` });
+    }
+  }
+  return merged;
+}
+
 /** Applies classifyRecordType across an array of findings, mutating
  * each in place (adds record_type if absent) and returning the same
  * array for convenience. */
@@ -215,4 +246,4 @@ function assignRecordTypes(findings) {
   return findings;
 }
 
-module.exports = { classifyRecordType, assignRecordTypes, screeningRecordType, resolveConfidence };
+module.exports = { classifyRecordType, assignRecordTypes, mergeDuplicateCriticalQueries, screeningRecordType, resolveConfidence };

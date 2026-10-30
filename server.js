@@ -62,7 +62,7 @@ const { checkRevenueDoubleCounting } = require('./src/utils/revenue-double-count
 const { checkBlankCellReferences, groupBlankCellReferencesByTarget } = require('./src/utils/blank-cell-reference-check');
 const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
-const { assignRecordTypes } = require('./src/utils/record-type-classifier');
+const { assignRecordTypes, mergeDuplicateCriticalQueries } = require('./src/utils/record-type-classifier');
 const { linkRelatedFindings } = require('./src/utils/related-findings');
 const { annotateMasterFindings, countMasters, priorityOf } = require('./src/utils/master-findings');
 const { applyFindingClasses, groupSameRemediation } = require('./src/utils/finding-class');
@@ -3308,6 +3308,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     try { remedyChecks = applyRemedyChecks(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (remedyChecks.withheld) console.log(`   \u2139\ufe0f  Remedy check: ${remedyChecks.withheld} of ${remedyChecks.checked} suggested fix(es) withheld (${remedyChecks.verified} verified, ${remedyChecks.unverified} not checkable)`); }
     catch (e) { console.error('   \u26a0\ufe0f  Remedy check failed (remedies left as written):', e.message); }
     assignRecordTypes(allFlagged);
+    { const mergedCQ = mergeDuplicateCriticalQueries(allFlagged); if (mergedCQ.length) console.log(`   \u2139\ufe0f  Critical Queries about the same cell merged: ${mergedCQ.map(m => `${m.id} into ${m.into} (${m.cell})`).join('; ')}`); }
     // Findings from different checks that name the same cells are one repair; cross-reference them (nothing is dropped).
     try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
     catch (e) { console.error('   \u26a0\ufe0f  Related-findings link failed:', e.message); }

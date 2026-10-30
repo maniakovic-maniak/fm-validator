@@ -88,6 +88,48 @@ function citationsWithFormulas(text, defaultSheet) {
   return res;
 }
 
+// Plain-prose citations: "FinancialStatements!AP35's source formula", "AP42 shows 0". Real remedies rarely quote a
+// formula in backticks, so this reads cell citations by the workbook's own sheet names (a name with spaces cannot be
+// told apart from a stray word any other way) and keeps only two kinds of claim that the saved file can contradict:
+//   formula claim   the text points at the formula in a cell: the cell must hold one
+//   value claim     the text says the cell shows/holds a number: the saved value must agree (units m/k/bn allowed)
+const UNIT = { k: 1e3, m: 1e6, bn: 1e9 };
+const FORMULA_AFTER_RE = /^(?:'s|’s)?\s*(?:\([^)]{0,40}\)\s*)?(?:source |current |underlying |own )?formula\b/i;
+const FORMULA_BEFORE_RE = /formulas?\s+(?:in|at|of|for|behind|used in)\s+$/i;
+const VALUE_AFTER_RE = /^(?:'s|’s)?\s*(?:\([^)]{0,40}\)\s*)?(?:currently\s+)?(?:shows|holds|reads|is|=|returns|gives|contains|has)\s+(~?)([-−]?)[£$]?(\d[\d,]*\.?\d*)\s*(bn|m|k)?\b(?!\s*%)/i;
+
+function proseCitations(text, workbook) {
+  const names = (workbook.worksheets || []).map(w => w.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  const out = [];
+  if (!names.length) return out;
+  const esc = n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?:'(${names.map(n => esc(n.replace(/'/g, "''"))).join('|')})'|(${names.map(esc).join('|')}))!\\$?([A-Z]{1,3})\\$?(\\d{1,7})(?![\\d(])`, 'g');
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const sheet = m[1] ? m[1].replace(/''/g, "'") : m[2];
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 90).split(/[.;](?:\s|$)/)[0];
+    const before = text.slice(Math.max(0, m.index - 30), m.index);
+    let claim = null;
+    if (FORMULA_AFTER_RE.test(after) || FORMULA_BEFORE_RE.test(before)) claim = { type: 'formula' };
+    else {
+      const v = VALUE_AFTER_RE.exec(after);
+      if (v && !/^\s*formula/i.test(after.slice(v[0].length))) {
+        const dec = (v[3].split('.')[1] || '').length;
+        claim = { type: 'value', expected: (v[2] ? -1 : 1) * parseFloat(v[3].replace(/,/g, '')), unit: UNIT[(v[4] || '').toLowerCase()] || 1, decimals: dec };
+      }
+    }
+    if (claim) out.push({ sheet, cell: (m[3] + m[4]).toUpperCase(), row: +m[4], col: colNum(m[3]), ...claim });
+  }
+  return out;
+}
+
+// Does a saved value agree with a number quoted from a remedy? The model may hold pounds where the text says millions.
+function valueAgrees(actual, c) {
+  const target = c.expected * c.unit;
+  const tol = Math.max(0.05 * Math.abs(target), 0.5 * c.unit / Math.pow(10, c.decimals));
+  return [1, 1e3, 1e6, 1e-3, 1e-6].some(sc => Math.abs(actual * sc - target) <= tol);
+}
+
 function actualFormula(workbook, cellScoreIndex, sheet, cell) {
   const ws = workbook.getWorksheet(sheet);
   if (!ws) return { state: 'no_sheet' };
@@ -98,6 +140,7 @@ function actualFormula(workbook, cellScoreIndex, sheet, cell) {
   if (!c) return { state: 'empty' };
   const v = c.value;
   if (v && typeof v === 'object' && typeof v.formula === 'string') return { state: 'formula', formula: v.formula };
+  if (v && typeof v === 'object' && v.sharedFormula) return { state: 'formula', formula: undefined };   // shared formula: text not held on this cell
   if (v === null || v === undefined || v === '') return { state: 'empty' };
   return { state: 'constant', value: v };
 }
@@ -119,7 +162,23 @@ function checkOne(f, workbook, cellScoreIndex, rd) {
     if (a.state === 'no_sheet') reasons.push({ type: 'citation', text: `the remedy cites ${c.sheet}!${c.cell}, but the file has no sheet "${c.sheet}"` });
     else if (a.state === 'empty') reasons.push({ type: 'citation', text: `the remedy says ${c.sheet}!${c.cell} holds ${clip(c.quoted)}, but that cell is empty in the audited file` });
     else if (a.state === 'constant') reasons.push({ type: 'citation', text: `the remedy says ${c.sheet}!${c.cell} holds the formula ${clip(c.quoted)}, but that cell holds the value ${clip(String(a.value), 40)}` });
-    else if (norm(a.formula) !== norm(c.quoted)) reasons.push({ type: 'citation', text: `the remedy says ${c.sheet}!${c.cell} holds ${clip(c.quoted)}, but the audited file holds ${clip(a.formula)}` });
+    else if (a.formula && norm(a.formula) !== norm(c.quoted)) reasons.push({ type: 'citation', text: `the remedy says ${c.sheet}!${c.cell} holds ${clip(c.quoted)}, but the audited file holds ${clip(a.formula)}` });
+  }
+
+  // 1b. Cell citations written in ordinary prose: a pointer at "the formula" in a cell that holds none, or a quoted
+  // number the saved value does not support.
+  for (const c of proseCitations(remedy, workbook)) {
+    if (c.type === 'formula') {
+      const a = actualFormula(workbook, cellScoreIndex, c.sheet, c.cell);
+      evaluated = true;
+      if (a.state === 'empty') reasons.push({ type: 'citation', text: `the remedy points at the formula in ${c.sheet}!${c.cell}, but that cell is empty in the audited file` });
+      else if (a.state === 'constant') reasons.push({ type: 'citation', text: `the remedy points at the formula in ${c.sheet}!${c.cell}, but that cell holds the value ${clip(String(a.value), 40)} and no formula` });
+    } else {
+      const v = rd.value(c.sheet, c.row, c.col);
+      if (!isNum(v)) continue;
+      evaluated = true;
+      if (!valueAgrees(v, c)) reasons.push({ type: 'citation', text: `the remedy says ${c.sheet}!${c.cell} shows ${clip(String(c.expected), 20)}${Object.keys(UNIT).find(k => UNIT[k] === c.unit) || ''}, but the saved value is ${clip(String(v), 20)}` });
+    }
   }
 
   // 2. Argument roles: a "negative width/height" claim must be true of a height or width argument.
@@ -203,4 +262,4 @@ function applyRemedyChecks(findings, { workbook, cellScoreIndex } = {}) {
   return out;
 }
 
-module.exports = { applyRemedyChecks, checkOne, citationsWithFormulas, offsetArgs, ARG_ROLES, NEG_SIZE_RE, SUPPRESS_RE };
+module.exports = { applyRemedyChecks, checkOne, proseCitations, valueAgrees, citationsWithFormulas, offsetArgs, ARG_ROLES, NEG_SIZE_RE, SUPPRESS_RE };

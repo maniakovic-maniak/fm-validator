@@ -1180,7 +1180,7 @@ def build_report(data_path, output_path):
     _rc = d.get('remedyChecks') or {}
     if _rc and _rc.get('checked'):
         r3 = panel_header(r3,'REMEDY CHECK')
-        r3 = kv_row(r3,'Suggested fixes checked',f"{_rc.get('checked',0)}: {_rc.get('verified',0)} confirmed against the file, {_rc.get('withheld',0)} withheld, {_rc.get('unverified',0)} could not be checked")
+        r3 = kv_row(r3,'Suggested fixes checked',f"{_rc.get('checked',0)}: {_rc.get('verified',0)} confirmed against the file, {_rc.get('withheld',0)} withheld, {_rc.get('unverified',0)} cite nothing the file can test")
         if _rc.get('withheld'):
             r3 = kv_row(r3,'What withheld means','The finding stays. Its suggested fix cited a cell the file does not support, misread a function argument, or only hid the error. The Issue Log row says which. The original wording is kept in the run data.')
             for _d in (_rc.get('details') or [])[:10]:

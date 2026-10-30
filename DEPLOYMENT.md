@@ -485,3 +485,14 @@ Acceptance cases 15 and 16 run on synthetic fixtures (`scripts/remedy-fixtures.j
 report builds under each registry state. Not done: the remedy check reads cited cells from backtick-quoted formulas only;
 the applicability record relies on the reviewer's wording, not on the model's structure; both are noted as the next places
 to widen if the first real runs show misses.
+
+## Remedy citations in prose, duplicate Critical Queries (Patch 34)
+
+Found in the ESO run Fm-00053 (all of Patches 27-33 deployed): the remedy check reported "130 could not be checked" because it read only formulas quoted in backticks and no real remedy contains any.
+
+- **Remedy check reads plain-prose cell citations** (`src/utils/remedy-check.js`: `proseCitations`, `valueAgrees`). Cells are found by the workbook's own sheet names, so a sheet called "RoRE ranges" works. Two claims are tested against the saved file: "the formula in X" (X must hold a formula) and "X shows 12.2m" (the saved value must agree, allowing m/k/bn units and rounding). A sheet name not in the workbook is not guessed at. Percentages are not read as values. A remedy that fails is withheld as before, with the original kept in `remedy_check.original`.
+- **Real-file result:** of the 77 ESO remedies, one is confirmed and one withheld (T2-S5-004 points at the source formula in `FinancialStatements!AP35`, which is empty; the hard-coded zero is in `AP42`). 75 cite nothing the file can test. The panel now says "cite nothing the file can test" rather than "could not be checked".
+- **Duplicate Critical Queries** (`mergeDuplicateCriticalQueries`, called after `assignRecordTypes` in `index.js` and `server.js`): two Critical Queries on the same sheet and cell count once. The higher-confidence one stays; the other becomes a Query with `merged_into` set. Cells that are only the A1 fallback are never merged. Logged as "Critical Queries about the same cell merged".
+- Not changed: the Patch 7 rule that a fatal, critical or high-severity absence keeps its Critical Query escalation at low confidence (tested by `test-patch7.js`).
+
+Checks: `node test-patch34.js` (17 checks). Earlier suites unchanged.
