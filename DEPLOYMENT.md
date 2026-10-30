@@ -414,3 +414,34 @@ Date objects; reading the raw serial would recover them.
 `approved_on` empty, is not read by the pipeline and holds no report. Approval storage and the verdict ceiling arrive in
 Patch 33. Deep Dive selection by consequence waits for the Patch 32 reference service (Tier 0 holds sheet-level links
 only). Tier 0 still runs after Tier 2 on the full-parse route.
+
+## One reference reader for the graph checks (Patch 32)
+
+`src/utils/reference-service.js` (JavaScript) and `src/reference_service.py` (Python) read formula references by the same
+rules, replacing three separate regular expressions in the dependency tracer, the circular-reference detector and the
+recalculation taint tracer. String literals are removed first, so `IF(B1="C99",...)` no longer creates a dependency on
+C99 or an invented cycle. A range stays a range: `A1=SUM(A2:A10)` with `A5=A1` is now found as a cycle. Whole-column
+and whole-row references, defined names that are plain ranges, and 3-D references (`Jan:Mar!B5`) are expanded or kept
+as rectangles. A reference that cannot be located (structured table reference, external workbook, a name that is not a
+plain range, a sheet not in the workbook) is counted as an unknown dependency and reported, never dropped quietly.
+`ROW`, `COLUMN`, `ROWS` and `COLUMNS` read position only and add no edge, to the closing bracket of the call. A
+reference in an `IF`, `IFERROR`, `IFNA`, `CHOOSE`, `IFS` or `SWITCH` branch after the condition is marked conditional.
+
+- **Cycle search** keeps ranges as ranges (a per-column sorted index, lazy three-colour search), so a long row-sum over
+  already-finished cells costs almost nothing. Direct cell cycles keep T0-CIRC-001. Cycles that close through a range are a
+  new finding, T0-CIRC-003, medium when every link is always evaluated, low when it closes only through a lazily
+  evaluated branch. It states what the search could not locate and that it reads formula text only.
+- **Key-output chain check** (the dependency tracer) follows the formula cells inside a range instead of the top-left
+  cell only. A blank reached through a range is not reported as a dead end; a top-left blank still is. A range is cut
+  at 60 cells and the cut is counted. On the real models, flagged dead ends: Carlsberg 3 to 3 (same cells), Sydney Airport
+  1 to 1 (same cell), Bend 6 to 5 (G103 is read only as part of a range).
+- **Recalculation taint tracer** (Python): ranges over 2,000 cells are kept as rectangles instead of being dropped, so
+  taint reaches a SUM over thousands of cells (acceptance case 6: 2,000 and 2,001 cells are both covered). The
+  recalculation ledger is unchanged on Carlsberg, Bend, riio and Port Melbourne.
+- Acceptance cases 4, 5 and 6 now pass. `test-patch32.js` (66 checks) includes JavaScript/Python agreement on shared
+  formulas.
+
+Measured in the sandbox: cycle search on Hidden Gem 10.8 s and 2.4 GB peak, riio 0.3 s, ESO 0.14 s. Carlsberg has
+iterative calculation switched on, so its whole-row `AVERAGEIF(...,102:102)` self-references are real references that
+Excel accepts only because of that setting. Not changed: the shared reader is not yet used by the checks that read
+single-cell references from their own patterns (lookup contract, bypassed checks); that is a later clean-up.

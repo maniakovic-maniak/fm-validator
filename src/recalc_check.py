@@ -395,58 +395,15 @@ def _is_bare_multicell_reference(formula_text, multicell_name_re):
 # each neutralized cell to find everything downstream and excludes it
 # from the comparison too, not just the neutralized cells themselves.
 
-_CELL_REF_RE = re.compile(
-    r"(?:(?:'([^']+)'|([A-Za-z0-9_]+))!)?\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?"
-)
+import reference_service as _refsvc
 
-# FIX (found via mining "Advanced Excel", Jordan — L23): 3D references
-# like =SUM(Jan:Dec!B5), aggregating across every sheet from Jan to Dec
-# inclusive, were not recognized by _CELL_REF_RE at all. Confirmed via
-# direct testing: '=SUM(Jan:Dec!B5)' extracted only ('Dec','B',5) —
-# "Jan:" doesn't match anything so the engine just skips past it. Worse,
-# '=SUM(Sheet1:Sheet3!B3)' produced an outright CORRUPTED ref —
-# ('Summary','EET',1) — because "Sheet1" doesn't match the sheet-prefix
-# pattern (no "!" immediately after it) or the plain cell pattern (too
-# many letters), but the SUBSTRING "eet1" within it accidentally does
-# match \$?([A-Za-z]{1,3})\$?(\d+) using the current sheet as an implicit
-# prefix. This regex is matched and MASKED OUT of the formula text before
-# _CELL_REF_RE runs, so the existing single-sheet logic never sees (and
-# can't corrupt-match into) a 3D-reference span.
-_SHEET_RANGE_REF_RE = re.compile(
-    r"(?:'([^']+)'|([A-Za-z0-9_]+)):(?:'([^']+)'|([A-Za-z0-9_]+))!"
-    r"\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?"
-)
-
-
-def _col_to_num(col):
-    n = 0
-    for ch in col:
-        n = n * 26 + (ord(ch) - 64)
-    return n
-
-
-def _num_to_col(n):
-    s = ''
-    while n > 0:
-        n, rem = divmod(n - 1, 26)
-        s = chr(65 + rem) + s
-    return s
-
-
-def _sheets_in_span(sheet1, sheet2, sheet_order):
-    """Every sheet from sheet1 to sheet2 inclusive, in actual tab order —
-    NOT alphabetical or numeric order, since that's what "Jan:Dec!B5"
-    genuinely means in Excel (whatever sheets sit between Jan's and
-    Dec's tab positions, in whichever direction). Falls back to just the
-    two named sheets if sheet_order wasn't supplied or either name isn't
-    found in it — degraded (won't catch sheets strictly between them),
-    but still correct for those two, and no longer silently drops the
-    first one or corrupts the parse the way the old behavior did."""
-    if sheet_order and sheet1 in sheet_order and sheet2 in sheet_order:
-        i1, i2 = sheet_order.index(sheet1), sheet_order.index(sheet2)
-        lo, hi = (i1, i2) if i1 <= i2 else (i2, i1)
-        return sheet_order[lo:hi + 1]
-    return [sheet1, sheet2] if sheet1 != sheet2 else [sheet1]
+# Reference reading lives in reference_service.py, the Python side of src/utils/reference-service.js: string literals
+# are removed first, 3-D references are expanded across the sheets between the two tabs, and a range above
+# max_range_cells is kept as a rectangle (Refs.big_ranges) rather than dropped.
+_col_to_num = _refsvc.col_to_num
+_num_to_col = _refsvc.num_to_col
+_sheets_in_span = _refsvc.sheets_in_span
+_extract_refs = _refsvc.extract_refs
 
 
 def _jsonable(v):
@@ -458,57 +415,6 @@ def _jsonable(v):
     except Exception:
         return str(v)
 
-
-def _extract_refs(formula, current_sheet, sheet_order=None, max_range_cells=2000):
-    """Best-effort cell/range reference extraction — doesn't need to be a
-    complete Excel-grammar parser, just reliable enough to catch real
-    references for taint propagation. Pathologically large ranges are
-    skipped rather than fully expanded (not worth the cost here).
-
-    sheet_order: the workbook's sheets in actual tab order (e.g.
-    wb.sheetnames), used to correctly expand 3D references like
-    "Jan:Dec!B5". Optional — falls back to a degraded-but-not-corrupted
-    two-sheet interpretation if not supplied."""
-    refs = set()
-
-    # Pass 1: 3D (multi-sheet) references — matched and masked out of the
-    # formula text before the single-sheet regex runs.
-    masked_formula = formula
-    for m in _SHEET_RANGE_REF_RE.finditer(formula):
-        q1, b1, q2, b2, col1, row1, col2, row2 = m.groups()
-        sheet1 = (q1 or b1).strip()
-        sheet2 = (q2 or b2).strip()
-        for sheet in _sheets_in_span(sheet1, sheet2, sheet_order):
-            if col2 and row2:
-                c1, c2 = sorted([_col_to_num(col1.upper()), _col_to_num(col2.upper())])
-                r1, r2 = sorted([int(row1), int(row2)])
-                if (c2 - c1 + 1) * (r2 - r1 + 1) > max_range_cells:
-                    continue
-                for c in range(c1, c2 + 1):
-                    for r in range(r1, r2 + 1):
-                        refs.add((sheet, _num_to_col(c), r))
-            else:
-                refs.add((sheet, col1.upper(), int(row1)))
-        start, end = m.span()
-        masked_formula = masked_formula[:start] + (' ' * (end - start)) + masked_formula[end:]
-
-    # Pass 2: ordinary single-sheet (or same-sheet) references, over the
-    # masked text so 3D-reference spans can't be re-matched or
-    # corrupt-matched here.
-    for m in _CELL_REF_RE.finditer(masked_formula):
-        quoted_sheet, bare_sheet, col1, row1, col2, row2 = m.groups()
-        sheet = (quoted_sheet or bare_sheet or current_sheet).strip()
-        if col2 and row2:
-            c1, c2 = sorted([_col_to_num(col1.upper()), _col_to_num(col2.upper())])
-            r1, r2 = sorted([int(row1), int(row2)])
-            if (c2 - c1 + 1) * (r2 - r1 + 1) > max_range_cells:
-                continue
-            for c in range(c1, c2 + 1):
-                for r in range(r1, r2 + 1):
-                    refs.add((sheet, _num_to_col(c), r))
-        else:
-            refs.add((sheet, col1.upper(), int(row1)))
-    return refs
 
 # Confirmed via direct testing (the system's own OOM killer log) that
 # Formualizer's evaluate_all() was killed by the OS after growing to
@@ -850,9 +756,11 @@ def run(path, relative_tolerance=None, absolute_tolerance=None):
         if formula:
             _ext_refs_by_key[target_keys[i]] = _extract_refs(formula, sheet_of_target[target_keys[i]], sheet_order=sheet_order)
     _ext_dependents_of = {}
+    _ext_big = _refsvc.BigRanges()          # ranges too large to expand: kept as rectangles so taint still reaches their readers
     for key, refs in _ext_refs_by_key.items():
         for (rsheet, rcol, rrow) in refs:
             _ext_dependents_of.setdefault(f"{rsheet}!{rcol}{rrow}", []).append(key)
+        _ext_big.add(refs, key)
     _progress(f"  reference parsing and reverse index complete ({round(time.time()-t_start,1)}s elapsed).")
 
     tainted = set(external_ref_cells) | set(offset_cells) | set(multicell_range_cells)
@@ -867,6 +775,9 @@ def run(path, relative_tolerance=None, absolute_tolerance=None):
                 for dep_key in _ext_dependents_of.get(tkey, ()):
                     if dep_key not in tainted:
                         newly_tainted.add(dep_key)
+            for dep_key in _ext_big.hit_by(frontier):
+                if dep_key not in tainted:
+                    newly_tainted.add(dep_key)
             if not newly_tainted:
                 break
             tainted |= newly_tainted
@@ -1006,9 +917,13 @@ def run(path, relative_tolerance=None, absolute_tolerance=None):
     _progress(f"  reference parsing complete ({round(time.time()-t_start,1)}s elapsed).")
 
     dependents_of = {}
+    _err_big = _refsvc.BigRanges()
+    _vol_big = _refsvc.BigRanges()
     for key, refs in refs_by_key.items():
         for (rsheet, rcol, rrow) in refs:
             dependents_of.setdefault(f"{rsheet}!{rcol}{rrow}", []).append(key)
+        _err_big.add(refs, key)
+        _vol_big.add(refs, key)
     _progress(f"  reverse dependency index built: {len(dependents_of):,} referenced cell(s) "
                f"({round(time.time()-t_start,1)}s elapsed).")
 
@@ -1035,6 +950,11 @@ def run(path, relative_tolerance=None, absolute_tolerance=None):
         if _hit:
             tainted_by_error.add(key)
             root_label_of[key] = f"unresolved cell {_hit}"
+    # a formula that reads a range containing an unresolved cell is linked to it too, whatever the range's size
+    for _dep, _cell in _err_big.first_hit(root_seeds).items():
+        if _dep not in tainted_by_error and formula_by_key.get(_dep):
+            tainted_by_error.add(_dep)
+            root_label_of[_dep] = f"unresolved cell {_cell} inside a range"
     _progress(f"  initial seeding pass complete: {len(tainted_by_error):,} cell(s) tainted "
                f"({round(time.time()-t_start,1)}s elapsed).")
 
@@ -1055,6 +975,11 @@ def run(path, relative_tolerance=None, absolute_tolerance=None):
                     newly_tainted.add(dep_key)
                     if dep_key not in root_label_of:
                         root_label_of[dep_key] = root_label_of.get(tkey, "an engine limitation")
+        for dep_key, _cell in _err_big.hit_by(frontier).items():
+            if dep_key not in tainted_by_error and dep_key not in newly_tainted:
+                newly_tainted.add(dep_key)
+                if dep_key not in root_label_of:
+                    root_label_of[dep_key] = root_label_of.get(_cell, "an engine limitation")
         _progress(f"  masking wave {_wave}: {len(newly_tainted):,} newly tainted, "
                   f"{len(tainted_by_error)+len(newly_tainted):,} total ({round(time.time()-t_start,1)}s elapsed).")
         if not newly_tainted:
@@ -1072,6 +997,9 @@ def run(path, relative_tolerance=None, absolute_tolerance=None):
             for _d in dependents_of.get(_k, ()):
                 if _d not in volatile_tainted:
                     _vnew.add(_d)
+        for _d in _vol_big.hit_by(_vfront):
+            if _d not in volatile_tainted:
+                _vnew.add(_d)
         volatile_tainted |= _vnew
         _vfront = _vnew
     volatile_mismatches = [m for m in mismatches if f"{m['sheet']}!{m['cell']}" in volatile_tainted]

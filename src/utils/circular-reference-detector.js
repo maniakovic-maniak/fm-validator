@@ -13,8 +13,9 @@
 // Reuses extractCellReferences from cell-dependency-tracer.js (A4) for
 // edge extraction — same proven reference-parsing logic, no duplication.
 
-const { extractCellReferences } = require('./cell-dependency-tracer');
 const { fullFormula } = require('./formula-store');
+const { buildRangeGraph, findCyclesInRangeGraph, RangeGraph } = require('./reference-service');
+const { namedAreas } = require('./path-checks-common');
 
 const DIVIDEND_LABEL_RE = /\b(dividend|distribution|shareholder return|equity distribution|equity payout|cash sweep|distributable cash|equity top[\s-]?up|minimum[\s-]?cash|funding gap|equity injection|capital call)\b/i;
 
@@ -63,20 +64,17 @@ function stripStructuralFunctionArgs(formula) {
   return result;
 }
 
-// Build a directed graph: key -> [referenced keys], where key is
-// "Sheet!Cell". Only formula cells contribute edges — a referenced cell
-// with no formula of its own is a leaf (an input), not a further edge.
-function buildDependencyGraph(cellScoreIndex, allSheetNames) {
-  const graph = {};
-  for (const [key, info] of Object.entries(cellScoreIndex)) {
-    const ftxt = fullFormula(cellScoreIndex, key, info);
-    if (!ftxt) continue;
-    const [sheet] = key.split('!');
-    const cleanedFormula = stripStructuralFunctionArgs(ftxt);
-    const refs = extractCellReferences(cleanedFormula, sheet, allSheetNames);
-    graph[key] = refs.map(r => `${r.sheet}!${r.cell}`);
-  }
-  return graph;
+// Build the dependency graph from the shared reference service (reference-service.js): string literals are removed
+// before references are read, a range is kept as a range (so a cell inside SUM(A2:A10) is a precedent of the SUM),
+// defined names resolve to their ranges, and whole-column references are ranges to the sheet's edge. A dependency that
+// cannot be located (a name that is not a plain range, a table reference, an external workbook) is counted in
+// graph.unknown rather than dropped silently. Position-only arguments (ROW, COLUMN, ROWS, COLUMNS) add no edge.
+// opts.names: { NAME: { sheet, c1, r1, c2, r2 } }; checkCircularReferences supplies the workbook's own.
+function buildDependencyGraph(cellScoreIndex, allSheetNames, opts = {}) {
+  return buildRangeGraph(cellScoreIndex, allSheetNames, {
+    names: opts.names,
+    textOf: (key, info) => fullFormula(cellScoreIndex, key, info),
+  });
 }
 
 // Iterative (non-recursive) DFS cycle detection using the classic
@@ -84,7 +82,18 @@ function buildDependencyGraph(cellScoreIndex, allSheetNames) {
 // black (fully processed). Encountering a gray node closes a cycle.
 // Iterative specifically to avoid stack-overflow risk on a workbook with
 // tens of thousands of formula cells and potentially deep chains.
-function findCycles(graph) {
+// Returns closed key paths ([ 'S!A1', 'S!A5', 'S!A1' ]) as before. For a RangeGraph each path also carries
+// .throughRange and .conditional (see findCyclesInRangeGraph) and the array carries .capped.
+function findCycles(graph, opts) {
+  if (!(graph instanceof RangeGraph)) return findCyclesPlain(graph);
+  const found = findCyclesInRangeGraph(graph, opts);
+  const out = found.map(c => Object.assign(c.path, { throughRange: c.throughRange, conditional: c.conditional }));
+  out.capped = found.capped;
+  return out;
+}
+
+// The older plain-object form { key: [keys] } is still accepted (tests and callers that build their own graph).
+function findCyclesPlain(graph) {
   const WHITE = 0, GRAY = 1, BLACK = 2;
   const color = {};
   const cycles = [];
@@ -164,21 +173,71 @@ function cycleTouchesDividendLabel(cyclePath, workbook) {
   return { touches: false };
 }
 
+function namesForGraph(workbook) {
+  const out = {};
+  try {
+    for (const [k, p] of Object.entries(namedAreas(workbook))) out[k] = { sheet: p.sheet, c1: p.c1, r1: p.r1, c2: p.c2, r2: p.r2 };
+  } catch (_) { /* no usable names: they are then counted as unknown dependencies */ }
+  return out;
+}
+
 function checkCircularReferences(cellScoreIndex, allSheetNames, workbook) {
-  const graph = buildDependencyGraph(cellScoreIndex, allSheetNames);
+  const graph = buildDependencyGraph(cellScoreIndex, allSheetNames, { names: workbook ? namesForGraph(workbook) : undefined });
   const cycles = findCycles(graph);
 
   const classified = cycles.map(cyclePath => {
     const dividendCheck = cycleTouchesDividendLabel(cyclePath, workbook);
-    return { path: cyclePath, length: cyclePath.length - 1, isDividendRelated: dividendCheck.touches, dividendLabel: dividendCheck.label, dividendCell: dividendCheck.atCell };
+    return { path: Array.from(cyclePath), length: cyclePath.length - 1, isDividendRelated: dividendCheck.touches, dividendLabel: dividendCheck.label, dividendCell: dividendCheck.atCell,
+             throughRange: !!cyclePath.throughRange, conditional: !!cyclePath.conditional };
   });
+  // Cycles made only of single-cell references keep their original two buckets and findings. A cycle that needs a range
+  // to close (a cell inside the SUM range that reads the SUM) is new and is reported separately, split into the ones
+  // every edge of which is always evaluated (Excel would flag these) and the ones that need a lazily evaluated branch.
+  const direct = classified.filter(c => !c.throughRange);
+  const viaRange = classified.filter(c => c.throughRange);
 
   return {
     applicable: true,
     totalCycles: classified.length,
-    dividendRelatedCycles: classified.filter(c => c.isDividendRelated),
-    otherCycles: classified.filter(c => !c.isDividendRelated),
+    capped: !!cycles.capped,
+    dividendRelatedCycles: direct.filter(c => c.isDividendRelated),
+    otherCycles: direct.filter(c => !c.isDividendRelated),
+    rangeCycles: viaRange,
+    rangeCyclesUnconditional: viaRange.filter(c => !c.conditional),
+    rangeCyclesConditional: viaRange.filter(c => c.conditional),
+    // what the graph could and could not locate, so a quiet result is not read as full coverage
+    stats: { ...graph.stats, unknownDependencies: graph.unknown },
   };
 }
 
-module.exports = { checkCircularReferences, buildDependencyGraph, findCycles, stripStructuralFunctionArgs };
+// T0-CIRC-003: cycles that close through a range, and what the search could not locate. null when there is nothing to say.
+function buildRangeCycleFinding(result) {
+  if (!result || !result.applicable) return null;
+  const unc = result.rangeCyclesUnconditional || [], con = result.rangeCyclesConditional || [];
+  const unk = result.stats && result.stats.unknownDependencies;
+  if (unc.length === 0 && con.length === 0) return null;
+  const sampleOf = list => list.slice(0, 3).map(c => c.path.slice(0, -1).slice(0, 4).join(' -> ') + (c.path.length > 5 ? ' -> ...' : '')).join('; ');
+  const parts = [];
+  if (unc.length) parts.push(`${unc.length} chain(s) close through a range and every link is always evaluated, so Excel reports them as circular unless iterative calculation is switched on: a cell inside a range such as SUM(A2:A10) reads the cell that holds that range, e.g. ${sampleOf(unc)}.`);
+  if (con.length) parts.push(`${con.length} further chain(s) close only through a lazily evaluated branch (an IF, CHOOSE or IFERROR argument), which Excel meets only when that branch runs${con.length ? `, e.g. ${sampleOf(con)}` : ''}.`);
+  const limits = [];
+  if (result.capped) limits.push('the search stopped at its cycle limit, so more may exist');
+  if (unk && unk.total > 0) limits.push(`${unk.total} dependenc${unk.total === 1 ? 'y' : 'ies'} could not be located (${Object.entries(unk.byKind).map(([k, v]) => `${v} ${k}`).join(', ')}), so loops through those are not visible`);
+  const first = (unc[0] || con[0]).path[0].split('!');
+  return {
+    id: 'T0-CIRC-003',
+    label: `${unc.length + con.length} circular reference chain(s) found through ranges`,
+    severity: unc.length ? 'medium' : 'low', status: 'fail',
+    sheet: first[0], cell: first[1], category: 'Structure',
+    condition: `${parts.join(' ')}${limits.length ? ' Limits: ' + limits.join('; ') + '.' : ''} This test reads formula text only; it does not recalculate, and it cannot tell whether a loop is intended.`,
+    reason: `${unc.length + con.length} circular reference chain(s) through ranges`,
+    corrective_action: 'For each chain, confirm whether it is a deliberate iterative calculation (documented, with iterative calculation enabled) or a range that has grown to include its own result. A total that sums a block containing itself should be re-pointed at the cells above it.',
+    workstream: 'Structure', issue_type: 'Circular reference — through a range',
+    model_risk: 'A range that includes its own result is evaluated differently by different spreadsheet engines and by Excel with iteration on or off, so the figure can differ between users.',
+    key_output_impact: 'Unknown', method: 'automated', needs_retest: false,
+    root_cause: 'Range includes a cell that depends on it', escalation_flag: false,
+    urgency: unc.length ? 'Before next reliance' : 'When convenient', confidence: unc.length ? 75 : 55,
+  };
+}
+
+module.exports = { buildRangeCycleFinding, checkCircularReferences, buildDependencyGraph, findCycles, stripStructuralFunctionArgs };

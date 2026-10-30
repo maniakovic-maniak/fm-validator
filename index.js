@@ -61,7 +61,7 @@ const { checkCellLockingGovernance } = require('./src/utils/cell-locking-governa
 const { checkKeyOutputChains } = require('./src/utils/key-output-chain-check');
 const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns } = require('./src/utils/fast-standard-checks');
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
-const { checkCircularReferences } = require('./src/utils/circular-reference-detector');
+const { checkCircularReferences, buildRangeCycleFinding } = require('./src/utils/circular-reference-detector');
 const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
@@ -2176,6 +2176,8 @@ async function run() {
         urgency: 'When convenient', confidence: 75
       });
     }
+    const rangeCycleFinding = buildRangeCycleFinding(circularRefResult);
+    if (rangeCycleFinding) allFlagged.push(rangeCycleFinding);
   }
 
   // G8-G11 — inspired by patterns confirmed real in the

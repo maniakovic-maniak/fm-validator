@@ -80,9 +80,9 @@ function runGraphCases() {
   res[4] = { status: c4 >= 1 ? 'pass' : 'fail', note: `real cycle through A5: ${c4} cycle(s) found` };
   const c5 = cyc({ 'S!A1': 'IF(B1="C99",D1,0)', 'S!C99': 'A1' });
   res[5] = { status: c5 === 0 ? 'pass' : 'fail', note: `literal "C99": ${c5} invented cycle(s)` };
-  const p = spawnSync('python3', ['-c', "import sys;sys.path.insert(0,sys.argv[1]);import recalc_check as r;print(len(r._extract_refs('SUM(A1:A2000)','S')),len(r._extract_refs('SUM(A1:A2001)','S')))", path.join(ROOT, 'src')], { encoding: 'utf8' });
+  const p = spawnSync('python3', ['-c', "import sys;sys.path.insert(0,sys.argv[1]);import recalc_check as r;print(r._extract_refs('SUM(A1:A2000)','S').cell_count(),r._extract_refs('SUM(A1:A2001)','S').cell_count())", path.join(ROOT, 'src')], { encoding: 'utf8' });
   if (p.status !== 0) res[6] = { status: 'skipped', note: 'python unavailable' };
-  else { const [a, b] = String(p.stdout).trim().split(/\s+/).map(Number); res[6] = { status: a > 0 && b > 0 ? 'pass' : 'fail', note: `2,000-cell range: ${a} refs; 2,001-cell range: ${b} refs` }; }
+  else { const [a, b] = String(p.stdout).trim().split(/\s+/).map(Number); res[6] = { status: a === 2000 && b === 2001 ? 'pass' : 'fail', note: `2,000-cell range: ${a} cells covered; 2,001-cell range: ${b} cells covered` }; }
   // case 7
   const t0 = require(path.join(ROOT, 'src/validator-tier0'));
   if (typeof t0.normalizeFormula !== 'function') res[7] = { status: 'skipped', note: 'normalizeFormula not exported' };
