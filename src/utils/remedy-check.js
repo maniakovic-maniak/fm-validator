@@ -130,6 +130,29 @@ function valueAgrees(actual, c) {
   return [1, 1e3, 1e6, 1e-3, 1e-6].some(sc => Math.abs(actual * sc - target) <= tol);
 }
 
+
+// A list of cells written after one sheet name: "SystemOperator!I165, I653, I694 and I724". Returns one entry per list.
+function cellListCitations(text, workbook) {
+  const names = (workbook.worksheets || []).map(w => w.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  const out = [];
+  if (!names.length) return out;
+  const esc = n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const alt = names.map(esc).join('|');
+  const qalt = names.map(n => esc(n.replace(/'/g, "''"))).join('|');
+  const re = new RegExp(`(?:'(${qalt})'|(${alt}))!\\$?([A-Z]{1,3})\\$?(\\d{1,7})((?:(?:\\s*,\\s*(?:and\\s+)?|\\s+and\\s+)\\$?[A-Z]{1,3}\\$?\\d{1,7}(?![\\d(!]))*)(?![\\d(])`, 'g');
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const sheet = m[1] ? m[1].replace(/''/g, "'") : m[2];
+    const cells = [(m[3] + m[4]).toUpperCase()];
+    for (const t of (m[5] || '').matchAll(/\$?([A-Z]{1,3})\$?(\d{1,7})/g)) cells.push((t[1] + t[2]).toUpperCase());
+    out.push({ sheet, cells, end: m.index + m[0].length, start: m.index });
+  }
+  return out;
+}
+// What the text says about those cells: that they are links to another cell, or that they hold typed values.
+const LINK_CLAIM_RE = /^\s*(?:\([^)]{0,40}\)\s*)?(?:are|is)\s+(?:all\s+)?(?:formula\s+)?(?:references?|links?|linked|formulas?)\b/i;
+const TYPED_CLAIM_RE = /^\s*(?:\([^)]{0,40}\)\s*)?(?:are|is)\s+(?:all\s+)?(?:hard-?coded|typed|constants?|inputs?|independently)\b/i;
+
 function actualFormula(workbook, cellScoreIndex, sheet, cell) {
   const ws = workbook.getWorksheet(sheet);
   if (!ws) return { state: 'no_sheet' };
@@ -179,6 +202,18 @@ function checkOne(f, workbook, cellScoreIndex, rd) {
       evaluated = true;
       if (!valueAgrees(v, c)) reasons.push({ type: 'citation', text: `the remedy says ${c.sheet}!${c.cell} shows ${clip(String(c.expected), 20)}${Object.keys(UNIT).find(k => UNIT[k] === c.unit) || ''}, but the saved value is ${clip(String(v), 20)}` });
     }
+  }
+
+  // 1c. Cells named in a list with a statement about their state ("I165, I653 and I724 are formula references"): a
+  // statement about a cell that holds nothing cannot be right, and the fix is withheld.
+  for (const L of cellListCitations(remedy, workbook)) {
+    const after = remedy.slice(L.end, L.end + 80);
+    if (!LINK_CLAIM_RE.test(after) && !TYPED_CLAIM_RE.test(after)) continue;
+    const ws = workbook.getWorksheet(L.sheet);
+    if (!ws) continue;
+    evaluated = true;
+    const empty = L.cells.filter(c => actualFormula(workbook, cellScoreIndex, L.sheet, c).state === 'empty');
+    if (empty.length) reasons.push({ type: 'citation', text: `the remedy makes a statement about ${empty.map(c => `${L.sheet}!${c}`).join(', ')}, but ${empty.length === 1 ? 'that cell is' : 'those cells are'} empty in the audited file` });
   }
 
   // 2. Argument roles: a "negative width/height" claim must be true of a height or width argument.
@@ -262,4 +297,4 @@ function applyRemedyChecks(findings, { workbook, cellScoreIndex } = {}) {
   return out;
 }
 
-module.exports = { applyRemedyChecks, checkOne, proseCitations, valueAgrees, citationsWithFormulas, offsetArgs, ARG_ROLES, NEG_SIZE_RE, SUPPRESS_RE };
+module.exports = { applyRemedyChecks, checkOne, actualFormula, cellListCitations, proseCitations, valueAgrees, citationsWithFormulas, offsetArgs, ARG_ROLES, NEG_SIZE_RE, SUPPRESS_RE };

@@ -84,6 +84,7 @@ const { checkBareNPV, checkNestedIFs, checkMergedCells, checkHiddenRowsColumns }
 const { checkHardcodedCheckCells } = require('./src/utils/hardcoded-check-cells');
 const { checkCircularReferences, buildRangeCycleFinding } = require('./src/utils/circular-reference-detector');
 const { applyRemedyChecks } = require('./src/utils/remedy-check');
+const { resolveAnswerableQueries } = require('./src/utils/query-resolver');
 const { buildApplicabilityRecord } = require('./src/utils/applicability-record');
 const { loadRegistryState } = require('./src/utils/output-registry');
 const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
@@ -3308,6 +3309,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     try { remedyChecks = applyRemedyChecks(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (remedyChecks.withheld) console.log(`   \u2139\ufe0f  Remedy check: ${remedyChecks.withheld} of ${remedyChecks.checked} suggested fix(es) withheld (${remedyChecks.verified} verified, ${remedyChecks.unverified} not checkable)`); }
     catch (e) { console.error('   \u26a0\ufe0f  Remedy check failed (remedies left as written):', e.message); }
     assignRecordTypes(allFlagged);
+    // Patch 37: a Query the audited file already answers ("confirm these cells are references to that cell") is closed with its evidence.
+    try { const _qr = resolveAnswerableQueries(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (_qr.examined) console.log(`   \u2139\ufe0f  Query resolver: ${_qr.answered.length} answered by the file (${_qr.answered.join(', ') || 'none'}), ${_qr.typed.length} found a typed value, ${_qr.open.length} left open`); }
+    catch (e) { console.error('   \u26a0\ufe0f  Query resolver failed (queries left as they were):', e.message); }
     { const mergedCQ = mergeDuplicateCriticalQueries(allFlagged); if (mergedCQ.length) console.log(`   \u2139\ufe0f  Critical Queries about the same cell merged: ${mergedCQ.map(m => `${m.id} into ${m.into} (${m.cell})`).join('; ')}`); }
     // Findings from different checks that name the same cells are one repair; cross-reference them (nothing is dropped).
     try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
