@@ -589,3 +589,12 @@ Checks: `node test-patch39.js` (20 checks, including six simultaneous workers an
 - **Fix.** The export script sends all logging to stderr, so stdout is only the JSON. The pipeline script also checks that the export output starts with `{` and ends with `}` and, if not, fails with a plain message naming what came first.
 - **Re-run** the failed engagements from the admin page; nothing else is needed.
 - No model calls. Check: `node test-patch43.js` (it fails on the old code and passes on the new).
+
+## Patch 44 - effective priority, in shadow mode
+
+- **What it is.** `src/utils/effective-priority.js` gives each Confirmed Finding a second priority that asks whether its consequence is substantiated: P1 or P2 only when the finding carries a quantified effect (`dollar_impact`) and a stated effect on a key output (`key_output_impact`); a confirmed defect without that is **Impact pending** (kept explicit, not hidden); P3 stays P3. Occurrence counts, sheet spread, distance to an output and dependency-graph completeness are not read, and an incomplete graph never lowers a priority.
+- **Shadow only.** It writes `effective_priority`, `effective_priority_basis` and `effective_priority_differs` onto each finding, logs one line ("Effective priority (shadow, no change to this report): ..."), and saves the comparison to `data/shadow/effective-priority/<run id>.json` (not the finding history, and `data/` is not committed). `build_report.py` and `master-findings.js` do not read it, so no report row, count or verdict changes. Wrapped in a try in both `server.js` and `index.js`.
+- **Rollback.** `FM_EFFECTIVE_PRIORITY_SHADOW=off` in the environment, or revert the commit.
+- **What it showed on the last ESO report.** All 30 P2 would be Impact pending, because none carries a quantified consequence; 11 name a key output, 19 name neither. The pipeline does not quantify consequence today. The decision-threshold tests in `recalc_compare.py` are what would supply that evidence, and priorities should not be switched over until they do.
+- No model calls. Check: `node test-patch44.js`.
+- Also fixes `test-patch31.js`: its registry file-name check still expected the pre-Patch-42 key (`my-model-v2`). It now checks that the key is safe and the same across versions. Every `test-patch*.js` passes after this change; Patch 42 was shipped with this test failing because only the tests nearest to it were run.

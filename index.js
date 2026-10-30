@@ -44,6 +44,7 @@ const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-co
 const { assignRecordTypes, mergeDuplicateCriticalQueries } = require('./src/utils/record-type-classifier');
 const { linkRelatedFindings } = require('./src/utils/related-findings');
 const { annotateMasterFindings } = require('./src/utils/master-findings');
+const { runShadow: runEffectivePriorityShadow, logLine: effectivePriorityLogLine } = require('./src/utils/effective-priority');
 const { applyFindingClasses, groupSameRemediation } = require('./src/utils/finding-class');
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
@@ -2861,6 +2862,10 @@ async function run() {
   // move a finding between tiers. Only record_type === 'Confirmed
   // Finding' gets scored, consistent with Tier 1's own gating.
   assignRiskScores(allFlagged);
+
+  // Patch 44: effective priority in shadow mode (compared and logged, never applied to this report).
+  try { const _ep = runEffectivePriorityShadow(allFlagged, { runId: `cli-${process.pid}-${Date.now()}` }); const _el = effectivePriorityLogLine(_ep); if (_el) console.log(`   \u2139\ufe0f  ${_el}`); }
+  catch (e) { console.error('   \u26a0\ufe0f  Effective-priority shadow failed (report unaffected):', e.message); }
 
   // ── P1/P2/P3 framework renewal, Tier 2 item 2 ────────────────────────────
   // Cross-run Closed/New/Regressed tracking. Depends directly on Tier 2

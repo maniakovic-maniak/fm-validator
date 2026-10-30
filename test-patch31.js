@@ -55,7 +55,8 @@ const ROOT = __dirname;
   const { proposeRegistry, slug } = require('./src/utils/output-registry');
   const reg = proposeRegistry({ getWorksheet: () => null }, {}, 'm.xlsx');
   check('a registry is only ever drafted as proposed, with no approval filled in', reg.status === 'proposed' && reg.approved_by === null && reg.approved_on === null);
-  check('registry file names are safe', slug('My Model (v2).xlsm') === 'my-model-v2');
+  // Patch 42: the key is the stable model identity, so version words are dropped and one approval follows the model across revisions.
+  check('registry file names are safe and stable across versions', /^[a-z0-9-]+$/.test(slug('My Model (v2).xlsm')) && slug('My Model (v2).xlsm') === slug('My Model.xlsm') && !/[\/.\s]/.test(slug('../../etc/passwd')));
   console.log(fails ? `\n${fails} FAILED` : '\nAll Patch 31 checks passed');
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.log('FAIL: ' + e.stack); process.exit(1); });
