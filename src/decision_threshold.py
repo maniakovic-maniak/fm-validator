@@ -143,3 +143,65 @@ def correction_directions(original, delta, t, tolerance=0.0):
             "flips_either_way": all(flips),
             "flips_in_one_direction": sum(flips) == 1,
             "needs_decision": any(o in ("flips_within_tolerance", "near_threshold") for o in outs)}
+
+
+_CELL_RE = None
+
+
+def _split_key(key):
+    """'Sheet!A1' -> ('Sheet', row_number). Sheet names may contain '!' so split on the last one."""
+    import re
+    global _CELL_RE
+    if _CELL_RE is None:
+        _CELL_RE = re.compile(r"^(.*)!\$?([A-Za-z]{1,3})\$?(\d+)$")
+    m = _CELL_RE.match(key)
+    return (m.group(1), m.group(2).upper(), int(m.group(3))) if m else (None, None, None)
+
+
+def evaluate_thresholds(thresholds, target_keys, cached_values, recalculated_values, excluded_keys=(), tolerance_fn=None, max_flagged=20, reasons=None):
+    """Patch 48. Applies each threshold to the formula cells the recalculation actually compared.
+
+    A threshold names a cell or a row. Only cells that were recalculated are tested: a cell the engine could not recalculate
+    (OFFSET, external link, downstream of an engine limit, volatile) is counted as excluded, never assumed to pass. The saved
+    value is the 'original', the recalculated value the 'other', and the numeric tolerance is the engine's, so a decision that
+    differs only inside that tolerance is reported as flips_within_tolerance, not as a defect.
+    """
+    index = {}
+    for i, key in enumerate(target_keys):
+        sheet, col, row = _split_key(key)
+        if sheet is not None:
+            index[(sheet.casefold(), col, row)] = i
+    excluded = set(excluded_keys)
+    results = []
+    for t in thresholds:
+        sheet = str(t["sheet"]).casefold()
+        wanted = []  # (key as displayed, index or None)
+        if t.get("cell"):
+            import re
+            m = re.match(r"^\$?([A-Za-z]{1,3})\$?(\d+)$", str(t["cell"]))
+            if m:
+                wanted = [(f"{t['sheet']}!{m.group(1).upper()}{m.group(2)}", index.get((sheet, m.group(1).upper(), int(m.group(2)))))]
+        else:
+            row = int(t["row"])
+            wanted = [(f"{t['sheet']}!{col}{r}", i) for (s, col, r), i in index.items() if s == sheet and r == row]
+        counts, flagged, not_tested, why = {}, [], 0, {}
+        for display, i in wanted:
+            if i is None or target_keys[i] in excluded:
+                not_tested += 1
+                if i is not None and reasons:
+                    r0 = reasons.get(target_keys[i]) or "an engine limitation"
+                    why[r0] = why.get(r0, 0) + 1
+                continue
+            cached, recalced = cached_values[i], recalculated_values[i]
+            tol = tolerance_fn(cached) if tolerance_fn and isinstance(cached, (int, float)) and not isinstance(cached, bool) else 0.0
+            r = decision_test(cached, recalced, t, tol)
+            counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
+            if r["outcome"] not in ("unchanged_pass", "unchanged_fail", "not_testable") and len(flagged) < max_flagged:
+                flagged.append({"cell": display, "outcome": r["outcome"], "saved": cached, "recalculated": recalced})
+        # Not-testable cells are blank/text cells (for example a DSCR row is empty before debt service starts): counted, not flagged.
+        results.append({"id": t["id"], "operator": t["operator"], "threshold": t["value"], "units": t["units"], "source": t["source"],
+                        "cells_tested": sum(v for k, v in counts.items() if k != "not_testable"),
+                        "cells_blank_or_text": counts.get("not_testable", 0),
+                        "cells_not_recalculated": not_tested, "not_recalculated_because": dict(sorted(why.items(), key=lambda kv: -kv[1])[:3]), "outcomes": counts, "flagged": flagged,
+                        "decision_changed": any(k.startswith("flips") for k in counts)})
+    return results

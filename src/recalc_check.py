@@ -537,7 +537,7 @@ except ImportError:  # run as a script from another directory
     import recalc_compare as rc
 
 
-def run(path, relative_tolerance=None, absolute_tolerance=None):
+def run(path, relative_tolerance=None, absolute_tolerance=None, thresholds_path=None):
     # Patch 28: the comparison policy lives in recalc_compare.POLICY (0.1% relative; absolute floor 0.01, or 0.0001
     # for saved values of size 10 or less; text, Boolean and error values exact). The arguments override it for tests.
     policy = dict(rc.POLICY)
@@ -1024,9 +1024,26 @@ def run(path, relative_tolerance=None, absolute_tolerance=None):
         {"external_reference": len(external_ref_cells), "offset": len(offset_cells),
          "bare_multicell_name": len(multicell_range_cells), "downstream_of_excluded": tainted_downstream_count if tainted_downstream_count > 0 else 0})
 
+    # Patch 48: decision tests. Separate from the numeric comparison above, which is unchanged.
+    decision_tests = None
+    if thresholds_path:
+        try:
+            import decision_threshold as dt
+            usable, problems = dt.load_thresholds(thresholds_path)
+            if problems:
+                decision_tests = {"status": "not_used", "file": os.path.basename(thresholds_path), "problems": problems}
+            else:
+                excluded_keys = set(masked) | volatile_tainted | set(tainted_by_error)
+                decision_tests = {"status": "ran", "file": os.path.basename(thresholds_path),
+                                  "results": dt.evaluate_thresholds(usable, target_keys, cached_values, recalculated_values, excluded_keys,
+                                                                    lambda v: rc.tolerance_for(v, policy), reasons=root_label_of)}
+        except Exception as e:  # never let an optional check break the recalculation
+            decision_tests = {"status": "not_used", "file": os.path.basename(str(thresholds_path)), "problems": [f"could not run: {e}"]}
+
     return {
         "status": "success",
         "elapsed_s": round(time.time() - t_start, 2),
+        "decision_tests": decision_tests,
         "formula_cells_checked": len(targets),
         "external_reference_cells_excluded": len(external_ref_cells),
         "offset_cells_excluded": len(offset_cells),
@@ -1061,5 +1078,5 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(json.dumps({"status": "error", "reason": "usage: recalc_check.py <path>"}))
         sys.exit(1)
-    result = run(sys.argv[1])
+    result = run(sys.argv[1], thresholds_path=sys.argv[2] if len(sys.argv) > 2 else None)
     print(json.dumps(result))

@@ -613,3 +613,6 @@ Nine test files read real models from /mnt/user-data/uploads, which only exists 
 
 ## Patch 47 - proposed decision thresholds for The Bend (data only)
 Adds config/decision-thresholds/the-bend.proposed.json: DSCR >= 1.2x (Cashflow row 68), ICR >= 2.5x (Debt Dashboard row 12), net leverage <= 4.5x (Debt Dashboard row 13). Read from the model's own Inputs sheet, where they are labelled "Management funding assumption", so the sources say so. Not approved and not read by any code yet; the next patch wires thresholds into the recalculation once the values are confirmed.
+
+## Patch 48 - decision thresholds applied by the recalculation
+`recalc_check.py` takes an optional second argument, a thresholds file, and adds a `decision_tests` section to its result: for each threshold, the formula cells it covers, how many were tested, whether the saved and recalculated values give a different decision, and why any cell was not recalculated (never assumed to pass). The numeric comparison is unchanged. server.js and index.js pass `config/decision-thresholds/<model-key>.json` when it exists and log one line per threshold; `.proposed.json` drafts are never read, so The Bend's draft does nothing until it is approved by renaming it. Not yet shown in the report or counted in the run record.

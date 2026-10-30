@@ -68,6 +68,7 @@ const { resolveAnswerableQueries } = require('./src/utils/query-resolver');
 const { buildRunRecord, writeRunRecord } = require('./src/utils/run-record');
 const { buildApplicabilityRecord } = require('./src/utils/applicability-record');
 const { loadRegistryState, checkRegistryAgainstWorkbook } = require('./src/utils/output-registry');
+const { thresholdsPathFor, decisionLogLines } = require('./src/utils/decision-thresholds');
 const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
 const { checkPII } = require('./src/utils/pii-detection');
 const { runFormulaDeepDive } = require('./src/validator-formula-deepdive');
@@ -2329,7 +2330,7 @@ async function run() {
     try {
       const scriptPath = path.join(__dirname, 'src', 'recalc_check.py');
       const stdout = await new Promise((resolve, reject) => {
-        execFile('python3', [scriptPath, parsed._filePath],
+        execFile('python3', [scriptPath, parsed._filePath].concat(thresholdsPathFor(originalName) ? [thresholdsPathFor(originalName)] : []),
           { timeout: 180000, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
           (err, stdout, stderr) => {
             if (err) { if (stderr) err.message += `\nstderr: ${stderr}`; return reject(err); }
@@ -2353,6 +2354,7 @@ async function run() {
     }
     // Patch 28: the findings are built in one place (src/utils/recalc-findings.js) for both pipelines.
     allFlagged.push(...buildRecalcFindings(recalcCheckResult));
+      decisionLogLines(recalcCheckResult).forEach(l => console.log(l));
   } else {
     console.log(`   \u26a0\ufe0f  Recalculation check did not complete: ${recalcCheckResult.status}${recalcCheckResult.error ? ' — ' + recalcCheckResult.error : ''}`);
     if (recalcCheckResult.reason) {

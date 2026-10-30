@@ -65,6 +65,26 @@ with tempfile.TemporaryDirectory() as td:
     u, p = dt.load_thresholds(bad); check("one bad threshold means none are used", u == [] and len(p) >= 1)
     u, p = dt.load_thresholds(dup); check("duplicate ids are rejected", u == [] and any("duplicate" in x for x in p))
 
+
+# 9. Patch 48: applying thresholds to recalculated cells
+keys = ["Cash!A1", "Cash!B1", "Cash!C1", "Cash!D1", "Cash!E1", "Other!A1"]
+saved = [1.50, 1.1995, "", 1.3, 1.25, 0.1]
+recalc = [1.50, 1.2005, "", 1.0, 1.25, 0.1]
+row_t = dict(T, id="R", sheet="cash", row=1)
+del row_t["cell"]
+res = dt.evaluate_thresholds([row_t], keys, saved, recalc, excluded_keys={"Cash!E1"}, tolerance_fn=lambda v: rc.tolerance_for(v), reasons={"Cash!E1": "MATCH() inside IFERROR/IFNA"})[0]
+check("a row threshold covers every formula cell in that row, sheet name case ignored", res["cells_tested"] == 3)
+check("a blank cell is counted, not flagged", res["cells_blank_or_text"] == 1)
+check("an excluded cell is never assumed to pass, and says why", res["cells_not_recalculated"] == 1 and "MATCH() inside IFERROR/IFNA" in res["not_recalculated_because"])
+check("a clear flip is reported as a decision change", res["decision_changed"] and any(f["cell"] == "cash!D1" or f["cell"].endswith("D1") for f in res["flagged"]))
+check("a flip inside the engine tolerance is reported separately", res["outcomes"].get("flips_within_tolerance", 0) + res["outcomes"].get("near_threshold", 0) >= 1)
+check("another sheet's cells are not touched", all("Other" not in f["cell"] for f in res["flagged"]))
+one = dict(T, id="C", sheet="Cash", cell="D1")
+r1 = dt.evaluate_thresholds([one], keys, saved, recalc)[0]
+check("a single-cell threshold tests that cell", r1["cells_tested"] == 1 and r1["outcomes"] == {"flips_to_fail": 1})
+gone = dt.evaluate_thresholds([dict(T, id="G", sheet="Cash", cell="Z99")], keys, saved, recalc)[0]
+check("a threshold cell that is not a recalculated formula is counted as not recalculated", gone["cells_tested"] == 0 and gone["cells_not_recalculated"] == 1)
+
 # 8. the numeric policy is untouched
 check("the numeric tolerance is still 0.1% relative", rc.POLICY["relative"] == 0.001)
 print("\n" + (f"{fails} FAILED" if fails else "All decision-threshold checks passed"))
