@@ -69,7 +69,7 @@ const { applyFindingClasses, groupSameRemediation } = require('./src/utils/findi
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
-const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats, normalizeModelIdentity } = require('./src/utils/finding-history');
+const { recordRun: recordRunHistory, normalizeModelIdentity } = require('./src/utils/finding-history');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -682,6 +682,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     return res.status(400).json({ status: 'error', message: 'No file uploaded' });
   }
   const runId         = req.body.orderId || originalName;
+  const runStartedAt  = new Date().toISOString();   // Patch 39: when this analysis began, for the history baseline
   const startTime    = Date.now();
   const clientIp      = getClientIp(req);
   const runLog        = startRunLog(originalName);
@@ -3335,9 +3336,10 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     const crossRunStats = (() => {
       try {
         const modelIdentity = normalizeModelIdentity(originalName);
-        const priorHistory = loadFindingHistory(modelIdentity);
-        const stats = computeCrossRunStats(allFlagged, priorHistory);
-        saveFindingHistory(modelIdentity, stats.updatedHistory);
+        // Patch 39: one run is recorded once (a retry replaces it), a run that started earlier never overwrites a newer
+        // baseline, and the update is locked. "Not found" is stored as not_observed, never as resolved.
+        const stats = recordRunHistory(modelIdentity, allFlagged, { runId, startedAt: runStartedAt });
+        if (stats.recordNote) console.log(`   \u2139\ufe0f  History: ${stats.recordNote}`);
         return stats;
       } catch (e) {
         console.error('   \u26a0\ufe0f  Cross-run tracking failed (this run\'s findings are unaffected, history for next run may not update):', e.message);

@@ -545,3 +545,17 @@ An independent review of Patch 37 raised seven points about the code; each was r
 - **Still to do (not in this patch):** history wording and storage (disappearance is "not observed", never "resolved"; idempotent and out-of-order safe), the evidence-backed run record that replaces `reviewerApproved`, registry validation, run provenance for `soul.md`, `finding-class.json` and `rule-tiering.json`, one `effective_priority`, and decision-threshold tests in recalculation. Owner decision recorded: no compulsory human sign-off; the system issues its own assessment, qualified where evidence is incomplete.
 
 Checks: `node test-patch38.js` (17 checks, including report builds). `test-patch34.js` now expects grouping instead of demotion.
+
+## History: "not observed" is not "resolved"; one run recorded once (Patch 39)
+
+From the independent review of Patch 37 (point 3), reproduced against `finding-history.js` and its two call sites before the change.
+
+- **Vocabulary** (`finding-history.js`, `STATUS`). A finding present before and absent now is stored as `not_observed` (it was `closed`). The report already said "not found in this run; it is not evidence that it was fixed"; the store now agrees. A finding that is found again after being not observed has **reappeared** (the report says "reappeared" and the tile is REAPPEARED; it said regressed). Three more statuses exist and are never set automatically: `verified_resolved`, `disproven`, `verification_unavailable`. `markVerification()` sets them and refuses without evidence (method, detail, checkedAt). Nothing calls it yet; a retest component will.
+- **Old files.** A `closed` entry is read as `not_observed` with `legacyClosed: true`. It is never promoted to verified. The file is rewritten as version 2 on the next run; version 1 files still load.
+- **One run, recorded once** (`recordRun`). `server.js` passes the order id (`runId`, already in `/api/validate`) and the time the analysis began; `index.js` generates a run id per command-line run. A retry of the run recorded last (a failed report build or e-mail that is run again) is compared with the baseline as it was before that run and **replaces** it, so "new" does not turn into "still open". A retry of an earlier run changes nothing.
+- **Out-of-order runs.** A run that started before the recorded baseline and finishes later is compared with the newer baseline and does not overwrite it; the report's Audit Output says so ("Note on history"). With four workers this can happen for real.
+- **Locking and atomic writes.** The read, compare and write are under a lock file (waits up to 5 s; a lock older than 60 s is cleared; `FM_HISTORY_LOCK_WAIT_MS` shortens the wait for tests). If the lock cannot be taken the run still gets its comparison, history is not written, and the note says so. The file is replaced by rename, so a crash cannot leave half a file.
+- **Size.** The previous baseline is kept inside the file to make a retry exact; if it exceeds 3 MB it is dropped and a retry then compares with the run already recorded.
+- **No new AI calls and no extra cost.** Timing is a file read and write.
+
+Checks: `node test-patch39.js` (20 checks, including six simultaneous workers and a report build). Existing history suites pass; `test-crossrun-llm-split.js` now expects "reappeared".

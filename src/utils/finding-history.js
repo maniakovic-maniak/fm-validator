@@ -118,7 +118,7 @@ function loadHistory(modelKey) {
   const p = historyFilePath(modelKey);
   if (!fs.existsSync(p)) return {};
   try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
+    return readRecord(modelKey).entries;
   } catch (e) {
     console.error('   \u26a0\ufe0f  Finding-history read failed, starting fresh for this model:', e.message);
     return {};
@@ -127,7 +127,8 @@ function loadHistory(modelKey) {
 
 function saveHistory(modelKey, history) {
   try {
-    fs.writeFileSync(historyFilePath(modelKey), JSON.stringify(history, null, 2));
+    const rec = fs.existsSync(historyFilePath(modelKey)) ? readRecord(modelKey) : { meta: {} };
+    writeRecord(modelKey, { version: 2, meta: rec.meta || {}, entries: history });
   } catch (e) {
     console.error('   \u26a0\ufe0f  Finding-history write failed (cross-run stats for this run are still valid, just won\'t persist for next time):', e.message);
   }
@@ -158,6 +159,127 @@ function currentFingerprints(findings) {
     }
   }
   return fingerprints;
+}
+
+
+// ── Status vocabulary (Patch 39) ─────────────────────────────────────────────────────────────────────────────────
+// open                       found in the latest run
+// not_observed               found before, not found in the latest run. NOT a resolution: a Tier 2 reviewer does not
+//                            raise the same item every run, a check may not have run, and an unchanged formula can be
+//                            fixed upstream. Old files stored this as "closed"; it is read as not_observed.
+// verified_resolved          reserved: set only by markVerification() with evidence from a retest of the original
+//                            defect condition and the outputs it touched. Nothing sets it automatically.
+// disproven                  reserved: the concern was investigated and shown not to be a defect (with evidence).
+// verification_unavailable   reserved: a retest was tried and could not be completed (with the reason).
+const STATUS = Object.freeze({ OPEN: 'open', NOT_OBSERVED: 'not_observed', VERIFIED: 'verified_resolved', DISPROVEN: 'disproven', UNAVAILABLE: 'verification_unavailable' });
+function normaliseStatus(st) { return st === 'closed' ? STATUS.NOT_OBSERVED : (st || STATUS.OPEN); }
+function normaliseEntries(entries) {
+  const out = {};
+  for (const [fp, e] of Object.entries(entries || {})) {
+    if (!e || typeof e !== 'object') continue;
+    out[fp] = e.status === 'closed' ? { ...e, status: STATUS.NOT_OBSERVED, legacyClosed: true } : e;     // never promoted to verified
+  }
+  return out;
+}
+
+/** Record a retest result. Needs evidence; refuses anything but the three reserved statuses. Nothing calls this yet. */
+function markVerification(entries, fingerprint, { status, evidence } = {}) {
+  if (![STATUS.VERIFIED, STATUS.DISPROVEN, STATUS.UNAVAILABLE].includes(status)) throw new Error(`status must be one of ${STATUS.VERIFIED}, ${STATUS.DISPROVEN}, ${STATUS.UNAVAILABLE}`);
+  if (!evidence || typeof evidence !== 'object' || !evidence.method || !evidence.detail || !evidence.checkedAt) throw new Error('verification needs evidence with method, detail and checkedAt');
+  if (!entries[fingerprint]) throw new Error('unknown fingerprint');
+  return { ...entries, [fingerprint]: { ...entries[fingerprint], status, verification: { status, ...evidence } } };
+}
+
+// ── The store (Patch 39) ─────────────────────────────────────────────────────────────────────────────────────────
+// File v2: { version: 2, meta: { lastRun: { runId, startedAt, recordedAt, priorEntries }, recentRunIds: [] }, entries }
+// A v1 file is the entries map itself. It is read as v2 with no meta.
+//
+// Rules, all enforced by recordRun():
+//  * one run id is recorded once. A retry (same order id) REPLACES that run's contribution; it does not advance the
+//    baseline a second time, so a failed report build or e-mail that is retried cannot turn "new" into "still open".
+//  * a run that started before the recorded baseline and finishes later never overwrites it.
+//  * read-modify-write is under a lock file, so two workers on one model cannot lose each other's update.
+//  * the file is replaced atomically (temp file, then rename).
+const LOCK_WAIT_MS = Number(process.env.FM_HISTORY_LOCK_WAIT_MS) || 5000, LOCK_STALE_MS = 60000, MAX_PRIOR_BYTES = 3 * 1024 * 1024;
+
+function readRecord(modelKey) {
+  const p = historyFilePath(modelKey);
+  if (!fs.existsSync(p)) return { version: 2, meta: {}, entries: {} };
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(p, 'utf8')); }
+  catch (e) { console.error('   ⚠️  Finding-history read failed, starting fresh for this model:', e.message); return { version: 2, meta: {}, entries: {}, unreadable: true }; }
+  if (raw && raw.version === 2 && raw.entries) return { version: 2, meta: raw.meta || {}, entries: normaliseEntries(raw.entries) };
+  return { version: 2, meta: {}, entries: normaliseEntries(raw) };
+}
+
+function writeRecord(modelKey, record) {
+  const p = historyFilePath(modelKey);
+  const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(record));
+  fs.renameSync(tmp, p);
+}
+
+function sleepMs(ms) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) { const end = Date.now() + ms; while (Date.now() < end) { /* wait */ } } }
+
+function withLock(modelKey, fn) {
+  const lock = historyFilePath(modelKey) + '.lock';
+  const start = Date.now();
+  let fd = null;
+  while (fd === null) {
+    try { fd = fs.openSync(lock, 'wx'); }
+    catch (e) {
+      if (e.code !== 'EEXIST') return { locked: false, error: e.message };
+      try { if (Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS) { fs.unlinkSync(lock); continue; } } catch (_) { continue; }
+      if (Date.now() - start > LOCK_WAIT_MS) return { locked: false, error: 'history is being updated by another run' };
+      sleepMs(50);
+    }
+  }
+  try { return { locked: true, value: fn() }; }
+  finally { try { fs.closeSync(fd); } catch (_) {} try { fs.unlinkSync(lock); } catch (_) {} }
+}
+
+/**
+ * Compare this run with the stored baseline and, when it is the newest run of this model, advance the baseline.
+ * @param run { runId, startedAt }  startedAt is when this analysis began (ISO string)
+ * @returns stats as computeCrossRunStats, plus { baseline: 'advanced'|'replaced_retry'|'not_advanced_older'|'not_saved_busy'|'not_saved_error', recordNote }
+ */
+function recordRun(modelKey, findings, run = {}) {
+  const runId = run.runId ? String(run.runId) : null;
+  const startedAt = run.startedAt || new Date().toISOString();
+  const attempt = withLock(modelKey, () => {
+    const rec = readRecord(modelKey);
+    const last = (rec.meta && rec.meta.lastRun) || null;
+    const recent = (rec.meta && rec.meta.recentRunIds) || [];
+    const commit = (entriesBefore, stats) => {
+      const prior = JSON.stringify(entriesBefore).length <= MAX_PRIOR_BYTES ? entriesBefore : null;
+      writeRecord(modelKey, { version: 2, meta: { lastRun: { runId, startedAt, recordedAt: new Date().toISOString(), priorEntries: prior }, recentRunIds: [...recent.filter(x => x !== runId), runId].filter(Boolean).slice(-20) }, entries: stats.updatedHistory });
+    };
+    if (rec.unreadable) { const stats = computeCrossRunStats(findings, {}); commit({}, stats); return Object.assign(stats, { baseline: 'advanced', recordNote: 'The earlier history file could not be read, so this run starts a new baseline.' }); }
+    if (runId && last && last.runId === runId) {
+      // Retry of the run recorded last: compare with the baseline as it was BEFORE that run, then replace its contribution.
+      if (last.priorEntries) {
+        const stats = computeCrossRunStats(findings, last.priorEntries);
+        commit(last.priorEntries, stats);
+        return Object.assign(stats, { baseline: 'replaced_retry', recordNote: 'This run was recorded before (a retry); its earlier entry was replaced, not added to.' });
+      }
+      const stats = computeCrossRunStats(findings, rec.entries);
+      return Object.assign(stats, { baseline: 'not_advanced_retry_no_snapshot', recordNote: 'This run was recorded before (a retry) and the earlier baseline was too large to keep, so the comparison is with the run already recorded; history was not changed.' });
+    }
+    if (runId && recent.includes(runId)) {
+      const stats = computeCrossRunStats(findings, rec.entries);
+      return Object.assign(stats, { baseline: 'not_advanced_older', recordNote: 'This run was recorded earlier and a newer run has been recorded since; history was not changed.' });
+    }
+    if (last && last.startedAt && startedAt < last.startedAt) {
+      const stats = computeCrossRunStats(findings, rec.entries);
+      return Object.assign(stats, { baseline: 'not_advanced_older', recordNote: 'A newer run of this model was recorded while this one was running, so "since last run" is compared with that newer run and history was not changed.' });
+    }
+    const stats = computeCrossRunStats(findings, rec.entries);
+    commit(rec.entries, stats);
+    return Object.assign(stats, { baseline: 'advanced', recordNote: null });
+  });
+  if (attempt.locked) return attempt.value;
+  const stats = computeCrossRunStats(findings, readRecord(modelKey).entries);
+  return Object.assign(stats, { baseline: 'not_saved_busy', recordNote: `History was not updated: ${attempt.error}.` });
 }
 
 /** Distinct finding count within one of the closed/new/regressed/
@@ -203,6 +325,7 @@ function splitDeterministicVsLlm(entries) {
 }
 
 function computeCrossRunStats(findings, history) {
+  history = normaliseEntries(history);
   const current = currentFingerprints(findings);
   const nowIso = new Date().toISOString();
 
@@ -217,8 +340,9 @@ function computeCrossRunStats(findings, history) {
     if (!priorEntry) {
       newOnes.push({ fingerprint: fp, ...info });
       updatedHistory[fp] = { status: 'open', ...info, firstSeen: nowIso, lastSeen: nowIso, timesClosed: 0 };
-    } else if (priorEntry.status === 'closed') {
-      regressed.push({ fingerprint: fp, ...info, previouslyClosedAt: priorEntry.closedAt || null, timesClosed: priorEntry.timesClosed || 0 });
+    } else if (priorEntry.status !== 'open') {
+      // Anything that was not observed (or, in future, verified resolved) and is now found again has reappeared.
+      regressed.push({ fingerprint: fp, ...info, previouslyClosedAt: priorEntry.notObservedAt || priorEntry.closedAt || null, previousStatus: normaliseStatus(priorEntry.status), timesClosed: priorEntry.timesNotObserved || priorEntry.timesClosed || 0 });
       updatedHistory[fp] = { ...priorEntry, status: 'open', ...info, lastSeen: nowIso, reopenedAt: nowIso };
     } else {
       stillOpen.push({ fingerprint: fp, ...info });
@@ -228,8 +352,11 @@ function computeCrossRunStats(findings, history) {
 
   for (const [fp, priorEntry] of Object.entries(history)) {
     if (priorEntry.status === 'open' && !current.has(fp)) {
+      // Not found this run. That is all it means: the model may have been fixed, the reviewer may not have raised it
+      // again, or the check may not have run. "closed" in the arrays and counts below is kept as a name for the report
+      // fields; the stored status is not_observed and is never read as resolved.
       closed.push({ fingerprint: fp, ...priorEntry });
-      updatedHistory[fp] = { ...priorEntry, status: 'closed', closedAt: nowIso, timesClosed: (priorEntry.timesClosed || 0) + 1 };
+      updatedHistory[fp] = { ...priorEntry, status: STATUS.NOT_OBSERVED, notObservedAt: nowIso, timesNotObserved: (priorEntry.timesNotObserved || priorEntry.timesClosed || 0) + 1 };
     }
   }
 
@@ -268,4 +395,4 @@ function computeCrossRunStats(findings, history) {
   };
 }
 
-module.exports = { loadHistory, saveHistory, currentFingerprints, computeCrossRunStats, historyFilePath, normalizeModelIdentity };
+module.exports = { loadHistory, saveHistory, readRecord, recordRun, markVerification, STATUS, normaliseStatus, currentFingerprints, computeCrossRunStats, historyFilePath, normalizeModelIdentity };

@@ -48,7 +48,7 @@ const { applyFindingClasses, groupSameRemediation } = require('./src/utils/findi
 const { assignRiskScores } = require('./src/utils/risk-scoring');
 const { buildRootCauseFields } = require('./src/utils/root-cause-consolidation');
 const { buildRootCauseFieldsFromResults } = require('./src/utils/root-cause-consolidation');
-const { loadHistory: loadFindingHistory, saveHistory: saveFindingHistory, computeCrossRunStats, normalizeModelIdentity } = require('./src/utils/finding-history');
+const { recordRun: recordRunHistory, normalizeModelIdentity } = require('./src/utils/finding-history');
 const { checkDisplayRoundsToZero } = require('./src/utils/display-rounds-to-zero-check');
 const { checkCustomFormatUnitHiding } = require('./src/utils/custom-format-unit-hiding-check');
 const { checkRevolverCashCrosscheck } = require('./src/utils/revolver-cash-crosscheck');
@@ -2886,9 +2886,9 @@ async function run() {
   const crossRunStats = (() => {
     try {
       const modelIdentity = normalizeModelIdentity(originalName);
-      const priorHistory = loadFindingHistory(modelIdentity);
-      const stats = computeCrossRunStats(allFlagged, priorHistory);
-      saveFindingHistory(modelIdentity, stats.updatedHistory);
+      // Patch 39: see server.js. A command-line run has no order id, so every run is its own run.
+      const stats = recordRunHistory(modelIdentity, allFlagged, { runId: `cli-${process.pid}-${Date.now()}`, startedAt: new Date().toISOString() });
+      if (stats.recordNote) console.log(`   \u2139\ufe0f  History: ${stats.recordNote}`);
       return stats;
     } catch (e) {
       console.error('   \u26a0\ufe0f  Cross-run tracking failed (this run\'s findings are unaffected, history for next run may not update):', e.message);

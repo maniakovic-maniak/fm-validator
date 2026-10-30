@@ -653,7 +653,7 @@ def build_report(data_path, output_path):
         # the validator's own code genuinely changed.
         _crn_text_det = f'{_crn_closed_det} not found in this run · {_crn_new_det} new · {_crn_still_open} still open since the last run'
         if _crn_regressed_det > 0:
-            _crn_text_det += f' · \u26a0 {_crn_regressed_det} regressed (not found in an earlier run, now found again)'
+            _crn_text_det += f' · \u26a0 {_crn_regressed_det} reappeared (not found in an earlier run, now found again)'
         merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run (deterministic checks):   ',_crn_text_det,sz=10,col=CHARCOAL,bg=(LIGHT_RED if _crn_regressed_det>0 else PANEL_GREY),v='center')
         set_row(ws1,r,20); r+=1
         # Tier 2 (LLM) line — explicitly caveated, never uses the
@@ -667,6 +667,10 @@ def build_report(data_path, output_path):
             _crn_text_llm += ' — Tier 2 (LLM) findings can vary between runs even with an unchanged model, since Tier 2 re-reasons from scratch each time; not necessarily a sign of genuine progress or regression.'
             merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run (Tier 2 / LLM findings):   ',_crn_text_llm,sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
             set_row(ws1,r,20); r+=1
+    _crn_note = crossRunStats.get('recordNote')
+    if _crn_note:
+        merge_bold_prefix(ws1,f'B{r}:I{r}','Note on history:   ',str(_crn_note),sz=9,col=CHARCOAL,bg=PANEL_GREY,v='center')
+        set_row(ws1,r,20); r+=1
     set_row(ws1,r,8); r+=1
 
     # ── Tier 2 review-depth summary ─────────────────────────────────────────
@@ -766,7 +770,7 @@ def build_report(data_path, output_path):
         kpi_card(ws1,_crn_lbl_row,_crn_val_row,2,3,'NOT FOUND THIS RUN',_crn_closed,fmt='#,##0;[Red](#,##0);-',val_col=CHARCOAL)
         kpi_card(ws1,_crn_lbl_row,_crn_val_row,4,5,'NEW',_crn_new,fmt='#,##0;[Red](#,##0);-',val_col=(AMBER if _crn_new>0 else CHARCOAL))
         kpi_card(ws1,_crn_lbl_row,_crn_val_row,6,7,'STILL OPEN',_crn_still_open,fmt='#,##0;[Red](#,##0);-',val_col=CHARCOAL)
-        kpi_card(ws1,_crn_lbl_row,_crn_val_row,8,9,'REGRESSED',_crn_regressed,fmt='#,##0;[Red](#,##0);-',val_col=(RED if _crn_regressed>0 else CHARCOAL))
+        kpi_card(ws1,_crn_lbl_row,_crn_val_row,8,9,'REAPPEARED',_crn_regressed,fmt='#,##0;[Red](#,##0);-',val_col=(RED if _crn_regressed>0 else CHARCOAL))
         for rr in (_crn_lbl_row,_crn_val_row):
             for cc in range(2,10): ws1.cell(rr,cc).border=B(col=PANEL_BORDER)
         set_row(ws1,_crn_lbl_row,16); set_row(ws1,_crn_val_row,26); r=_crn_val_row+1

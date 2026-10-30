@@ -109,7 +109,7 @@ const baseMeta = {
     const lines = readAuditOutputLines(outPath);
     const text = lines.join(' ');
     check('a genuine deterministic regression still shows the explicit warning text',
-      text.includes('2 regressed (not found in an earlier run, now found again)'));
+      text.includes('2 reappeared (not found in an earlier run, now found again)'));
   }
 
   // ══════════════════════════════════════════════════════════════
