@@ -575,3 +575,10 @@ Checks: `node test-patch39.js` (20 checks, including six simultaneous workers an
 - The recalculation coverage gap now names the cause (OFFSET cells, bare multi-cell named ranges, external references, cells downstream of those), in the gap text and as a "Not recalculated" line in the Assessment Record panel. On ESO this is 354 OFFSET, 611 named-range and 4,278 downstream cells (36% covered). The 90% bar is unchanged.
 - The Scope tab footer no longer says "Not yet signed off". It states that the automated review issued the assessment, with the date and record id, and that no manual sign-off is required. With no record it says so.
 - No model calls; run price unchanged. Check: `node test-patch41.js`.
+
+## Patch 42 - the priority-output list follows the model across uploads; ESO list approved
+
+- **Bug fixed.** The registry was keyed on the raw upload file name, which carries a timestamp (`...Model-1793358051904.xlsm`), so an approval could never match the next upload. The key now uses the same model identity the finding history uses (`normalizeModelIdentity`).
+- **ESO list.** `config/output-registries/determinations-eso-licence-model.json` holds 53 outputs, approved by Mik Riazanov on 2026-10-30 on the owner's instruction to sign by default. It was drafted from the audited file (hash b5dd90df...) with rows labelled only "Check" removed. All 53 resolve to formulas in that file. The draft is kept beside it.
+- An approval still applies only while its outputs are found in the workbook being audited.
+- No model calls. Check: `node test-patch42.js`.

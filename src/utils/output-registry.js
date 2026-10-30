@@ -8,7 +8,10 @@ const SHEET_HINT = /summary|output|dashboard|returns?|valuation|ratios?|kpi|cove
 const ROW_HINT = /\b(npv|irr|moic|dscr|llcr|plcr|icr|gearing|leverage|ebitda|equity value|enterprise value|payback|total (assets|liabilities|equity|revenue)|net (income|profit|debt|cash)|check)\b/i;
 const MAX_OUTPUTS = 60;
 
-function slug(name) { return String(name || 'model').toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'model'; }
+// The upload step appends a timestamp to the file name (Model-1793358051904.xlsm), so the raw name differs on every upload.
+// The registry is keyed by the same model identity the finding history uses, so one approval follows the model across uploads.
+const { normalizeModelIdentity } = require('./finding-history');
+function slug(name) { return String(normalizeModelIdentity(name || 'model') || name || 'model').toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'model'; }
 
 function proposeRegistry(workbook, cellScoreIndex, modelName) {
   const rd = makeReader(workbook);

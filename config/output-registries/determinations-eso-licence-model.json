@@ -1,0 +1,593 @@
+{
+  "status": "approved",
+  "model": "Final Determinations - ESO Licence Model.xlsm",
+  "generated_from": "sheet and row labels",
+  "approved_by": "Mik Riazanov",
+  "approved_on": "2026-10-30",
+  "note": "Approved list of priority outputs for this model.",
+  "outputs": [
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 77,
+      "label": "Total revenue for charges",
+      "example_cells": [
+        "AH77",
+        "AI77",
+        "AJ77"
+      ],
+      "formula_cells_in_row": 17
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 187,
+      "label": "Total revenue for charges",
+      "example_cells": [
+        "AH187",
+        "AI187",
+        "AJ187"
+      ],
+      "formula_cells_in_row": 13
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 188,
+      "label": "Check: total revenue for charges",
+      "example_cells": [
+        "AH188",
+        "AI188",
+        "AJ188"
+      ],
+      "formula_cells_in_row": 13
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 39,
+      "label": "Net Debt/RAV",
+      "example_cells": [
+        "E39",
+        "G39",
+        "AP39"
+      ],
+      "formula_cells_in_row": 11
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 40,
+      "label": "Net Debt/Earnings Before Interest Tax and Deprecation",
+      "example_cells": [
+        "E40",
+        "G40",
+        "AP40"
+      ],
+      "formula_cells_in_row": 11
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 49,
+      "label": "Regulated equity / (EBITDA)",
+      "example_cells": [
+        "E49",
+        "G49",
+        "AP49"
+      ],
+      "formula_cells_in_row": 11
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 51,
+      "label": "EBITDA / RAV",
+      "example_cells": [
+        "E51",
+        "G51",
+        "AP51"
+      ],
+      "formula_cells_in_row": 11
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 45,
+      "label": "Total debt / EBITDA",
+      "example_cells": [
+        "G45",
+        "AP45",
+        "AQ45"
+      ],
+      "formula_cells_in_row": 10
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 47,
+      "label": "Opex / Total revenue",
+      "example_cells": [
+        "G47",
+        "AP47",
+        "AQ47"
+      ],
+      "formula_cells_in_row": 10
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 31,
+      "label": "Notional gearing",
+      "example_cells": [
+        "AP31",
+        "AQ31",
+        "AR31"
+      ],
+      "formula_cells_in_row": 9
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 55,
+      "label": "Closing net debt",
+      "example_cells": [
+        "AP55",
+        "AQ55",
+        "AR55"
+      ],
+      "formula_cells_in_row": 9
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 58,
+      "label": "NPV-neutral RAV return base",
+      "example_cells": [
+        "AP58",
+        "AQ58",
+        "AR58"
+      ],
+      "formula_cells_in_row": 9
+    },
+    {
+      "sheet": "ScenarioRun_AllOutputData",
+      "row": 76,
+      "label": "Total revenue (including external)",
+      "example_cells": [
+        "AP76",
+        "AQ76",
+        "AR76"
+      ],
+      "formula_cells_in_row": 9
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 135,
+      "label": "Regulated equity / (EBITDA)",
+      "example_cells": [
+        "E135",
+        "G135",
+        "AP135"
+      ],
+      "formula_cells_in_row": 7
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 137,
+      "label": "EBITDA / RAV",
+      "example_cells": [
+        "E137",
+        "G137",
+        "AP137"
+      ],
+      "formula_cells_in_row": 7
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 118,
+      "label": "Regulated equity / (EBITDA)",
+      "example_cells": [
+        "E118",
+        "G118",
+        "AP118"
+      ],
+      "formula_cells_in_row": 7
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 120,
+      "label": "EBITDA / RAV",
+      "example_cells": [
+        "E120",
+        "G120",
+        "AP120"
+      ],
+      "formula_cells_in_row": 7
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 70,
+      "label": "EBITDA",
+      "example_cells": [
+        "E70",
+        "AP70",
+        "AQ70"
+      ],
+      "formula_cells_in_row": 6
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 79,
+      "label": "EBITDA",
+      "example_cells": [
+        "G79",
+        "AP79",
+        "AQ79"
+      ],
+      "formula_cells_in_row": 6
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 108,
+      "label": "Net Debt/RAV",
+      "example_cells": [
+        "E108",
+        "AP108",
+        "AQ108"
+      ],
+      "formula_cells_in_row": 6
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 109,
+      "label": "Net Debt/Earnings Before Interest Tax and Deprecation",
+      "example_cells": [
+        "E109",
+        "AP109",
+        "AQ109"
+      ],
+      "formula_cells_in_row": 6
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 25,
+      "label": "EBITDA",
+      "example_cells": [
+        "AP25",
+        "AQ25",
+        "AR25"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 36,
+      "label": "Closing net debt",
+      "example_cells": [
+        "AP36",
+        "AQ36",
+        "AR36"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 38,
+      "label": "FFO / Net Debt",
+      "example_cells": [
+        "AP38",
+        "AQ38",
+        "AR38"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 39,
+      "label": "RCF / Net Debt",
+      "example_cells": [
+        "AP39",
+        "AQ39",
+        "AR39"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 43,
+      "label": "Closing net debt",
+      "example_cells": [
+        "AP43",
+        "AQ43",
+        "AR43"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 46,
+      "label": "Net Debt / Total closing RAV",
+      "example_cells": [
+        "AP46",
+        "AQ46",
+        "AR46"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 58,
+      "label": "Closing net debt",
+      "example_cells": [
+        "AP58",
+        "AQ58",
+        "AR58"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 75,
+      "label": "Regulated equity / (EBITDA)",
+      "example_cells": [
+        "AP75",
+        "AQ75",
+        "AR75"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 77,
+      "label": "EBITDA / RAV",
+      "example_cells": [
+        "AP77",
+        "AQ77",
+        "AR77"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 86,
+      "label": "Regulated equity (notional, NPV neutral)",
+      "example_cells": [
+        "AP86",
+        "AQ86",
+        "AR86"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 87,
+      "label": "Net debt (notional, NPV neutral)",
+      "example_cells": [
+        "AP87",
+        "AQ87",
+        "AR87"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 94,
+      "label": "RoRE (based on NPV neutral values)",
+      "example_cells": [
+        "AP94",
+        "AQ94",
+        "AR94"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 95,
+      "label": "CoE cross-check",
+      "example_cells": [
+        "AP95",
+        "AQ95",
+        "AR95"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 100,
+      "label": "Net debt (notional, closing)",
+      "example_cells": [
+        "AP100",
+        "AQ100",
+        "AR100"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 115,
+      "label": "Dividend / regulated equity (NPV neutral)",
+      "example_cells": [
+        "AP115",
+        "AQ115",
+        "AR115"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 125,
+      "label": "Net Debt/RAV",
+      "example_cells": [
+        "AP125",
+        "AQ125",
+        "AR125"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinancialRatios",
+      "row": 126,
+      "label": "Net Debt/Earnings Before Interest Tax and Deprecation",
+      "example_cells": [
+        "AP126",
+        "AQ126",
+        "AR126"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 45,
+      "label": "Total revenue",
+      "example_cells": [
+        "AP45",
+        "AQ45",
+        "AR45"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 49,
+      "label": "EBITDA",
+      "example_cells": [
+        "AP49",
+        "AQ49",
+        "AR49"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 55,
+      "label": "Total revenue",
+      "example_cells": [
+        "AP55",
+        "AQ55",
+        "AR55"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 57,
+      "label": "EBITDA",
+      "example_cells": [
+        "AP57",
+        "AQ57",
+        "AR57"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 97,
+      "label": "Less financing costs (notional, NPV neutral)",
+      "example_cells": [
+        "AP97",
+        "AQ97",
+        "AR97"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 98,
+      "label": "Financing net revenue (notional, NPV neutral)",
+      "example_cells": [
+        "AP98",
+        "AQ98",
+        "AR98"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 110,
+      "label": "Regulated equity (notional, NPV neutral)",
+      "example_cells": [
+        "AP110",
+        "AQ110",
+        "AR110"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 111,
+      "label": "Net debt (notional, NPV neutral)",
+      "example_cells": [
+        "AP111",
+        "AQ111",
+        "AR111"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "FinRatios RoRE decomposition",
+      "row": 128,
+      "label": "Net debt (notional, closing)",
+      "example_cells": [
+        "AP128",
+        "AQ128",
+        "AR128"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 134,
+      "label": "Closing net debt",
+      "example_cells": [
+        "AP134",
+        "AQ134",
+        "AR134"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "OutputSummary",
+      "row": 163,
+      "label": "Total revenue (including external)",
+      "example_cells": [
+        "AP163",
+        "AQ163",
+        "AR163"
+      ],
+      "formula_cells_in_row": 5
+    },
+    {
+      "sheet": "NGESO (Scenarios)",
+      "row": 86,
+      "label": "Notional gearing",
+      "example_cells": [
+        "F86",
+        "AG86",
+        "AH86"
+      ],
+      "formula_cells_in_row": 15
+    },
+    {
+      "sheet": "RoRE ranges",
+      "row": 48,
+      "label": "NPV-neutral RAV return base",
+      "example_cells": [
+        "AP48",
+        "AQ48",
+        "AR48"
+      ],
+      "formula_cells_in_row": 8
+    },
+    {
+      "sheet": "RoRE ranges",
+      "row": 51,
+      "label": "Notional gearing",
+      "example_cells": [
+        "AP51",
+        "AQ51",
+        "AR51"
+      ],
+      "formula_cells_in_row": 8
+    },
+    {
+      "sheet": "SystemOperator",
+      "row": 101,
+      "label": "Notional gearing",
+      "example_cells": [
+        "AO101",
+        "AP101",
+        "AQ101"
+      ],
+      "formula_cells_in_row": 6
+    }
+  ]
+}
