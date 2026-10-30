@@ -206,10 +206,13 @@ function classifyRecordType(finding) {
 }
 
 /**
- * Patch 34: two Critical Queries about the same cell are one open matter. In an ESO run T2-S5-004 and T2-S10-004 both
- * concerned FinancialStatements!AP42 and counted twice towards "unresolved Critical Queries". The stronger (higher
- * confidence, then earlier id) stays; the other becomes a Query that names it, so nothing is dropped.
- * Runs after assignRecordTypes. Only findings anchored to a real cell (not A1 or blank) are merged.
+ * Critical Queries about the same cell are grouped for display, never demoted. Patch 34 turned the weaker one into a
+ * Query so the report counted one open matter; Patch 38 reverses that, because two different rules raising a concern at
+ * one cell can be two different concerns (a review of Patch 37 pointed this out) and a concern must keep its blocking
+ * status until it is answered on its own evidence. Every record stays a Critical Query. Each carries
+ * `same_location_group` (sheet!cell) and the weaker ones also `grouped_with` (the strongest record's id); the report
+ * counts blocking records as before and adds how many locations they cover.
+ * Runs after assignRecordTypes. Only findings anchored to a real cell (not A1 or blank) are grouped.
  */
 function mergeDuplicateCriticalQueries(findings) {
   const by = new Map();
@@ -221,19 +224,20 @@ function mergeDuplicateCriticalQueries(findings) {
     if (!by.has(k)) by.set(k, []);
     by.get(k).push(f);
   }
-  const merged = [];
-  for (const group of by.values()) {
+  const grouped = [];
+  for (const [k, group] of by.entries()) {
     if (group.length < 2) continue;
     group.sort((a, b) => (b.confidence || 0) - (a.confidence || 0) || String(a.id).localeCompare(String(b.id)));
     const keep = group[0];
+    for (const f of group) f.same_location_group = k;
     for (const dup of group.slice(1)) {
-      dup.record_type = 'Query';
-      dup.merged_into = keep.id;
-      dup.record_type_note = `Same cell as Critical Query ${keep.id}; counted once.`;
-      merged.push({ id: dup.id, into: keep.id, cell: `${keep.sheet}!${keep.cell}` });
+      if (dup.grouped_with === keep.id) continue;          // already grouped by an earlier call
+      dup.grouped_with = keep.id;
+      dup.record_type_note = `${dup.record_type_note ? dup.record_type_note + ' ' : ''}Same cell as Critical Query ${keep.id}; shown as one location, still blocking.`;
+      grouped.push({ id: dup.id, into: keep.id, cell: k });
     }
   }
-  return merged;
+  return grouped;
 }
 
 /** Applies classifyRecordType across an array of findings, mutating

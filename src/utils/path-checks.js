@@ -77,7 +77,7 @@ function buildPathCheckFindings(pc) {
   if (dup.length) {
     out.push({
       id: 'T0-LOOKUP-002', label: `${dup.length} lookup(s) select a key that appears in more than one source row`,
-      severity: 'medium', status: 'fail', sheet: dup[0].sheet, cell: dup[0].cell,
+      severity: 'medium', status: 'fail', record_type: 'Query', sheet: dup[0].sheet, cell: dup[0].cell,
       condition: `${sample(dup, 4, r => `${r.sheet}!${r.cell}: ${r.text}`)}${dup.length > 4 ? ` and ${dup.length - 4} more` : ''}.`,
       reason: `${dup.length} exact-match lookup(s) depend on source order`,
       corrective_action: 'Confirm which source row is intended and add the missing key component, or remove the duplicate row.',
@@ -174,10 +174,10 @@ function pathCheckRows(pc, limitPerKind = 400) {
     add('Volatile timestamp', (pc.timestamp && pc.timestamp.records) || [], r => r.text),
     add('Fallback propagation', pc.fallback.records || [], r => r.text + (r.examples && r.examples.length ? ' Readers: ' + r.examples.map(e => `${e.cell} (${e.formula})`).join('; ') + '.' : '')),
   ];
-  const sum = (name, c) => ({ criterion: name, tested: c.tested ?? c.families ?? 0, counts: c.counts || {}, notCompleted: c.notCompleted || 0, reasons: c.notCompletedReasons || {}, stopped: c.stopped || null });
+  const sum = (name, c) => ({ criterion: name, tested: c.tested ?? c.families ?? 0, counts: c.counts || {}, notCompleted: c.notCompleted || 0, reasons: c.notCompletedReasons || {}, stopped: c.stopped || null, failed: c.error || null });
   return {
     rows, omitted: cut.reduce((a, b) => a + b, 0),
-    summary: [sum('Lookup contract', pc.lookup), sum('Average completeness', pc.average), sum('Fallback propagation', pc.fallback)].concat(pc.independence && pc.independence.applicable ? [sum('Check independence', pc.independence)] : [], pc.timestamp && pc.timestamp.applicable ? [sum('Volatile timestamp', pc.timestamp)] : []),
+    summary: [sum('Lookup contract', pc.lookup), sum('Average completeness', pc.average), sum('Fallback propagation', pc.fallback)].concat(pc.independence && (pc.independence.applicable || pc.independence.error) ? [sum('Check independence', pc.independence)] : [], pc.timestamp && (pc.timestamp.applicable || pc.timestamp.error) ? [sum('Volatile timestamp', pc.timestamp)] : []),
   };
 }
 

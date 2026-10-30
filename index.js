@@ -2844,9 +2844,9 @@ async function run() {
   catch (e) { console.error('   \u26a0\ufe0f  Remedy check failed (remedies left as written):', e.message); }
   assignRecordTypes(allFlagged);
   // Patch 37: a Query the audited file already answers ("confirm these cells are references to that cell") is closed with its evidence.
-  try { const _qr = resolveAnswerableQueries(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (_qr.examined) console.log(`   \u2139\ufe0f  Query resolver: ${_qr.answered.length} answered by the file (${_qr.answered.join(', ') || 'none'}), ${_qr.typed.length} found a typed value, ${_qr.open.length} left open`); }
+  try { const _qr = resolveAnswerableQueries(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (_qr.examined) console.log(`   \u2139\ufe0f  Query resolver: ${_qr.answered.length} answered by the file (${_qr.answered.join(', ') || 'none'}), ${_qr.partial.length} part answered, ${_qr.typed.length} found a typed value, ${_qr.open.length} left open`); }
   catch (e) { console.error('   \u26a0\ufe0f  Query resolver failed (queries left as they were):', e.message); }
-  { const mergedCQ = mergeDuplicateCriticalQueries(allFlagged); if (mergedCQ.length) console.log(`   \u2139\ufe0f  Critical Queries about the same cell merged: ${mergedCQ.map(m => `${m.id} into ${m.into} (${m.cell})`).join('; ')}`); }
+  { const mergedCQ = mergeDuplicateCriticalQueries(allFlagged); if (mergedCQ.length) console.log(`   \u2139\ufe0f  Critical Queries about the same cell grouped for display (all still blocking): ${mergedCQ.map(m => `${m.id} into ${m.into} (${m.cell})`).join('; ')}`); }
   // Findings from different checks that name the same cells are one repair; cross-reference them (nothing is dropped).
   try { const _linked = linkRelatedFindings(allFlagged); if (_linked.length) console.log(`   \u2139\ufe0f  ${_linked.length} group(s) of findings share cells and are cross-referenced: ${_linked.slice(0, 5).map(g => g.ids.join(' + ')).join('; ')}`); }
   catch (e) { console.error('   \u26a0\ufe0f  Related-findings link failed:', e.message); }

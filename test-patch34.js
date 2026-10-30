@@ -31,8 +31,9 @@ const check = (n, ok) => { console.log((ok ? 'PASS: ' : 'FAIL: ') + n); if (!ok)
   const cq = (id, conf, cell = 'AP42') => ({ id, sheet: 'FinancialStatements', cell, severity: 'critical', confidence: conf, condition: 'AP42 shows 0 while AP122 shows 12.2m', record_type: 'Critical Query' });
   const set = [cq('T2-S5-004', 45), cq('T2-S10-004', 50), cq('T2-S10-014', 40, 'AP666'), cq('T2-S1-009', 50, 'A1'), cq('T2-S1-010', 50, 'A1')];
   const merged = mergeDuplicateCriticalQueries(set);
-  check('two Critical Queries on one cell become one', merged.length === 1 && set.filter(x => x.record_type === 'Critical Query').length === 4);
-  check('the stronger one stays and the other names it', set[1].record_type === 'Critical Query' && set[0].record_type === 'Query' && set[0].merged_into === 'T2-S10-004');
+  // Patch 38: grouped for display only; every concern stays a Critical Query and keeps blocking
+  check('two Critical Queries on one cell are grouped, none is demoted', merged.length === 1 && set.filter(x => x.record_type === 'Critical Query').length === 5);
+  check('the weaker one names the stronger and both share a location group', set[0].record_type === 'Critical Query' && set[0].grouped_with === 'T2-S10-004' && set[0].same_location_group === set[1].same_location_group && !set[1].grouped_with);
   check('nothing is dropped', set.length === 5);
   check('cells that are only the A1 fallback are never merged', set[3].record_type === 'Critical Query' && set[4].record_type === 'Critical Query');
   check('running it twice changes nothing', mergeDuplicateCriticalQueries(set).length === 0);

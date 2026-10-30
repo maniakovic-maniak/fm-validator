@@ -434,6 +434,10 @@ def build_report(data_path, output_path):
     # is the memo's own explicit principle, distinct from ordinary Queries/
     # Observations, which do NOT gate reliance at all.
     critical_query_open = len(critical_queries)
+    # Patch 38: Critical Queries that concern the same cell all stay blocking (each is a separate concern); only the
+    # displayed count says how many locations they cover.
+    critical_query_locations = len({(f.get('same_location_group') or f.get('id')) for f in critical_queries})
+    _cq_loc_note = (f' (at {critical_query_locations} location{"" if critical_query_locations==1 else "s"})' if critical_query_locations < critical_query_open else '')
     # ── P1/P2/P3 framework renewal, Tier 3 ───────────────────────────────────
     # The three substantive named gates (mandatory critical procedure,
     # critical module, key output) block reliance with the SAME severity
@@ -447,7 +451,7 @@ def build_report(data_path, output_path):
     if p1_open > 0 or critical_query_open > 0 or other_gates_open:
         _blocker_parts = []
         if p1_open > 0: _blocker_parts.append(f'{p1_open} P1 item(s)')
-        if critical_query_open > 0: _blocker_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}')
+        if critical_query_open > 0: _blocker_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}{_cq_loc_note}')
         if mandatory_procedure_gap: _blocker_parts.append(_mandatory_phrase())
         if critical_module_gap: _blocker_parts.append(f'{len(_unresolved_critical_modules)} unaudited critical module(s) ({", ".join(_unresolved_critical_modules)})')
         if key_output_gap: _blocker_parts.append('an unreconciled key output')
@@ -565,7 +569,7 @@ def build_report(data_path, output_path):
     # the verdict banner right above it is blocking on.
     _open_parts = []
     if p1_open>0: _open_parts.append(f'{p1_open} open P1 finding(s)')
-    if critical_query_open>0: _open_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}')
+    if critical_query_open>0: _open_parts.append(f'{critical_query_open} unresolved Critical Quer{"y" if critical_query_open==1 else "ies"}{_cq_loc_note}')
     if mandatory_procedure_gap: _open_parts.append(_mandatory_phrase())
     if critical_module_gap: _open_parts.append(f'{len(_unresolved_critical_modules)} unaudited critical module(s)')
     if key_output_gap: _open_parts.append('an unreconciled key output')
@@ -588,7 +592,7 @@ def build_report(data_path, output_path):
     # detail. p1/p2/p3 are already computed above for the Work Not
     # Performed table's own logic; this just surfaces the same counts
     # more prominently, right where a reader looks first.
-    merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2{_mf_note(p2)} · {len(p3)} P3{_mf_note(p3)}' + (f' · {critical_query_open} Critical Quer{"y" if critical_query_open==1 else "ies"}' if critical_query_open>0 else ''),sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
+    merge_bold_prefix(ws1,f'B{r}:I{r}','Findings by priority:   ',f'{len(p1)} P1 · {len(p2)} P2{_mf_note(p2)} · {len(p3)} P3{_mf_note(p3)}' + (f' · {critical_query_open} Critical Quer{"y" if critical_query_open==1 else "ies"}{_cq_loc_note}' if critical_query_open>0 else ''),sz=10,col=CHARCOAL,bg=PANEL_GREY,v='center')
     set_row(ws1,r,20); r+=1
     # ── P1/P2/P3 framework renewal, Tier 2 item 2 ────────────────────────────
     # Cross-run Closed/New/Regressed — previously the report only ever
@@ -1457,6 +1461,14 @@ def build_report(data_path, output_path):
     # deliberate, permanent scope exclusions; this is a real, specific
     # failure on this one run, and is shown separately, only when one
     # genuinely occurred.
+    # Patch 38: a path check that failed to run is a scope limitation for what it would have tested; it is not a pass, and
+    # it does not by itself withdraw reliance on everything else.
+    _pc_failed = [sm for sm in ((d.get('pathChecks') or {}).get('summary') or []) if sm.get('failed')]
+    if _pc_failed:
+        _exclusions.append((
+            'Path checks (' + ', '.join(sm['criterion'] for sm in _pc_failed) + ')', 'Not completed',
+            'The check stopped with an error, so none of its criteria were tested on this run: ' + '; '.join(f"{sm['criterion']}: {sm['failed']}" for sm in _pc_failed) + '. This is a gap in what was tested, not a clean result.',
+            'Re-run the review. If it happens again, report the error text above.'))
     for _bf in batchFailures:
         _exclusions.append((
             f"{_bf.get('label','A batch')} (this run only)",
@@ -2339,7 +2351,7 @@ def build_report(data_path, output_path):
     # TAB — PATH CHECKS (Patch 31): every tested criterion on the paths that feed outputs, with its verdict
     # ════════════════════════════════════════════════════════════════════════
     pcIn = d.get('pathChecks') or {}
-    if pcIn.get('rows'):
+    if pcIn.get('rows') or any(sm.get('failed') for sm in (pcIn.get('summary') or [])):
         wpc=wb.create_sheet('Path Checks'); wpc.sheet_view.showGridLines=False
         for i,w in enumerate([3,22,30,18,100],1): set_col(wpc,i,w)
         merge(wpc,'B1:E1','PATH CHECKS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
@@ -2350,6 +2362,10 @@ def build_report(data_path, output_path):
         r_pc=4
         for sm in pcIn.get('summary',[]):
             cnt=sm.get('counts',{}) or {}
+            if sm.get('failed'):
+                merge(wpc,f'B{r_pc}:E{r_pc}',f"{sm['criterion']}: NOT COMPLETED. The check stopped with an error ({sm['failed']}), so nothing was tested for this criterion.",sz=9,col=P1_TXT,bg=P1_FILL,wrap=True,v='center')
+                set_row(wpc,r_pc,30); r_pc+=1
+                continue
             label={'passed':'passed','defect':'defect','query':'query','control_weakness':'control weakness','not_applicable':'not applicable'}
             bits=[f"{v} {label.get(k,k)}" for k,v in cnt.items() if v]
             line=f"{sm['criterion']}: {sm.get('tested',0)} tested" + (f" ({', '.join(bits)})" if bits else '')
