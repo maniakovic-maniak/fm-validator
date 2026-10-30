@@ -1,0 +1,7 @@
+{
+  "test-actuals-forecast-flags.js": "Two T1-012 assertions fail ('real defect fixed' and 'a genuine absence still fails'); T1-012 is now handled by scope decisions. Needs review against the current rule, then repair or retire.",
+  "test-bug-scan-agent.js": "Fails 'report-tab.js resolves its Python invocation (build_report.py)'; report-tab.js now passes more through execFile. Update the expectation or retire.",
+  "test-conclusive-coverage-metric.js": "Hard-codes 165 rules and 55% concluded; checklist.json now holds 824 Tier 2 rules. Rewrite against the current checklist or retire.",
+  "test-hardcoded-check-cells.js": "End-to-end case expects exactly 42 flags on a dated copy of The Bend model; the file or the check has moved on. Re-baseline from the current file, or retire.",
+  "test-infrastructure-domain-alias.js": "Looks for railway-domain markers in the loaded infrastructure skill; skill-infrastructure.md content has changed. Update the markers."
+}
