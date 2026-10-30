@@ -607,3 +607,6 @@ Checks: `node test-patch39.js` (20 checks, including six simultaneous workers an
 - **`npm test`** now runs every `test-*.js` in the repo root plus `tests/test_decision_threshold.py`, one process each; a test passes when it exits 0. `node scripts/run-tests.js <text>` runs the files whose names contain the text. Five suites that already failed on main are listed with reasons in `scripts/stale-tests.json`; they still run and are reported but do not fail the run: test-actuals-forecast-flags, test-bug-scan-agent, test-conclusive-coverage-metric, test-hardcoded-check-cells, test-infrastructure-domain-alias. Any other failure fails `npm test`.
 - No CI workflow was added for pushes: it could not be tried from here, and the report tests need the Python dependencies installed. `npm test` is ready for one.
 - No model calls. Check: `python3 tests/test_decision_threshold.py` and `npm test`.
+
+## Patch 46 - npm test skips tests that need a real model file
+Nine test files read real models from /mnt/user-data/uploads, which only exists in the build sandbox. On a laptop they failed (130 passed, 9 failed). `npm test` now reports them as "skip (needs <file>)" when the file is absent; any FAIL means something is genuinely broken. No production code changed.

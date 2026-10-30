@@ -13,7 +13,18 @@ let stale = {};
 try { stale = JSON.parse(fs.readFileSync(path.join(__dirname, 'stale-tests.json'), 'utf8')); } catch (_) {}
 const files = fs.readdirSync(root).filter(f => /^test-.*\.js$/.test(f) && f.includes(only)).sort();
 const results = [];
+// Some tests read real models from /mnt/user-data/uploads (present in the build sandbox, not on a laptop). When such a file is missing the test
+// is reported as "skipped: needs <file>" instead of failing, so a failure always means something is actually broken.
+function missingFixtures(file) {
+  const src = fs.readFileSync(path.join(root, file), 'utf8');
+  const hard = [...new Set((src.match(/\/mnt\/user-data\/uploads\/[A-Za-z0-9_.\-]+/g) || []))];
+  if (!hard.length || /existsSync/.test(src)) return [];
+  return hard.filter(p => !fs.existsSync(p));
+}
+const skipped = [];
 for (const f of files) {
+  const miss = missingFixtures(f);
+  if (miss.length) { skipped.push({ name: f, miss }); console.log(`skip  ${f} (needs ${path.basename(miss[0])})`); continue; }
   const t0 = Date.now();
   const r = spawnSync(process.execPath, [f], { cwd: root, encoding: 'utf8', timeout: 600000, maxBuffer: 256 * 1024 * 1024 });
   const ok = r.status === 0;
@@ -27,7 +38,7 @@ if (!only || 'decision'.includes(only) || only.includes('decision')) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} tests/test_decision_threshold.py`);
 }
 const failed = results.filter(r => !r.ok && !r.stale), staleFailed = results.filter(r => !r.ok && r.stale);
-console.log(`\n${results.length - failed.length - staleFailed.length} passed, ${failed.length} failed, ${staleFailed.length} known-stale`);
+console.log(`\n${results.length - failed.length - staleFailed.length} passed, ${failed.length} failed, ${staleFailed.length} known-stale, ${skipped.length} skipped (real model file not on this machine)`);
 failed.forEach(r => console.log(`  FAILED ${r.name}: ${r.tail}`));
 staleFailed.forEach(r => console.log(`  stale  ${r.name}: ${stale[r.name]}`));
 process.exit(failed.length ? 1 : 0);
