@@ -1682,7 +1682,7 @@ def build_report(data_path, output_path):
             'Output affected': out_impact, 'Key Output Impact': f.get('key_output_impact','Unknown'),
             'F-Score': fscore_val, 'Confidence': confidence_display, 'Method': f.get('method',''), 'Range': '',
             'Root Cause': f.get('root_cause',''),
-            'Master Finding': (f.get('master_finding_id') or f.get('id','')) if (f.get('linked_findings') or 1) > 1 else '—',
+            'Master Finding': (((f.get('master_finding_id') or f.get('id','')) + (' \u00b7 ' + f['issue_label'] if f.get('issue_label') else '')) if (f.get('linked_findings') or 1) > 1 else '\u2014'),
             'Occur- rences': f.get('master_occurrences') or f.get('occurrence_count') or '',
             'Investment Blocker': 'Yes' if f.get('investment_grade_blocker') else 'No',
             'Escalation Flag': 'Yes' if f.get('escalation_flag') else 'No',

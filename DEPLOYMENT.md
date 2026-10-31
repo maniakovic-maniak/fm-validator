@@ -616,3 +616,6 @@ Adds config/decision-thresholds/the-bend.proposed.json: DSCR >= 1.2x (Cashflow r
 
 ## Patch 48 - decision thresholds applied by the recalculation
 `recalc_check.py` takes an optional second argument, a thresholds file, and adds a `decision_tests` section to its result: for each threshold, the formula cells it covers, how many were tested, whether the saved and recalculated values give a different decision, and why any cell was not recalculated (never assumed to pass). The numeric comparison is unchanged. server.js and index.js pass `config/decision-thresholds/<model-key>.json` when it exists and log one line per threshold; `.proposed.json` drafts are never read, so The Bend's draft does nothing until it is approved by renaming it. Not yet shown in the report or counted in the run record.
+
+## Patch 49 - merged findings are numbered as distinct issues
+Owner decision: findings that share a cell may stay merged under one master finding, but each distinct issue must be clearly defined. Inside a group, findings from different checks are now "Issue 1 of N", "Issue 2 of N" (highest priority first); findings from the same check count as one issue with occurrences. The Issue Log's Master Finding column shows e.g. "RC-T2-S1-003 · Issue 2 of 2". Counts, grouping and priorities are unchanged; no row is dropped. Apply after Patch 48.

@@ -8,6 +8,10 @@
 //   linked_findings     how many findings share the group
 //   occurrence_count    distinct cells this finding names (1 when it names none)
 //   master_occurrences  distinct cells named by the whole group
+// Patch 49: a group can hold more than one distinct issue (two detectors on the same cell, a different defect each). The owner's
+// rule: merging is fine, but each issue must be clearly defined. Inside a group of more than one issue every member gets
+//   issue_no / issue_count / issue_label ("Issue 1 of 2")   findings from the same check count as ONE issue (its occurrences)
+// and the group carries issue_summaries so a reader sees what each issue is. Counts (countMasters) are unchanged.
 const { cellsOf } = require('./related-findings');
 
 const RANK = { P1: 1, P2: 2, P3: 3 };
@@ -20,6 +24,28 @@ function prio(f) {
   if (sev === 'fatal' || sev === 'critical') return 'P1';
   if (sev === 'high' || sev === 'medium') return 'P2';
   return 'P3';
+}
+
+// The check a finding came from. Findings from one check inside a group are occurrences of one issue.
+function issueKey(f) {
+  return String(f.rule_id || f.check_id || f.id || '').replace(/-\d{3}$/, '') || String(f.id);
+}
+
+function defineIssues(members) {
+  const byKey = new Map();
+  for (const f of members) {
+    const k = issueKey(f);
+    if (!byKey.has(k)) byKey.set(k, { key: k, title: f.label || f.title || f.id, priority: prio(f), members: [] });
+    const i = byKey.get(k);
+    i.members.push(f);
+    const p = prio(f);
+    if (p && (!i.priority || RANK[p] < RANK[i.priority])) i.priority = p;
+  }
+  const list = [...byKey.values()].sort((a, b) => (RANK[a.priority] || 9) - (RANK[b.priority] || 9) || a.key.localeCompare(b.key));
+  list.forEach((i, n) => { i.no = n + 1; });
+  const byMember = new Map();
+  list.forEach(i => i.members.forEach(m => byMember.set(m, i)));
+  return { list, byMember };
 }
 
 function annotateMasterFindings(findings) {
@@ -37,7 +63,13 @@ function annotateMasterFindings(findings) {
     if (p && (!g.best || RANK[p] < RANK[g.best])) g.best = p;
   }
   for (const g of groups.values()) {
+    g.issues = defineIssues(g.members);
     for (const f of g.members) {
+      const iss = g.issues.byMember.get(f);
+      f.issue_count = g.issues.list.length;
+      f.issue_no = g.issues.list.length > 1 ? iss.no : null;
+      f.issue_label = g.issues.list.length > 1 ? `Issue ${iss.no} of ${g.issues.list.length}` : null;
+      f.issue_summaries = g.issues.list.length > 1 ? g.issues.list.map(i => ({ no: i.no, id: i.key, title: i.title, priority: i.priority })) : null;
       f.master_priority = g.best || prio(f);
       f.linked_findings = g.members.length;
       f.master_occurrences = Math.max(g.cells.size, ...g.members.map(m => m.occurrence_count));
