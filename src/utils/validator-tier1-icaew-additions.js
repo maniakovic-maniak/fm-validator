@@ -30,11 +30,12 @@ function checkHiddenCalcRowsColumns(workbook, rule) {
     worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
       if (!row.hidden) return;
       if (rowNumber > usedRange.bottom) return; // beyond used range — allowed
-      const hasContent = rowHasFormulaOrValue(row);
-      if (hasContent) {
+      const c = countContent(row);
+      if (c.formulas + c.values > 0) {
         findings.push({
           sheet: worksheet.name,
           location: `Row ${rowNumber}`,
+          kind: 'row', index: rowNumber, formulaCells: c.formulas, valueCells: c.values,
           detail: 'Hidden row contains formulas or values within the used range.',
         });
       }
@@ -45,11 +46,12 @@ function checkHiddenCalcRowsColumns(workbook, rule) {
       const colNumber = idx + 1;
       if (!col.hidden) return;
       if (colNumber > usedRange.right) return; // beyond used range — allowed
-      const hasContent = columnHasFormulaOrValue(worksheet, colNumber, usedRange);
-      if (hasContent) {
+      const c = countColumnContent(worksheet, colNumber, usedRange);
+      if (c.formulas + c.values > 0) {
         findings.push({
           sheet: worksheet.name,
           location: `Column ${colLetter(colNumber)}`,
+          kind: 'column', index: colNumber, formulaCells: c.formulas, valueCells: c.values,
           detail: 'Hidden column contains formulas or values within the used range.',
         });
       }
@@ -58,28 +60,66 @@ function checkHiddenCalcRowsColumns(workbook, rule) {
 
   return buildResult(rule, findings, {
     passMessage: 'No hidden rows/columns found containing formulas or values within the used range.',
-    failMessage: `${findings.length} hidden row(s)/column(s) contain live content.`,
+    failMessage: hiddenContentMessage(findings),
   });
 }
 
-function rowHasFormulaOrValue(row) {
-  let found = false;
+function isEmptyValue(v) { return v === null || v === undefined || v === ''; }
+function isFormulaValue(v) { return !!v && typeof v === 'object' && (v.formula !== undefined || v.sharedFormula !== undefined); }
+
+function countContent(row) {
+  const out = { formulas: 0, values: 0 };
   row.eachCell({ includeEmpty: false }, (cell) => {
-    if (cell.value !== null && cell.value !== undefined && cell.value !== '') found = true;
+    if (isEmptyValue(cell.value)) return;
+    if (isFormulaValue(cell.value)) out.formulas++; else out.values++;
   });
-  return found;
+  return out;
 }
 
-function columnHasFormulaOrValue(worksheet, colNumber, usedRange) {
-  let found = false;
-  for (let r = usedRange.top; r <= usedRange.bottom; r++) {
-    const cell = worksheet.getRow(r).getCell(colNumber);
-    if (cell.value !== null && cell.value !== undefined && cell.value !== '') {
-      found = true;
-      break;
-    }
+function countColumnContent(worksheet, colNumber, usedRange) {
+  const out = { formulas: 0, values: 0 };
+  worksheet.getColumn(colNumber).eachCell({ includeEmpty: false }, (cell, rowNumber) => {
+    if (rowNumber < usedRange.top || rowNumber > usedRange.bottom) return;
+    if (isEmptyValue(cell.value)) return;
+    if (isFormulaValue(cell.value)) out.formulas++; else out.values++;
+  });
+  return out;
+}
+
+// 5,6,7,9 -> "5-7, 9" (at most `max` pieces, then "...")
+function compactRanges(nums, fmt, max = 6) {
+  const sorted = [...new Set(nums)].sort((a, b) => a - b);
+  const parts = [];
+  for (let i = 0; i < sorted.length; ) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    parts.push(i === j ? fmt(sorted[i]) : `${fmt(sorted[i])}-${fmt(sorted[j])}`);
+    i = j + 1;
   }
-  return found;
+  return parts.length > max ? parts.slice(0, max).join(', ') + `, ... (${parts.length} ranges)` : parts.join(', ');
+}
+
+// Patch 51: a reader can reproduce the finding from its own text: how many formula cells and constants sit in hidden
+// rows/columns, and where, sheet by sheet. A Partner Review could not reproduce "397 hidden row(s)/column(s)" from the count alone.
+function hiddenContentMessage(findings) {
+  const total = findings.length;
+  const formulas = findings.reduce((a, f) => a + (f.formulaCells || 0), 0);
+  const values = findings.reduce((a, f) => a + (f.valueCells || 0), 0);
+  const bySheet = new Map();
+  for (const f of findings) {
+    if (!bySheet.has(f.sheet)) bySheet.set(f.sheet, { rows: [], cols: [], formulas: 0, values: 0 });
+    const g = bySheet.get(f.sheet);
+    (f.kind === 'column' ? g.cols : g.rows).push(f.index);
+    g.formulas += f.formulaCells || 0; g.values += f.valueCells || 0;
+  }
+  const sheets = [...bySheet.entries()].sort((a, b) => (b[1].formulas + b[1].values) - (a[1].formulas + a[1].values));
+  const lines = sheets.slice(0, 6).map(([name, g]) => {
+    const where = [g.rows.length ? `row${g.rows.length > 1 ? 's' : ''} ${compactRanges(g.rows, String)}` : null,
+                   g.cols.length ? `column${g.cols.length > 1 ? 's' : ''} ${compactRanges(g.cols, colLetter)}` : null].filter(Boolean).join('; ');
+    return `${name}: ${where} (${g.formulas} formula cell${g.formulas === 1 ? '' : 's'}, ${g.values} constant${g.values === 1 ? '' : 's'})`;
+  });
+  const more = sheets.length > 6 ? ` ... and ${sheets.length - 6} more sheet(s).` : '';
+  return `${total} hidden row(s)/column(s) contain live content: ${formulas} formula cell(s) and ${values} constant(s) on ${sheets.length} sheet(s). ${lines.join(' | ')}${more}`;
 }
 
 // ---------------------------------------------------------------------

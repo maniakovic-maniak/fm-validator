@@ -99,6 +99,7 @@ const { checkDegenerateCovenantBranch } = require('./src/utils/degenerate-covena
 const { checkEquityComponentBackwardSolved } = require('./src/utils/equity-component-backward-solved-check');
 const { checkMidRowFormulaRegimeChange } = require('./src/utils/mid-row-formula-regime-change-check');
 const { checkZeroBaseRates } = require('./src/utils/zero-base-rate-check');
+const { checkZeroRateMultipliers } = require('./src/utils/zero-rate-multiplier-check');
 const { checkDateGatedRatioZero } = require('./src/utils/date-gated-ratio-zero-check');
 const { checkExceptionStatusRows } = require('./src/utils/exception-status-check');
 const { checkHardcodedMajorAsset } = require('./src/utils/hardcoded-major-asset-check');
@@ -780,7 +781,9 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     catch (e) { console.error('   \u26a0\ufe0f  Master-control-failure scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const impossibleCountaTarget = (() => { try { return checkImpossibleCountaTarget(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Impossible-COUNTA-target scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
-  const mismatchedBasisComparison = (() => { try { return checkMismatchedBasisComparison(parsed._raw); }
+  const zeroRateMultipliers = (() => { try { return checkZeroRateMultipliers(parsed._raw); }
+    catch (e) { console.error('   \u26a0\ufe0f  Zero-rate-multiplier scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
+    const mismatchedBasisComparison = (() => { try { return checkMismatchedBasisComparison(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Mismatched-basis-comparison scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
   const releaseGateCoverage = (() => { try { return checkReleaseGateCoverage(parsed._raw); }
     catch (e) { console.error('   \u26a0\ufe0f  Release-gate-coverage scan failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();
@@ -3217,6 +3220,22 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
             model_risk: `A control gate that can mathematically never pass will always show as failed or excepted, regardless of whether the underlying model is actually correct — this can mask genuine issues among the noise, or cause reviewers to distrust a genuinely important control.`,
             key_output_impact: 'No', method: 'automated', needs_retest: true, root_cause: 'Control target exceeds the mathematical maximum of its own referenced ranges',
             escalation_flag: true, urgency: 'Before next reliance', confidence: 99,
+          });
+        }
+      }
+      if (zeroRateMultipliers.applicable && zeroRateMultipliers.flaggedCount > 0) {
+        for (const f of zeroRateMultipliers.findings) {
+          allFlagged.push({
+            id: `T0-ZERORATE-${f.sheet.replace(/[^A-Za-z0-9]/g, '')}-${f.labelCell}`,
+            label: `"${f.label}" is zero in every period and is used as a multiplier`,
+            severity: 'medium', status: 'fail', sheet: f.sheet, cell: f.cell,
+            category: 'Inputs', condition: f.note,
+            reason: f.note,
+            corrective_action: 'Confirm whether a zero rate is intended. If not, link the rate row to its source input or schedule so every period carries the real rate; if it is intended, label the row so a reader knows.',
+            workstream: 'Inputs', issue_type: 'Zero rate used as a multiplier',
+            model_risk: 'Everything scaled by this rate is calculated as if the rate were 0%, so results such as post-tax returns, discounted values or indexed amounts can be overstated while every formula still looks correct.',
+            key_output_impact: 'Unknown', method: 'automated', needs_retest: true, root_cause: 'Rate row holds hard-typed zeros that other formulas multiply or divide by',
+            escalation_flag: false, urgency: 'Before next reliance', confidence: 60, record_type: 'Query'
           });
         }
       }
