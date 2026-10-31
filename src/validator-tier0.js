@@ -7,6 +7,7 @@
 //   - Formula Map (sheet dependency matrix + edge list)
 //   - Risk indicators (IFERROR, OFFSET, external links, hardcodes, #REF!)
 
+const { PricingCounter } = require('./utils/pricing-formula-count');
 const { FormulaStore, attachStore } = require('./utils/formula-store');
 
 // ── F-Score rules (KPMG) ─────────────────────────────────────────────────────
@@ -267,6 +268,8 @@ async function runTier0(parsed) {
   const dependencyMap = {};
   // UFI map: normalized formula → UFI data
   const ufiMap = {};
+  // Patch 50: the count that prices a quote, kept apart from the family identity above.
+  const pricingCounter = new PricingCounter(f => complexityBand(scoreFormula(f)));
   // Cell-level index: 'Sheet!Cell' -> { ufi, fscore, band, formulaText }
   const cellScoreIndex = {};
   // Complete text of every formula cut for display (Patch 30); the index holds only offsets
@@ -427,6 +430,8 @@ async function runTier0(parsed) {
             }
           });
 
+          pricingCounter.add(formula);
+
           // UFI grouping
           const normalized = normalizeFormula(formula, cell.address);
           if (!ufiMap[normalized]) {
@@ -583,6 +588,7 @@ async function runTier0(parsed) {
       totalExternalLinks,
       totalHardcodes,
       uniqueFormulaCount: uniqueFormulas.length,
+      pricing: pricingCounter.result(),
       sheetCount:         allSheetNames.length,
       fscoreDist
     },
@@ -614,6 +620,7 @@ function buildEmptyResult() {
       totalIferrorCount: 0, totalOffsetCount: 0, totalIndirectCount: 0,
       totalRefInFormula: 0, totalExternalLinks: 0,
       totalHardcodes: 0, uniqueFormulaCount: 0,
+      pricing: { version: 'pricing-key-v1', uniqueFormulaCount: 0, fscoreDist: { Low: 0, Moderate: 0, High: 0, Critical: 0 } },
       sheetCount: 0,
       fscoreDist: { Low: 0, Moderate: 0, High: 0, Critical: 0 }
     },

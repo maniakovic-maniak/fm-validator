@@ -391,8 +391,9 @@ app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (re
   try {
     const parsed = await parseExcel(filePath);
     const tier0  = await runTier0(parsed);
-    const fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
-    const uniqueFormulaTotal = (tier0.stats && tier0.stats.uniqueFormulaCount) || 0;
+    const pricingCount = (tier0.stats && tier0.stats.pricing) || { uniqueFormulaCount: 0, fscoreDist: { Low: 0, Moderate: 0, High: 0, Critical: 0 } };
+    const fscoreDist = pricingCount.fscoreDist;
+    const uniqueFormulaTotal = pricingCount.uniqueFormulaCount;
     const { priceTotal, gstTotal, grandTotal } = calculatePricing(fscoreDist);
 
     res.json({
@@ -468,8 +469,9 @@ app.post('/api/submit-order', requireApiKey, async (req, res) => {
   try {
     const parsed = await parseExcel(filePath);
     const tier0 = await runTier0(parsed);
-    fscoreDist = (tier0.stats && tier0.stats.fscoreDist) || { Low: 0, Moderate: 0, High: 0, Critical: 0 };
-    uniqueFormulaTotal = (tier0.stats && tier0.stats.uniqueFormulaCount) || 0;
+    const pricingCount = (tier0.stats && tier0.stats.pricing) || { uniqueFormulaCount: 0, fscoreDist: { Low: 0, Moderate: 0, High: 0, Critical: 0 } };
+    fscoreDist = pricingCount.fscoreDist;
+    uniqueFormulaTotal = pricingCount.uniqueFormulaCount;
     fileSizeBytes = fs.statSync(filePath).size;
     ({ grandTotal } = calculatePricing(fscoreDist, discount));
   } catch (err) {

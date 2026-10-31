@@ -619,3 +619,6 @@ Adds config/decision-thresholds/the-bend.proposed.json: DSCR >= 1.2x (Cashflow r
 
 ## Patch 49 - merged findings are numbered as distinct issues
 Owner decision: findings that share a cell may stay merged under one master finding, but each distinct issue must be clearly defined. Inside a group, findings from different checks are now "Issue 1 of N", "Issue 2 of N" (highest priority first); findings from the same check count as one issue with occurrences. The Issue Log's Master Finding column shows e.g. "RC-T2-S1-003 · Issue 2 of 2". Counts, grouping and priorities are unchanged; no row is dropped. Apply after Patch 48.
+
+## Patch 50 - the quote's unique-formula count is independent of the audit's formula families
+Patch 30 made the audit's formula families exact, which raised ESO's unique-formula count from 311 to 757 and its quote from $1,048 to $2,550 with no change to the model. The count that prices a quote now comes from its own frozen module (src/utils/pricing-formula-count.js, key version pricing-key-v1: every cell address becomes CELL), fed from the formula text only, and server.js prices from `tier0.stats.pricing`. The audit keeps its exact families (`uniqueFormulaCount`, 757 on ESO). Changing how quotes are counted needs a new named key version, not an edit. Apply after Patch 49. Check: ESO quote is $1,048 again.
