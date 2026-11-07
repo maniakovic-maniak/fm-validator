@@ -84,7 +84,9 @@ function linkRelatedFindings(findings) {
       findings[i].related_ids = direct;
       if (groupId) findings[i].related_group_id = groupId;
       const shown = direct.slice(0, MAX_LISTED).join(', ') + (direct.length > MAX_LISTED ? ` and ${direct.length - MAX_LISTED} more` : '');
-      const note = ` (Same cell(s) are also reported by ${shown}: one repair and one retest cover them.)`;
+      // Patch 55: sharing a cell does not mean sharing a fix. Two checks on one cell can need different repairs (a reference
+      // repair and a tax-assumption correction), so the note says only that the cells overlap; each finding keeps its own fix and retest.
+      const note = ` (Same cell(s) are also reported by ${shown}. These are separate findings: each keeps its own fix and retest.)`;
       if (!String(findings[i].condition || '').includes('Same cell(s) are also reported by')) findings[i].condition = (findings[i].condition || '') + note;
     }
     linked.push({ groupId: groupId || 'RC-large', ids });

@@ -88,6 +88,7 @@ const { applyRemedyChecks } = require('./src/utils/remedy-check');
 const { resolveAnswerableQueries } = require('./src/utils/query-resolver');
 const { buildRunRecord, writeRunRecord } = require('./src/utils/run-record');
 const { buildApplicabilityRecord } = require('./src/utils/applicability-record');
+const { dedupFindings } = require('./src/utils/dedup-findings');
 const { loadRegistryState, checkRegistryAgainstWorkbook } = require('./src/utils/output-registry');
 const { thresholdsPathFor, decisionLogLines } = require('./src/utils/decision-thresholds');
 const { checkOffByOneRanges, checkAggregateResultMismatch, checkRangeIncludesOwnTotal, checkSuspiciousErrorMasking } = require('./src/utils/spreadsheet-auditor-checks');
@@ -1017,18 +1018,12 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       }
     })();
     const allFailures  = [...t1Failures, ...t2Failures.filter(f => !ruleExclusions.isExcluded(f.id))];
-    const existingKeys = new Set();
-    for (const f of allFailures) {
-      // FIX: found via a real bug-scan run — server.js still had the old
-      // version of this key, which collapsed to "undefined-SheetName"
-      // when f.id was missing, letting two different id-less findings
-      // collide and silently drop one. Mirrors the same fix already
-      // applied to index.js.
-      const key = `${f.id || f.reason || f.label || JSON.stringify(f)}-${f.sheet || ""}`;
-      if (!existingKeys.has(key)) {
-        existingKeys.add(key);
-        allFlagged.push(f);
-      }
+    // Patch 55 (Review R5): a finding is identified by its occurrence (rule + sheet + cell + claim), not by rule + sheet. The same
+    // rule raised twice on one sheet about different cells or claims now keeps both; only a true duplicate collapses, losslessly.
+    {
+      const _dd = dedupFindings(allFailures);
+      for (const f of _dd.kept) allFlagged.push(f);
+      if (_dd.merged.length || _dd.split.length) console.log(`   \u2139\ufe0f  Duplicate check: ${_dd.merged.length} true duplicate report(s) merged into the finding they repeat; ${_dd.split.length} further occurrence(s) of a rule on the same sheet kept as separate findings (${_dd.split.slice(0, 6).map(x => x.as).join(', ')}${_dd.split.length > 6 ? ', ...' : ''})`);
     }
     // Captured here, before any T0-* deterministic findings (redundant
     // inputs, orphan sheets, named ranges, reasonableness, duplicate

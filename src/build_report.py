@@ -399,12 +399,17 @@ def build_report(data_path, output_path):
         parts = str(finding_id or '').split('-')
         return '-'.join(parts[:2]) if len(parts) >= 2 else finding_id
 
+    # Patch 55 (Review R6): a group is lossless. Members are grouped by detector AND record type, so a Query is never folded into
+    # a Confirmed Finding's row (or the reverse). The row takes the most severe member, not the first one, a blocking or
+    # escalation flag on any member, and it lists every member id. Counts and samples name the real number of members.
+    _SEV_ORDER = {'fatal': 0, 'critical': 1, 'high': 2, 'medium': 3, 'low': 4, 'info': 5}
+    def _sev_rank(m): return _SEV_ORDER.get(str(m.get('severity') or '').lower(), 6)
     _t0_groups = _defaultdict(list)
     _non_t0 = []
     for _f in findings:
         _fid = str(_f.get('id', ''))
         if _fid.startswith('T0-'):
-            _t0_groups[_t0_group_key(_fid)].append(_f)
+            _t0_groups[(_t0_group_key(_fid), str(_f.get('record_type') or 'Confirmed Finding'))].append(_f)
         else:
             _non_t0.append(_f)
 
@@ -414,20 +419,32 @@ def build_report(data_path, output_path):
     # dashboard's existing top5 hyperlink mechanism (uses id_to_issue_row)
     # would silently break for any aggregated finding it happens to cite.
     _original_id_to_group_key = {}
-    for _key, _members in _t0_groups.items():
+    _types_per_key = _defaultdict(set)
+    for (_k, _rt) in _t0_groups: _types_per_key[_k].add(_rt)
+    for (_key, _rtype), _members in _t0_groups.items():
         if len(_members) >= _T0_AGGREGATION_THRESHOLD:
-            _first = dict(_members[0])
+            _lead = min(_members, key=_sev_rank)            # most severe member, ties keep file order
+            _first = dict(_lead)
             _sample_cells = []
-            for _m in _members[:5]:
+            for _m in _members:
                 _sheet = _m.get('sheet') or ''
                 _cell = _m.get('cell') or ''
                 if _sheet and _cell and _cell != 'A1':
                     _sample_cells.append(f'{_sheet}!{_cell}')
+                if len(_sample_cells) >= 8: break
             _sample_text = ', '.join(_sample_cells)
             _remaining = len(_members) - len(_sample_cells)
             _sample_suffix = f' (sample: {_sample_text}{f" + {_remaining} more" if _remaining > 0 else ""})' if _sample_cells else ''
-            _first['condition'] = f"{_first.get('condition', '')} — {len(_members)} instance(s) of this pattern found{_sample_suffix}"
-            _first['id'] = f'{_key} ({len(_members)} instances)'
+            _ids_all = [str(_m.get('id')) for _m in _members]
+            _ids_text = ', '.join(_ids_all) if len(_ids_all) <= 15 else ', '.join(_ids_all[:15]) + f' and {len(_ids_all) - 15} more'
+            _first['condition'] = f"{_lead.get('condition', '')} — {len(_members)} instance(s) of this pattern found{_sample_suffix}. Members: {_ids_text}"
+            _gid = f'{_key} ({len(_members)} instances)'
+            if len(_types_per_key[_key]) > 1: _gid = f'{_key} - {_rtype} ({len(_members)} instances)'
+            _first['id'] = _gid
+            _first['member_ids'] = [str(_m.get('id')) for _m in _members]
+            _first['members_total'] = len(_members)
+            for _flag in ('investment_grade_blocker', 'escalation_flag', 'needs_retest'):
+                if any(_m.get(_flag) for _m in _members): _first[_flag] = True
             _first['sheet'] = '' if len({_m.get('sheet') for _m in _members}) > 1 else _first.get('sheet', '')
             _first['cell'] = 'A1'
             display_findings.append(_first)
@@ -1848,7 +1865,7 @@ def build_report(data_path, output_path):
     # blocking items.
     rem_findings=[f for f in findings if priority(f) in ('P1','P2','Critical Query')]
     # Findings that report the same cell(s) share a related_group_id (set by related-findings.js): keep them
-    # adjacent within their priority so one repair and one retest is visible as one block.
+    # adjacent within their priority so findings that report the same cells sit together; each keeps its own fix and retest.
     _pri_rank = {'P1': 0, 'Critical Query': 0, 'P2': 1}
     rem_findings.sort(key=lambda f: (_pri_rank.get(priority(f), 2), str(f.get('related_group_id') or '~'), str(f.get('id', ''))))
     _rf_first, _rf_last = REM_HEADER_ROW+1, REM_HEADER_ROW+len(rem_findings)

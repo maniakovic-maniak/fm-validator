@@ -27,8 +27,22 @@ function prio(f) {
 }
 
 // The check a finding came from. Findings from one check inside a group are occurrences of one issue.
+// Patch 55: the rule number is part of a Tier 1 / Tier 2 rule's identity and is never stripped. The old rule removed any final
+// three-digit segment, so T2-S4-006 (error suppression) and T2-S4-007 (SUM coverage) both became "T2-S4" and showed as one
+// issue (Review R7). Now:
+//   T2-S4-006, or an occurrence of it (T2-S4-006-002)   -> T2-S4-006
+//   T1-013, or an occurrence (T1-013-002)               -> T1-013
+//   explicit rule_id / check_id                         -> kept exactly as given
+//   T0 detectors (T0-BLANKCELLREF-003)                  -> T0-BLANKCELLREF (numbered occurrences of one detector are one issue)
+const T2_RULE_RE = /^(T2-S\d+-\d{3})(?:-\d+)?$/;
+const T1_RULE_RE = /^(T1-\d{3})(?:-\d+)?$/;
 function issueKey(f) {
-  return String(f.rule_id || f.check_id || f.id || '').replace(/-\d{3}$/, '') || String(f.id);
+  const explicit = String(f.rule_id || f.check_id || '').trim();
+  if (explicit) return explicit;
+  const id = String(f.id || '');
+  let m = T2_RULE_RE.exec(id) || T1_RULE_RE.exec(id);
+  if (m) return m[1];
+  return id.replace(/-\d{3}$/, '') || id;
 }
 
 function defineIssues(members) {
@@ -90,4 +104,4 @@ function countMasters(findings) {
   return { P1: seen.P1.size, P2: seen.P2.size, P3: seen.P3.size };
 }
 
-module.exports = { annotateMasterFindings, countMasters, priorityOf: prio };
+module.exports = { annotateMasterFindings, countMasters, priorityOf: prio, issueKey };
