@@ -341,6 +341,39 @@ function parseResponse(raw) {
 }
 
 // Run a single batch of rules via streaming
+// Patch 54: one retry when a call is cut off by a dropped connection. A stream that ends mid-answer
+// ("terminated", a reset socket, an overloaded or 5xx response) is a network event, not a verdict on the model, and
+// losing a whole batch to it leaves up to ~70 procedures Not Performed. Only these transient errors are retried,
+// and only once; an authentication, request-shape or rate-limit error is never retried. A call that succeeds the
+// first time costs exactly what it did before; a retry costs one more call of that batch.
+const TRANSIENT_ERROR_RE = /terminated|ECONNRESET|ECONNABORTED|ETIMEDOUT|EPIPE|socket hang up|other side closed|fetch failed|UND_ERR|premature close|connection (?:error|reset|closed)|network error|overloaded/i;
+function isTransientApiError(e) {
+  if (!e) return false;
+  const st = Number(e.status);
+  if ([408, 500, 502, 503, 504, 529].includes(st)) return true;
+  if ([400, 401, 403, 404, 413, 422, 429].includes(st)) return false;
+  return TRANSIENT_ERROR_RE.test(String(e.message || '')) || TRANSIENT_ERROR_RE.test(String(e.code || ''));
+}
+async function withTransientRetry(fn, label, opts = {}) {
+  const delayMs = opts.delayMs === undefined ? 20000 : opts.delayMs;
+  const log = opts.log || console.log;
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isTransientApiError(e)) throw e;
+    log(`   \u26a0\ufe0f  ${label}: the connection was cut off (${String(e.message).slice(0, 120)}) - retrying this batch once in ${Math.round(delayMs / 1000)}s`);
+    if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+    try {
+      const out = await fn();
+      log(`   \u2139\ufe0f  ${label}: the retry completed`);
+      return out;
+    } catch (e2) {
+      log(`   \u26a0\ufe0f  ${label}: the retry also failed (${String(e2.message).slice(0, 120)})`);
+      throw e2;
+    }
+  }
+}
+
 async function runBatch(batchRules, dataSubset, sheetNames, systemPrompt, batchLabel, tier0Context = {}, isFullParse = false) {
   const payload = {
     sheetNames,
@@ -1027,11 +1060,11 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       let sawMeta = null;
       for (let i = 0; i < dataChunks.length; i++) {
         const chunkLabel = dataChunks.length > 1 ? `${label} (data chunk ${i + 1}/${dataChunks.length})` : label;
-        const { results, meta } = await runBatch(
+        const { results, meta } = await withTransientRetry(() => runBatch(
           rules, dataChunks[i], parsed.sheetNames, systemPrompt, chunkLabel,
           ctxFor(dataChunks.length, opts),
           useFullParse
-        );
+        ), chunkLabel);
         chunkResultArrays.push(results);
         // RETRY_MISSING_RULES: the reviewer sometimes ends its turn cleanly after skipping rules (seen: 21 of 48 in one
         // batch). Ask once more for only those rules, with the same data and context, and keep whatever comes back.
@@ -1396,4 +1429,4 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
   }
 }
 
-module.exports = { runTier2, describeOutputMix, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows, extractCellReferenceFromText };
+module.exports = { runTier2, isTransientApiError, withTransientRetry, describeOutputMix, parseResponse, resolveDeepAccountingSheets, extractMeaningfulRows, extractCellReferenceFromText };

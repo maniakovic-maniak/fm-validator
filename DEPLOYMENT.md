@@ -648,3 +648,11 @@ Changes what can reach the highest reliance tier. No new findings, no change to 
 5. Path checks: a criterion that tested nothing, or stopped at a limit, is an evidence gap. Partial non-completion is disclosed but does not hold back the tier. The Path Checks tab now appears whenever a scan did not complete, even with no detail rows.
 Visible effect to expect on real models: any model with many engine errors (Carlsberg and Hidden Gem: the MATCH/IRR limitation) or with scans stopped at a cell limit will now show a named evidence gap and cannot reach "Ready for transaction execution". That is intended; it was previously hidden. The 90% bar itself is unchanged.
 VPS: `cd /home/deploy/fm-validator && git pull --ff-only && pm2 restart all`
+
+## Patch 54 - retry a Tier 2 batch once when the connection is cut off (from ESO run Fm-00059)
+In Fm-00059 Batch 2 (Accounting & Debt, 70 rules, ~784,000 input tokens) ended with "terminated" (the connection dropped mid-answer). Tier 2 had no retry for that, so all 70 procedures were Not Performed and the run could not be used as a baseline.
+1. A batch call that fails with a transient connection error is retried once after 20 seconds: "terminated", reset or closed sockets, fetch failed, HTTP 408/500/502/503/504/529. Nothing else is retried: 400, 401, 403, 404, 413, 422 and 429 fail immediately, as does a truncated or unparseable answer.
+2. The log says when a retry happens and whether it completed. If the retry also fails the batch is recorded as failed exactly as before, with the original error.
+Cost: a batch that works first time costs exactly what it did. A batch that drops and is retried costs one more call of that batch (roughly US$2-3 on ESO; estimate, not measured). That replaces a run that would otherwise be unusable.
+Not changed: the number of rules, the prompts, the payload, Tier 2 input for a normal run.
+VPS: `cd /home/deploy/fm-validator && git pull --ff-only && pm2 restart all`
