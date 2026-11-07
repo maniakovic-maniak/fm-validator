@@ -134,29 +134,57 @@ function saveHistory(modelKey, history) {
   }
 }
 
+// Patch 55b: occurrence identity.
+// Cell address: "$AP$92", "ap92" and "'Sheet 1'!$AP$92" are the same place. Quotes and $ are dropped and the address is
+// upper-cased; the sheet name keeps its case (Excel treats it case-blind, but history written before this patch used the
+// sheet as written, and a sheet rename is a real change anyway).
+function normaliseCell(cell) {
+  if (cell === null || cell === undefined || cell === '') return null;
+  const s = String(cell).trim();
+  const i = s.lastIndexOf('!');
+  const sheet = i >= 0 ? s.slice(0, i).replace(/^'+|'+$/g, '').trim() : null;
+  const addr = (i >= 0 ? s.slice(i + 1) : s).replace(/\$/g, '').replace(/\s+/g, '').toUpperCase();
+  return sheet !== null ? `${sheet}!${addr}` : addr;
+}
+// Rule id: the occurrence suffix Patch 55 adds (T2-S5-007-002) is an ordering accident, not an identity. A later run that
+// reports the same concerns in another order would swap them. Fold it back to the rule; the claim tells occurrences apart.
+const RULE_SUFFIX_RE = /^((?:T1-\d{3})|(?:T2-S\d+-\d{3}))-\d+$/;
+function baseRuleId(id) { const m = RULE_SUFFIX_RE.exec(String(id || '')); return m ? m[1] : id; }
+const claimText = f => String(f.condition || f.what_wrong || f.reason || f.label || f.finding || '').toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim().slice(0, 240);
+function claimHash(f) { return require('crypto').createHash('sha1').update(claimText(f)).digest('hex').slice(0, 6); }
+const makeFp = (rootCauseId, cell, tag) => (cell ? `${rootCauseId}::${cell}` : rootCauseId) + (tag ? `#${tag}` : '');
+
 /** Builds this run's fingerprints from the assembled findings array.
- * Fingerprint = "{root_cause_id}::{affected_cell}" for cell-level
- * granularity; falls back to the bare root_cause_id (or id) alone for a
- * check with no affected_cells at all (a genuinely check-level finding,
- * not one with individual cell instances to distinguish). */
+ * Fingerprint = "{rule}::{normalised cell}" for cell-level granularity; falls back to the bare rule id for a check with
+ * no affected_cells. When one run reports the same rule at the same cell about two different claims, both carry a short
+ * claim tag ("...#a1b2c3") so each is followed on its own, whichever order they arrive in. */
 function currentFingerprints(findings) {
-  const fingerprints = new Map();
+  const rows = [];                       // one row per (finding, cell)
   for (const f of findings) {
-    const rootCauseId = f.root_cause_id || f.id;
+    const rootCauseId = baseRuleId(f.root_cause_id || f.id);
     if (!rootCauseId) continue;
     const cells = Array.isArray(f.affected_cells) && f.affected_cells.length > 0 ? f.affected_cells : [null];
-    for (const cell of cells) {
-      const fp = cell ? `${rootCauseId}::${cell}` : rootCauseId;
-      // Later cells with the same fingerprint simply overwrite with the
-      // same info — a genuine duplicate within one run's own findings
-      // would be unusual, but this keeps the map well-defined either way.
-      fingerprints.set(fp, {
-        rootCauseId, cell,
-        label: f.label || f.reason || rootCauseId,
-        priority: f.priority || null,
-        recordType: f.record_type || null,
-      });
-    }
+    for (const raw of cells) rows.push({ f, rootCauseId, cell: normaliseCell(raw) });
+  }
+  const claimsAt = new Map();            // base fingerprint -> set of claim hashes
+  for (const r of rows) {
+    const k = makeFp(r.rootCauseId, r.cell); r.hash = claimHash(r.f);
+    if (!claimsAt.has(k)) claimsAt.set(k, new Set());
+    claimsAt.get(k).add(r.hash);
+  }
+  const fingerprints = new Map();
+  for (const r of rows) {
+    const k = makeFp(r.rootCauseId, r.cell);
+    const tagged = claimsAt.get(k).size > 1;
+    const fp = makeFp(r.rootCauseId, r.cell, tagged ? r.hash : null);
+    fingerprints.set(fp, {
+      rootCauseId: r.rootCauseId, cell: r.cell,
+      label: r.f.label || r.f.reason || r.rootCauseId,
+      priority: r.f.priority || null,
+      recordType: r.f.record_type || null,
+      claimHash: r.hash,
+      ...(tagged ? { claimTag: r.hash } : {}),
+    });
   }
   return fingerprints;
 }
@@ -175,9 +203,22 @@ const STATUS = Object.freeze({ OPEN: 'open', NOT_OBSERVED: 'not_observed', VERIF
 function normaliseStatus(st) { return st === 'closed' ? STATUS.NOT_OBSERVED : (st || STATUS.OPEN); }
 function normaliseEntries(entries) {
   const out = {};
-  for (const [fp, e] of Object.entries(entries || {})) {
-    if (!e || typeof e !== 'object') continue;
-    out[fp] = e.status === 'closed' ? { ...e, status: STATUS.NOT_OBSERVED, legacyClosed: true } : e;     // never promoted to verified
+  for (const [fp0, e0] of Object.entries(entries || {})) {
+    if (!e0 || typeof e0 !== 'object') continue;
+    let e = e0.status === 'closed' ? { ...e0, status: STATUS.NOT_OBSERVED, legacyClosed: true } : e0;     // never promoted to verified
+    // Patch 55b: bring older keys onto the current identity (rule suffix folded, cell address normalised).
+    let fp = fp0;
+    if (e.rootCauseId && !e.claimTag) {
+      const root = baseRuleId(e.rootCauseId), cell = normaliseCell(e.cell);
+      fp = makeFp(root, cell);
+      if (fp !== fp0) e = { ...e, rootCauseId: root, cell, migratedFrom: e.migratedFrom || fp0 };
+    }
+    if (out[fp]) {
+      // Two old entries now share one identity. Do not guess which story is true: keep the open one if any, mark it
+      // ambiguous, and let computeCrossRunStats treat a match to it as new rather than as a reappearance.
+      const a = out[fp], keep = (a.status === STATUS.OPEN || e.status !== STATUS.OPEN) ? a : e;
+      out[fp] = { ...keep, ambiguous: true };
+    } else out[fp] = e;
   }
   return out;
 }
@@ -335,11 +376,31 @@ function computeCrossRunStats(findings, history) {
   const stillOpen = [];
   const updatedHistory = { ...history };
 
+  // Patch 55b: a finding whose tag appeared or disappeared since last run (a second claim on the same rule and cell was
+  // added or fixed) is matched to its own old entry by claim, never by position. No claim match means it is new.
+  const byHash = new Map();
+  for (const [k, e] of Object.entries(history)) if (e.claimHash) { const kk = `${e.rootCauseId}::${e.cell}|${e.claimHash}`; if (!byHash.has(kk)) byHash.set(kk, k); }
+  const claimed = new Set();
+  const resolveKey = (fp, info) => {
+    if (history[fp]) return fp;
+    const alt = byHash.get(`${info.rootCauseId}::${info.cell}|${info.claimHash}`);
+    return alt && !current.has(alt) ? alt : fp;
+  };
+  const priorKey = new Map();
+  for (const [fp, info] of current.entries()) priorKey.set(fp, resolveKey(fp, info));
+
   for (const [fp, info] of current.entries()) {
-    const priorEntry = history[fp];
+    const pk = priorKey.get(fp);
+    const priorEntry = history[pk];
+    if (pk !== fp) { claimed.add(pk); delete updatedHistory[pk]; }
     if (!priorEntry) {
       newOnes.push({ fingerprint: fp, ...info });
       updatedHistory[fp] = { status: 'open', ...info, firstSeen: nowIso, lastSeen: nowIso, timesClosed: 0 };
+    } else if (priorEntry.ambiguous && priorEntry.status !== 'open') {
+      // Patch 55b: the stored entry stands for more than one old entry. Do not claim a reappearance from it.
+      newOnes.push({ fingerprint: fp, ...info });
+      const { ambiguous, ...rest } = priorEntry;
+      updatedHistory[fp] = { ...rest, status: 'open', ...info, lastSeen: nowIso };
     } else if (priorEntry.status !== 'open') {
       // Anything that was not observed (or, in future, verified resolved) and is now found again has reappeared.
       regressed.push({ fingerprint: fp, ...info, previouslyClosedAt: priorEntry.notObservedAt || priorEntry.closedAt || null, previousStatus: normaliseStatus(priorEntry.status), timesClosed: priorEntry.timesNotObserved || priorEntry.timesClosed || 0 });
@@ -351,7 +412,7 @@ function computeCrossRunStats(findings, history) {
   }
 
   for (const [fp, priorEntry] of Object.entries(history)) {
-    if (priorEntry.status === 'open' && !current.has(fp)) {
+    if (priorEntry.status === 'open' && !current.has(fp) && !claimed.has(fp)) {
       // Not found this run. That is all it means: the model may have been fixed, the reviewer may not have raised it
       // again, or the check may not have run. "closed" in the arrays and counts below is kept as a name for the report
       // fields; the stored status is not_observed and is never read as resolved.
@@ -395,4 +456,4 @@ function computeCrossRunStats(findings, history) {
   };
 }
 
-module.exports = { loadHistory, saveHistory, readRecord, recordRun, markVerification, STATUS, normaliseStatus, currentFingerprints, computeCrossRunStats, historyFilePath, normalizeModelIdentity };
+module.exports = { normaliseCell, baseRuleId, normaliseEntries, loadHistory, saveHistory, readRecord, recordRun, markVerification, STATUS, normaliseStatus, currentFingerprints, computeCrossRunStats, historyFilePath, normalizeModelIdentity };
