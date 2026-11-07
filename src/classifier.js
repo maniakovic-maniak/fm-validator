@@ -222,7 +222,7 @@ function normalizeDomainLabel(modelType) {
   return modelType; // no known alias — leave as-is; a genuinely new domain still works correctly, it just won't be normalized to anything yet
 }
 
-function loadDomainSkill(modelType, industry) {
+function loadDomainSkill(modelType, industry, sheetNames) {
   const normalized = normalizeDomainLabel(modelType);
   const skillDir = path.join(__dirname, '../config');
   const candidates = [
@@ -262,7 +262,15 @@ function loadDomainSkill(modelType, industry) {
       // model gets both the generic infrastructure knowledge and the
       // regulatory-specific mechanics together.
       const riioRe = /\b(riio|pcfm|ofgem|gt1|gt2|gt3|et1|et2|et3|gd1|gd2|gd3|ed1|ed2|ed3|gas transmission|electricity transmission|gas distribution|electricity distribution|energy network regulation|network price control)\b/i;
-      if (riioRe.test(`${modelType || ''} ${industry || ''}`) /* RIIO_INDUSTRY_FIX */) {
+      // Patch 56b: the model description is worded by the familiarisation call and varies between runs. Fm-00060 said
+      // "electricity transmission system operation" (matched); Fm-00061 said "electricity system operator regulated utility"
+      // (no match), so the RIIO layer was silently dropped from the same file. The wider words below are the ones the scope
+      // profile in config/rule-exclusions.json already uses, and the sheet names are read from the file itself.
+      const riioWideRe = /\b(network licence|price control|regulated network|system operator|transmission system)\b/i;
+      const riioSheetRe = /\b(riio|pcfm|ofgem)\b|^rore\b/i;
+      const _riioByText = riioRe.test(`${modelType || ''} ${industry || ''}`) || riioWideRe.test(`${modelType || ''} ${industry || ''}`);
+      const _riioBySheets = Array.isArray(sheetNames) && sheetNames.some(n => riioSheetRe.test(String(n || '').trim()));
+      if (_riioByText || _riioBySheets /* RIIO_INDUSTRY_FIX */) {
         const riioFilepath = path.join(skillDir, 'skill-riio-pcfm.md');
         if (fs.existsSync(riioFilepath)) {
           content += `\n\n---\n\n${fs.readFileSync(riioFilepath, 'utf8')}`;

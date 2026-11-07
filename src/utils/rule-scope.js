@@ -176,6 +176,13 @@ function summarizeScopeForReport(exclusionRecord, plan, scopeCfg) {
   return {
     discloseInReport: cfg.discloseInReport !== false,
     notApplicable: by('not_applicable').length,
+    // Patch 56b: name the procedures set aside after the run (the reviewer said they do not apply, or an owner scope decision
+    // covers them), with the reason, so a reader can see and overrule each one. Counts alone hid them. Pre-run profile
+    // exclusions stay a count: they are the fixed model-type list in config/rule-exclusions.json.
+    notApplicableList: by('not_applicable').filter(e => !e.preRun).map(e => ({
+      id: e.id, fatal: e.severity === 'fatal', ownerDecision: !!e.decision,
+      reason: String(e.decision || e.finding || '').replace(/\s+/g, ' ').trim().slice(0, 160)
+    })),
     evidenceRequired: by('evidence_required').map(e => ({ id: e.id, label: e.label })),
     extendedNotRun: by('extended_not_run').length,
     fullReview: !!(plan && plan.fullScope),

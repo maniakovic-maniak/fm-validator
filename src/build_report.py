@@ -1583,6 +1583,23 @@ def build_report(data_path, output_path):
             'Procedures needing source documents or live testing', 'Not performed',
             f"{len(_scope_ev)} procedure(s) compare the model with records outside the workbook, need cell formatting the review does not read (colour conventions), or need the model changed and recalculated, so the file as reviewed cannot settle them. They are not counted in the completion figure: {_ev_names}.",
             'Supply the source documents (audited accounts, ledgers, contracts, licence terms) or commission live testing of the model'))
+    # Patch 56b: name the procedures set aside as not applicable after the run, each with its reason, so a reader can overrule them.
+    _na_list = (_scope.get('notApplicableList') or []) if _scope_disclose else []
+    if _na_list:
+        _na_rev = [e for e in _na_list if not e.get('fatal')]
+        _na_fat = [e for e in _na_list if e.get('fatal')]
+        def _na_txt(es, n=60):
+            return '; '.join(f"{e.get('id')}: {str(e.get('reason') or '').replace('Not applicable to this model type: ','').rstrip('.')[:n]}" for e in es)
+        if _na_rev:
+            _exclusions.append((
+                'Procedures the reviewer said do not apply', 'Not performed',
+                f"{len(_na_rev)} procedure(s) were answered by the reviewer as not applicable to this kind of model, so they are not counted in the completion figure: {_na_txt(_na_rev)}.",
+                'Overrule any of these if the model does use the item, and re-run the review'))
+        if _na_fat:
+            _exclusions.append((
+                'Fatal-gate checks set aside by scope decision', 'Not performed',
+                f"{len(_na_fat)} fatal-gate check(s) were left out by an explicit scope decision for this model type, so they cannot raise or clear a gate: {_na_txt(_na_fat, 90)}.",
+                'Confirm the scope decision still holds for this model'))
     if _scope_disclose and _scope.get('extendedNotRun'):
         _exclusions.append((
             'Extended review procedures', 'Not performed',
