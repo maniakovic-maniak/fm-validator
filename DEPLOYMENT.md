@@ -656,3 +656,8 @@ In Fm-00059 Batch 2 (Accounting & Debt, 70 rules, ~784,000 input tokens) ended w
 Cost: a batch that works first time costs exactly what it did. A batch that drops and is retried costs one more call of that batch (roughly US$2-3 on ESO; estimate, not measured). That replaces a run that would otherwise be unusable.
 Not changed: the number of rules, the prompts, the payload, Tier 2 input for a normal run.
 VPS: `cd /home/deploy/fm-validator && git pull --ff-only && pm2 restart all`
+
+## Patch 55a - explicit "Not applicable" answers are recorded as Not Applicable
+Reviewer answers that open with "Not applicable" (Fm-00060: T2-S10-376, -480, -508, -702) were counted as Critical Queries.
+`src/utils/absence-policy.js` now treats them as Not Applicable (non-fatal rules only), so they leave the P1-P3/Critical Query counts,
+the Top 5 Blockers and Remediation, and appear in the Applicability Record. Revert point: absence-policy.js. Test: `node test-patch55a.js`.

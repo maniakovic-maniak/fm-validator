@@ -47,9 +47,13 @@ function isConfirmedAbsence(r) {
 
 // An uncertain answer that reads like an absence and in which the reviewer says the structure does not belong in this
 // kind of model. Used by the applicability record (applicability-record.js).
+// Patch 55a: the reviewer's own answer opens with "Not applicable" (Fm-00060: T2-S10-376/480/508/702). That is an explicit
+// statement, so it needs no absence wording. Its text must open with the phrase; a mention further in does not count.
+const EXPLICIT_NA_RE = /^\s*not applicable\b/i;
 function isNotApplicableAbsence(r) {
   if (!r || r.status !== 'uncertain') return false;
   const text = textOf(r);
+  if (EXPLICIT_NA_RE.test(text)) return true;
   if (!STRICT_START_RE.test(text) || !isAbsenceFinding(text)) return false;
   if (/^\s*not present in the workbook/i.test(text)) return false;
   if (LIMITATION_RE.test(text)) return false;
@@ -61,6 +65,7 @@ function isNotApplicableAbsence(r) {
 function keptUncertainReason(r) {
   if (!r || r.status !== 'uncertain') return null;
   const text = textOf(r);
+  if (EXPLICIT_NA_RE.test(text)) return null;
   if (!STRICT_START_RE.test(text) || !isAbsenceFinding(text)) return null;
   if (/^\s*not present in the workbook/i.test(text)) return null;
   if (LIMITATION_RE.test(text)) return 'reviewer limitation wording';
