@@ -3409,6 +3409,13 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
       // Validation Matrix can show it (Tier 2 findings already have an Issue Log entry to point at).
       reason: (String(r.id || '').startsWith('T1-') && r.reason) ? String(r.reason) : null
     }));
+    // Patch 57 (shadow only): count critical/high Pass results that carry a low confidence. Nothing in the report changes.
+    try {
+      const _cl = require('./config/checklist.json');
+      const _sev = new Map([..._cl.tier1, ..._cl.tier2].map(r => [r.id, r.severity]));
+      const _line = require('./src/utils/low-confidence-pass').summaryLine(require('./src/utils/low-confidence-pass').lowConfidencePasses(ruleResults, _sev));
+      if (_line) console.log(`   \u2139\ufe0f  ${_line}`);
+    } catch (e) { console.error('   (confidence check skipped:', e.message, ')'); }
 
 
     // ── Step 6: Build report + upload + notify ─────────────────────────
