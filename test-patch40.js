@@ -83,7 +83,7 @@ check('a recalculation gap caps the tier and the reason is printed', !gapped.err
 const nullRec = build({ runRecord: null });
 check('a record that could not be built caps the tier', !nullRec.error && !TOP.test(nullRec.text) && /could not be built/.test(nullRec.text));
 const legacy = build({});
-check('a payload without a record behaves as before', !legacy.error && TOP.test(legacy.text));
+check('a payload without a record is capped like a null one (Patch 53: absence is not complete evidence)', !legacy.error && !TOP.test(legacy.text) && /no automated assessment record was supplied/.test(legacy.text));
 const unmatched = build({ outputRegistry: { ...approved, usable: false, unresolved: [{ label: 'Equity IRR', reason: 'row 5 on "Summary" holds no formula in this workbook' }] }, runRecord: r0 });
 check('an approved list that no longer matches the workbook caps the tier and says why', !unmatched.error && !TOP.test(unmatched.text) && /not found in this workbook/.test(unmatched.text));
 

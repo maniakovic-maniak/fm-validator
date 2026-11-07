@@ -1163,9 +1163,16 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
     }
 
     // Normalise all results — ensure required fields exist
+    // Patch 53 (D0): only pass / fail / uncertain are supported outcomes. A priority code used as a status (P1-P3)
+    // is an unmistakable raised issue and is read as 'fail'. Anything else (a missing, misspelt or invented status)
+    // is read as uncertain, so it counts as not concluded instead of as a finding or a pass.
+    const SUPPORTED_STATUS = new Set(['pass', 'fail', 'uncertain']);
+    const toSupportedStatus = st => (SUPPORTED_STATUS.has(st) ? st : (/^P[123]$/i.test(String(st)) ? 'fail' : 'uncertain'));
+    const unsupportedStatus = allResults.filter(r => r && !SUPPORTED_STATUS.has(r.status) && !/^P[123]$/i.test(String(r.status)) && r.status !== undefined && r.status !== null && !/-ERROR$/.test(String(r.id)));
+    if (unsupportedStatus.length) console.log(`   \u26a0\ufe0f  ${unsupportedStatus.length} Tier 2 result(s) carried an unsupported status (${[...new Set(unsupportedStatus.map(r => String(r.status)))].slice(0, 5).join(', ')}) and were recorded as uncertain`);
     const normalised = allResults.map(r => ({
       id:                       r.id || 'UNKNOWN',
-      status:                   r.status || 'uncertain',
+      status:                   toSupportedStatus(r.status),
       confidence:               r.confidence ?? 0,
       priority:                 r.priority || 'P3',
       severity:                 r.severity || 'Medium',

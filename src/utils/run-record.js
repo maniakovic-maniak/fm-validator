@@ -34,10 +34,17 @@ function recalcEvidence(r) {
   const total = checked + excluded;
   const n = k => Number(r[k]) || 0;
   const not_recalculated = { offset: n('offset_cells_excluded'), bare_multicell_name: n('multicell_named_range_cells_excluded'), external_reference: n('external_reference_cells_excluded'), downstream_of_those: n('tainted_downstream_cells_excluded') };
+  const unresolved = Number(r.unresolved_error_count) || 0;
+  // Patch 53: raw ratios drive the policy test; rounding is for display only. 'Verified' leaves out cells whose
+  // recalculation errored: an attempted cell that could not be evaluated is not verification.
+  const attempted_ratio = total > 0 ? checked / total : null;
+  const verified_ratio = total > 0 ? Math.max(0, checked - unresolved) / total : null;
   return {
     status: 'completed', cells_checked: checked, cells_excluded: excluded, not_recalculated,
     coverage_pct: total > 0 ? Math.round(checked / total * 100) : null,
-    mismatches: Number(r.mismatch_count) || 0, unresolved_errors: Number(r.unresolved_error_count) || 0,
+    verified_pct: verified_ratio === null ? null : Math.round(verified_ratio * 100),
+    attempted_ratio, verified_ratio,
+    mismatches: Number(r.mismatch_count) || 0, unresolved_errors: unresolved,
   };
 }
 
@@ -45,7 +52,10 @@ function pathEvidence(pathChecks) {
   // A path-check run that produced nothing at all is a failure, not a clean result.
   if (!pathChecks) return { criteria: [], failed: ['all path checks (the run produced no result)'] };
   const summary = pathCheckRows(pathChecks).summary || [];
-  return { criteria: summary.map(s => ({ criterion: s.criterion, tested: s.tested || 0, failed: s.failed || null, not_completed: s.notCompleted || 0 })), failed: summary.filter(s => s.failed).map(s => s.criterion) };
+  // Patch 53: a criterion that tested nothing, or that stopped at a limit, is not a clean result. Partial non-completion
+  // (some cells tested, no stop) stays in the criteria list and in the report, but does not by itself hold back the tier.
+  const incomplete = s => !s.failed && (s.notCompleted || 0) > 0 && ((s.tested || 0) === 0 || !!s.stopped);
+  return { criteria: summary.map(s => ({ criterion: s.criterion, tested: s.tested || 0, failed: s.failed || null, not_completed: s.notCompleted || 0, stopped: s.stopped ? true : false })), failed: summary.filter(s => s.failed || incomplete(s)).map(s => incomplete(s) ? `${s.criterion} (${s.notCompleted} not completed${(s.tested || 0) === 0 ? ', nothing tested' : ', stopped at a limit'})` : s.criterion) };
 }
 
 function recalcBreakdown(rc) {
@@ -64,7 +74,13 @@ function evidenceGaps(ev) {
   if (!rc || rc.status !== 'completed') gaps.push({ key: 'recalculation', text: `no independent recalculation was completed (${(rc && rc.detail) || 'not run'}), so the model's own saved values are not independently confirmed` });
   else {
     if (rc.mismatches > 0) gaps.push({ key: 'recalculation', text: `the independent recalculation disagreed with the saved values in ${rc.mismatches} cell(s)` });
-    if (rc.coverage_pct !== null && rc.coverage_pct < MIN_RECALC_COVERAGE_PCT) gaps.push({ key: 'recalculation_coverage', text: `the independent recalculation covered ${rc.coverage_pct}% of formula cells (at least ${MIN_RECALC_COVERAGE_PCT}% is needed); not recalculated: ${recalcBreakdown(rc)}` });
+    // Patch 53: tested on the unrounded ratio, so a displayed 90% can no longer hide 89.6%.
+    const attempted = typeof rc.attempted_ratio === 'number' ? rc.attempted_ratio : (rc.coverage_pct === null ? null : rc.coverage_pct / 100);
+    const verified = typeof rc.verified_ratio === 'number' ? rc.verified_ratio : null;
+    const bar = MIN_RECALC_COVERAGE_PCT / 100;
+    const attemptedShort = attempted !== null && attempted < bar;
+    if (attemptedShort) gaps.push({ key: 'recalculation_coverage', text: `the independent recalculation covered ${rc.coverage_pct}% of formula cells (at least ${MIN_RECALC_COVERAGE_PCT}% is needed); not recalculated: ${recalcBreakdown(rc)}${rc.unresolved_errors > 0 ? `; ${rc.unresolved_errors.toLocaleString('en-US')} attempted cell(s) returned an engine error and are not verified` : ''}` });
+    else if (verified !== null && rc.unresolved_errors > 0 && verified < bar) gaps.push({ key: 'recalculation_unresolved', text: `${rc.unresolved_errors.toLocaleString('en-US')} attempted cell(s) returned an engine error, so only ${rc.verified_pct}% of formula cells were verified (at least ${MIN_RECALC_COVERAGE_PCT}% is needed); an attempted cell that could not be evaluated is not verification` });
   }
   if (ev.path_checks.failed.length) gaps.push({ key: 'path_checks', text: `path check(s) did not complete: ${ev.path_checks.failed.join(', ')}` });
   if (ev.batches.failed > 0) gaps.push({ key: 'review_batches', text: `${ev.batches.failed} review batch(es) failed to complete` });

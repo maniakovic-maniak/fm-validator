@@ -7,8 +7,9 @@ scripts/test-scope-sync.js runs both implementations over the same fixtures and 
 
 A rule's status is derived exactly as the Validation Matrix derives it:
   no result returned                       -> Not Performed
-  any result not pass/uncertain            -> Raised Issue
+  any result 'fail'                        -> Raised Issue
   any result uncertain                     -> Uncertain
+  any result with an unsupported status    -> Not Performed (outcome unknown; Patch 53)
   otherwise                                -> Pass
 Completion = (Pass + Raised Issue) / planned. Uncertain and Not Performed count as not concluded.
 """
@@ -27,14 +28,21 @@ def _matches(rule_id, result_id):
     return result_id == rule_id or result_id.startswith(rule_id + '-')
 
 
+# Patch 53 (D0): the only supported result statuses. A result with any other status (error, not_run, null,
+# an unknown value) means the procedure's outcome is unknown: it is NOT concluded and must not count as a finding.
+VALID_STATUSES = ('pass', 'fail', 'uncertain')
+
+
 def rule_status(rule_id, rule_results):
     res = [r for r in rule_results if _matches(rule_id, r.get('id', ''))]
     if not res:
         return 'Not Performed'
-    if any(r.get('status') not in ('pass', 'uncertain') for r in res):
+    if any(r.get('status') == 'fail' for r in res):        # a completed procedure that found a defect stays concluded
         return 'Raised Issue'
     if any(r.get('status') == 'uncertain' for r in res):
         return 'Uncertain'
+    if any(r.get('status') not in VALID_STATUSES for r in res):
+        return 'Not Performed'                              # unknown outcome: incomplete evidence
     return 'Pass'
 
 

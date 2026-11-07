@@ -189,8 +189,9 @@ function matches(ruleId, resultId) { return resultId === ruleId || String(result
 function ruleStatus(ruleId, ruleResults) {
   const res = ruleResults.filter(r => r && matches(ruleId, r.id));
   if (!res.length) return 'Not Performed';
-  if (res.some(r => r.status !== 'pass' && r.status !== 'uncertain')) return 'Raised Issue';
+  if (res.some(r => r.status === 'fail')) return 'Raised Issue';
   if (res.some(r => r.status === 'uncertain')) return 'Uncertain';
+  if (res.some(r => r.status !== 'pass')) return 'Not Performed';   // Patch 53: unsupported status = outcome unknown, not concluded
   return 'Pass';
 }
 

@@ -151,7 +151,7 @@ async function review(opts = {}) {
     assert.ok(later.length > 0);
     for (const c of later) assert.ok(!c.ruleIds.includes(raisedId), `${raisedId} asked again in chunk ${c.chunk}`);
     const byId = new Map(out.res.map(r => [r.id, r]));
-    assert.strictEqual(byId.get(raisedId).status, 'P1');
+    assert.strictEqual(byId.get(raisedId).status, 'fail');   // Patch 53: a P-code status is read as fail
     const others = out.res.filter(r => r.id !== raisedId && !/-ERROR$/.test(r.id));
     assert.ok(others.length > 20);
     assert.ok(others.every(r => r.status === 'pass'), 'pass beats uncertain across chunks');
@@ -179,7 +179,7 @@ async function review(opts = {}) {
       const r = await review();
       assert.ok(calls.some(c => c.chunk === 2 && c.ruleIds[0] && c.ruleIds[0].includes('-S1-')), 'the failing call happened');
       const s1 = r.res.filter(x => x.id.includes('-S1-') && !/-ERROR$/.test(x.id));
-      assert.ok(s1.length > 0 && s1.every(x => x.status === 'pass' || x.status === 'P1'), 'structure rules still answered');
+      assert.ok(s1.length > 0 && s1.every(x => x.status === 'pass' || x.status === 'fail'), 'structure rules still answered');
       assert.ok(!r.res._batchFailures || r.res._batchFailures.every(f => !f.ruleIds.some(id => id.includes('-S1-'))), 'no failure recorded for rules another chunk answered');
     } finally { scenario = {}; }
   });

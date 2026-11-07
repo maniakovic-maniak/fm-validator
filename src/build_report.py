@@ -14,7 +14,7 @@ from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.formatting.rule import CellIsRule, FormulaRule, DataBarRule
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from completion import compute_completion  # ONE_COMPLETION: shared with server.js via src/utils/rule-scope.js
+from completion import compute_completion, rule_status as _rule_status  # ONE_COMPLETION: shared with server.js via src/utils/rule-scope.js
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 DARK_BLUE   = '1F4E79'; MID_BLUE   = '2E75B6'; LIGHT_BLUE  = 'D6E4F0'; PALE_BLUE = 'EBF3FA'
@@ -263,17 +263,15 @@ def build_report(data_path, output_path):
         if r.get('severity')=='fatal' or 'fatal gate' in str(r.get('source_section','')).lower()}
     # Patch 11: a rule may now carry several results (one per distinct problem). It is complete only when it has
     # at least one result and every one of them is a pass; the last result must not overwrite an earlier issue.
-    _rule_statuses_by_id = {}
-    for r in ruleResults:
-        _rule_statuses_by_id.setdefault(r.get('id'), []).append(r.get('status'))
-    _incomplete_mandatory = [rid for rid in _mandatory_critical_ids
-        if not _rule_statuses_by_id.get(rid) or any(st != 'pass' for st in _rule_statuses_by_id[rid])]
+    # Patch 53: matched with the same rule as the completion figure and the Validation Matrix (a result id with a
+    # supported -suffix counts for its rule), so the three can no longer disagree about the same procedure.
+    _mand_status = {rid: _rule_status(rid, ruleResults) for rid in _mandatory_critical_ids}
+    _incomplete_mandatory = [rid for rid, st in _mand_status.items() if st != 'Pass']
     mandatory_procedure_gap = len(_incomplete_mandatory) > 0
     # Patch 16: say which kind of gap it is. A mandatory procedure that ran and raised an issue is finished work with a
     # finding that blocks reliance; one that was uncertain or never ran is work still to do. Both block, but they are
     # different actions for the reader, and calling the first "incomplete" overstated how much of the audit was missing.
-    _mand_with_issue = [rid for rid in _incomplete_mandatory
-        if any(st not in ('pass', 'uncertain', None) for st in _rule_statuses_by_id.get(rid, []))]
+    _mand_with_issue = [rid for rid in _incomplete_mandatory if _mand_status[rid] == 'Raised Issue']
     _mand_not_concluded = [rid for rid in _incomplete_mandatory if rid not in set(_mand_with_issue)]
     def _mandatory_phrase():
         parts = []
@@ -314,8 +312,8 @@ def build_report(data_path, output_path):
     # the record could not be built, which is itself a gap.
     _rr = d.get('runRecord')
     _gaps_all = list((_rr or {}).get('gaps') or [])
-    if 'runRecord' in d and _rr is None:
-        _gaps_all = [{'key': 'run_record', 'text': 'the automated assessment record could not be built for this run'}]
+    if _rr is None:   # Patch 53: an omitted record is the same gap as a null one; absence is never complete evidence
+        _gaps_all = [{'key': 'run_record', 'text': 'the automated assessment record could not be built for this run' if 'runRecord' in d else 'no automated assessment record was supplied for this run'}]
     _oreg = d.get('outputRegistry') or {}
     registry_approved = (_oreg.get('status') == 'approved') and (_oreg.get('usable', True) is not False)
     registry_gap = not registry_approved
@@ -2036,11 +2034,13 @@ def build_report(data_path, output_path):
         rres=[r for r in ruleResults if _rmatch(rid,r.get('id',''))]
         rfnd=[f for f in findings if _rmatch(rid,f.get('id',''))]
         performed='Yes' if rres else 'No'
-        issues=[r for r in rres if r.get('status') not in ('pass','uncertain')]
+        issues=[r for r in rres if r.get('status')=='fail']
         unc=[r for r in rres if r.get('status')=='uncertain']
+        unknown=[r for r in rres if r.get('status') not in ('pass','fail','uncertain')]   # Patch 53: outcome unknown
         if not rres: status='Not Performed'; n_np+=1
         elif issues: status='Raised Issue'; n_issue+=1
         elif unc: status='Uncertain'; n_unc+=1
+        elif unknown: status='Not Performed'; n_np+=1
         else: status='Pass'; n_pass+=1
         confs=[r.get('confidence') for r in rres if isinstance(r.get('confidence'),(int,float)) and r.get('confidence')]
         conf_num = (max(confs)/100.0) if (confs and tier=='Tier 2') else None
@@ -2454,7 +2454,7 @@ def build_report(data_path, output_path):
     # TAB — PATH CHECKS (Patch 31): every tested criterion on the paths that feed outputs, with its verdict
     # ════════════════════════════════════════════════════════════════════════
     pcIn = d.get('pathChecks') or {}
-    if pcIn.get('rows') or any(sm.get('failed') for sm in (pcIn.get('summary') or [])):
+    if pcIn.get('rows') or any(sm.get('failed') or sm.get('notCompleted') for sm in (pcIn.get('summary') or [])):
         wpc=wb.create_sheet('Path Checks'); wpc.sheet_view.showGridLines=False
         for i,w in enumerate([3,22,30,18,100],1): set_col(wpc,i,w)
         merge(wpc,'B1:E1','PATH CHECKS',bold=True,sz=14,col=WHITE,bg=DARK_BLUE,v='center')
