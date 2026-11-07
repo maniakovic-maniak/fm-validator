@@ -101,6 +101,53 @@ def merge_bold_prefix(ws, rng, bold_prefix, rest, sz=10, col='000000', bg=None, 
     return c
 
 
+# ── Patch 52: front-end helpers (presentation only; no finding, priority or verdict changes) ──
+_SINGLE_CELL_RE = re.compile(r'^\$?[A-Za-z]{1,3}\$?[0-9]{1,7}$')
+_RANGE_RE = re.compile(r'^\$?[A-Za-z]{1,3}\$?[0-9]{1,7}:\$?[A-Za-z]{1,3}\$?[0-9]{1,7}$')
+
+def source_link_target(sheet, cell, source_file):
+    """Return (formula, label) for the Issue Log 'View' link.
+
+    A single cell or a plain range links to that exact location. Anything else
+    (blank, the default A1, a list, 'Multiple', prose) links to the sheet only and
+    is labelled 'View sheet' so a sheet-level jump is never mistaken for a precise
+    citation. Returns (None, None) when there is no usable sheet."""
+    sh = str(sheet or '').strip()
+    if not sh or sh in ('—','N/A','Multiple','Workbook'):
+        return None, None
+    ref = str(cell or '').strip().replace('$', '').upper()
+    precise = bool(ref) and ref != 'A1' and (_SINGLE_CELL_RE.match(ref) or _RANGE_RE.match(ref))
+    target = ref if precise else 'A1'
+    label = 'View' if precise else 'View sheet'
+    simple = re.fullmatch(r'[A-Za-z0-9_]+', sh) is not None
+    if simple:
+        loc = f'[{source_file}]{sh}!{target}'
+    else:
+        loc = "'[" + str(source_file) + "]" + sh.replace("'", "''") + "'!" + target
+    loc = loc.replace('"', '""')
+    return f'=HYPERLINK("{loc}","{label}")', label
+
+def complete_headline(title):
+    """Drop a dangling, unclosed parenthetical (for example '... (e.g.') so a headline
+    never ends mid-sentence. Text is only ever shortened back to the last complete clause."""
+    t = str(title or '').strip()
+    if t.count('(') > t.count(')'):
+        cut = t[:t.rfind('(')].rstrip(' ,;:-\u2014\u2013')
+        if cut:
+            t = cut
+    return t
+
+def issue_log_sort_key(f, priority_fn):
+    """Blocking state, then priority/record type, then F-Score (high first), then stable ID."""
+    order = {'P1': 0, 'Critical Query': 1, 'P2': 2, 'P3': 3, 'Query': 4}
+    try:
+        fs = float(f.get('fscore'))
+    except (TypeError, ValueError):
+        fs = 0.0
+    return (0 if f.get('investment_grade_blocker') else 1,
+            order.get(priority_fn(f), 5), -fs, str(f.get('id', '')))
+
+
 def build_report(data_path, output_path):
     with open(data_path,'r') as f: d=json.load(f)
 
@@ -1644,10 +1691,11 @@ def build_report(data_path, output_path):
     _pri_badge={'P1':(P1_FILL,P1_TXT),'P2':(P2_FILL,P2_TXT),'P3':(P3_FILL,P3_TXT)}
     _default_urgency_days={'P1':7,'P2':30,'P3':90}
     from datetime import timedelta
+    findings = sorted(findings, key=lambda _f: issue_log_sort_key(_f, priority))
     for idx,f in enumerate(findings):
         row_i = HEADER_ROW+1+idx
         pri=priority(f)
-        _t=(f.get('title') or f.get('label') or '').strip()
+        _t=complete_headline((f.get('title') or f.get('label') or '').strip())
         f['title']=_t; f['label']=_t
         raw_sev=(f.get('severity') or f.get('priority') or 'Medium').lower()
         sheet=f.get('sheet',''); cell_ref=f.get('cell','A1') or 'A1'
@@ -1712,8 +1760,9 @@ def build_report(data_path, output_path):
         # but the label itself is now always exactly "View", never raw
         # formula/implementation text, never a variable fallback label.
         vc=ws4.cell(row_i,VIEW_COL)
-        if sheet and sheet not in ('—','N/A','Multiple','Workbook'):
-            vc.value=f'=HYPERLINK("[{sourceFile}]{sheet}!A1","View")'
+        _lnk, _lbl = source_link_target(sheet, f.get('cell'), sourceFile)
+        if _lnk:
+            vc.value=_lnk
             vc.font=Font(size=9,color=MID_BLUE,underline='single',name='Arial')
         else:
             vc.value='—'; vc.font=Fn(sz=9,col=GREY_MID)
@@ -1857,8 +1906,11 @@ def build_report(data_path, output_path):
         # freezing at whatever was true when the report was generated.
         tgt_ref = f'{get_column_letter(rem_idx["Target Date"])}{row_i}'
         as_ref  = f'{get_column_letter(rem_idx["Action Status"])}{row_i}'
-        timing_formula = (f'=IF({as_ref}="Closed","-",'
-                           f'IF({tgt_ref}<TODAY(),"Overdue",IF({tgt_ref}<TODAY()+7,"Due Soon","On Track")))')
+        own_ref = f'{get_column_letter(rem_idx["Owner"])}{row_i}'
+        # Patch 52: a calendar position is only 'On Track' when someone owns the action.
+        timing_formula = (f'=IF({as_ref}="Closed","-",IF({tgt_ref}="","Unscheduled",'
+                           f'IF({tgt_ref}<TODAY(),"Overdue",IF({tgt_ref}<TODAY()+7,"Due Soon",'
+                           f'IF(TRIM({own_ref}&"")="","Unassigned","On Track")))))')
         tim_c = ws5.cell(row_i, rem_idx['Timing']); tim_c.value = timing_formula
         tim_c.font=Fn(bold=True,sz=9,col=CHARCOAL); tim_c.fill=F(row_bg)
         tim_c.alignment=A(h='center',v='center'); tim_c.border=B(col=PANEL_BORDER)
@@ -1899,6 +1951,10 @@ def build_report(data_path, output_path):
         ws5.conditional_formatting.add(_tim_rng,
             CellIsRule(operator='equal', formula=['"Due Soon"'],
                        fill=PatternFill(start_color=P2_FILL,end_color=P2_FILL,fill_type='solid'), font=Font(color=P2_TXT)))
+        for _lab in ('Unassigned','Unscheduled'):
+            ws5.conditional_formatting.add(_tim_rng,
+                CellIsRule(operator='equal', formula=[f'"{_lab}"'],
+                           fill=PatternFill(start_color=GREY_LIGHT,end_color=GREY_LIGHT,fill_type='solid'), font=Font(color=CHARCOAL)))
         ws5.conditional_formatting.add(_tim_rng,
             CellIsRule(operator='equal', formula=['"On Track"'],
                        fill=PatternFill(start_color=OK_FILL,end_color=OK_FILL,fill_type='solid'), font=Font(color=OK_TXT)))
@@ -3240,6 +3296,19 @@ def build_report(data_path, output_path):
     ws1.page_setup.fitToHeight = 0
     ws1.sheet_properties.pageSetUpPr.fitToPage = True
     ws1.print_area = f'B1:I{_audit_output_last_row}'
+
+    # Patch 52: print set-up for the two working tables (landscape, one page wide, header row repeated)
+    from openpyxl.comments import Comment
+    for _ws, _hdr, _lastc, _lastr in ((ws4, HEADER_ROW, n_visible, _il_last_data_row), (ws5, REM_HEADER_ROW, n_rem_visible, _rem_last_row)):
+        _ws.page_setup.orientation = 'landscape'
+        _ws.page_setup.fitToWidth = 1
+        _ws.page_setup.fitToHeight = 0
+        _ws.sheet_properties.pageSetUpPr.fitToPage = True
+        _ws.print_title_rows = f'{_hdr}:{_hdr}'
+        _ws.print_area = f'B1:{get_column_letter(_lastc)}{max(_lastr, _hdr)}'
+    _td_note = 'Suggested by the report generator from priority. This is not an agreed commitment; set an owner and an agreed date to track delivery.'
+    ws4.cell(HEADER_ROW, col_idx['Target Date']).comment = Comment(_td_note, 'PlsFx')
+    ws5.cell(REM_HEADER_ROW, rem_idx['Target Date']).comment = Comment(_td_note, 'PlsFx')
 
     wb.save(output_path)
     return {'status':'ok','tabs':16,'findings':len(findings)}
