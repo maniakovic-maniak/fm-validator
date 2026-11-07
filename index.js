@@ -1445,6 +1445,25 @@ async function run() {
     });
   }
 
+  if (sumRangeScan.applicable && (sumRangeScan.allowanceRows || []).length > 0) {
+    const _ar = sumRangeScan.allowanceRows;
+    const _arSample = _ar.slice(0, 6).map(r => `${r.sheet} row ${r.row} "${r.label}" (${r.sample})`).join('; ');
+    allFlagged.push({
+      id: 'T0-SUMRANGE-003',
+      label: `${_ar.length} allowance, depreciation or amortisation row(s) use an expanding SUM range`,
+      severity: 'medium', status: 'fail',
+      sheet: _ar[0].sheet, cell: 'A' + _ar[0].row, category: 'Tax',
+      condition: `${_arSample}${_ar.length > 6 ? ' and others' : ''}. Each starts at a fixed column and ends at the current period, so the base grows every period. That is right if the allowance is meant to be worked out on cumulative cost, and wrong if it is meant to be a one-period or written-down balance: later periods would then be overstated even when annual additions are flat.`,
+      reason: `${_ar.length} allowance-type row(s) sum every earlier period; confirm the base should be cumulative`,
+      corrective_action: 'Confirm with the model owner that each listed row is meant to apply its rate to cumulative cost. If it should apply to a written-down balance or one period, correct the range.',
+      workstream: 'Tax', issue_type: 'Expanding SUM range on an allowance',
+      model_risk: 'An allowance or depreciation charge worked out on an ever-growing base overstates later periods and so understates tax payable and profit after tax, while every formula still looks consistent.',
+      key_output_impact: 'Unknown', method: 'automated', needs_retest: true,
+      root_cause: 'Expanding SUM range on an allowance line', escalation_flag: false,
+      urgency: 'Before next reliance', confidence: 60, record_type: 'Query'
+    });
+  }
+
   // ── Placeholder note standing in for a missing calculation ──
   const placeholderTextCheck = (() => { try { return checkPlaceholderText(parsed._raw); }
     catch (e) { console.error('   ⚠️  Placeholder-text check failed:', e.message); return { applicable:false, flaggedCount:0, findings:[] }; } })();

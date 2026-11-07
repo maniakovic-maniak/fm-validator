@@ -661,3 +661,7 @@ VPS: `cd /home/deploy/fm-validator && git pull --ff-only && pm2 restart all`
 Reviewer answers that open with "Not applicable" (Fm-00060: T2-S10-376, -480, -508, -702) were counted as Critical Queries.
 `src/utils/absence-policy.js` now treats them as Not Applicable (non-fatal rules only), so they leave the P1-P3/Critical Query counts,
 the Top 5 Blockers and Remediation, and appear in the Applicability Record. Revert point: absence-policy.js. Test: `node test-patch55a.js`.
+
+## Patch 56 - T1-013 headline and allowance-row expanding ranges (from Partner Review Fm-00060)
+1. A failed Tier 1 check whose rule title starts "No ..." was headed by that title (T1-013 read "No hidden rows or columns" above 397 hidden rows). The Issue Log now heads it with the first sentence of what the check found (build_report.py). Titles that already state the problem, and checks with no detail, are unchanged.
+2. src/utils/sum-range-scan.js reads the row label and lists expanding SUM rows labelled allowance/depreciation/amortisation. server.js and index.js raise them as one Query, T0-SUMRANGE-003 (the generic T0-SUMRANGE-001 Observation stays). No Tier 2 cost. Revert points: those three files. Test: `node test-patch56.js`.

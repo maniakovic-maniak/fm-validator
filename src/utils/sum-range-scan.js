@@ -47,6 +47,17 @@ function rangeText(s, colN) {
   return `${s.abs1 ? '$' : ''}${colName(s.c1)}${s.r1}:${s.abs2 ? '$' : ''}${colName(s.c2)}${s.r2}`;
 }
 
+// Patch 56: the first text label in columns A-L of the row (a person reads the row by it). Used only to tell a reader that
+// an expanding range sits on a line named as an allowance; the range shape itself is still read from the formulas alone.
+const ALLOWANCE_RE = /allowance|depreciation|amorti[sz]ation/i;
+function rowLabel(row) {
+  for (let c = 1; c <= 12; c++) {
+    const v = row.getCell(c).value;
+    if (typeof v === 'string' && v.trim() && !v.startsWith('=')) return v.trim().slice(0, 80);
+  }
+  return '';
+}
+
 function scanSumRanges(workbook) {
   const rows = new Map();   // "sheet|row" -> { sheet, row, cells: [{col, shape}] }
   let cellsSeen = 0;
@@ -65,7 +76,7 @@ function scanSumRanges(workbook) {
         cellsSeen++;
         const key = ws.name + '|' + rowNum;
         let g = rows.get(key);
-        if (!g) { g = { sheet: ws.name, row: rowNum, cells: [] }; rows.set(key, g); }
+        if (!g) { g = { sheet: ws.name, row: rowNum, cells: [], label: rowLabel(row) }; rows.set(key, g); }
         g.cells.push({ col: colN, shape });
       });
     });
@@ -73,6 +84,7 @@ function scanSumRanges(workbook) {
 
   const kinds = { fixed: 0, running: 0, rolling: 0, other: 0, irregular: 0, tooShort: 0 };
   const runningRows = [];
+  const allowanceRows = [];
   const findings = [];
   let rowsScanned = 0;
 
@@ -89,6 +101,9 @@ function scanSumRanges(workbook) {
     kinds[first.shape.kind]++;
     if (first.shape.kind === 'running' && runningRows.length < 30) {
       runningRows.push({ sheet: g.sheet, row: g.row, sample: `${colName(first.col)}${g.row} =SUM(${rangeText(first.shape, first.col)})`, cells: g.cells.length });
+    }
+    if (first.shape.kind === 'running' && ALLOWANCE_RE.test(g.label) && allowanceRows.length < 30) {
+      allowanceRows.push({ sheet: g.sheet, row: g.row, label: g.label, sample: `${colName(first.col)}${g.row} =SUM(${rangeText(first.shape, first.col)})` });
     }
     // Mid-row deviants only: the first cells are where a series starts and often differ on purpose.
     // A period total in the same row (a horizontal sum among vertical ones, or the reverse) differs on purpose.
@@ -111,10 +126,11 @@ function scanSumRanges(workbook) {
     rowsScanned,
     kinds,
     runningRows,
+    allowanceRows,
     flaggedCount: findings.length,
     findings,
     note: 'Simple SUM and SUMIFS ranges only. A range that is wrong in every period of a row looks consistent and is not found here.'
   };
 }
 
-module.exports = { scanSumRanges, shapeOf, RANGE_RE };
+module.exports = { scanSumRanges, ALLOWANCE_RE, shapeOf, RANGE_RE };

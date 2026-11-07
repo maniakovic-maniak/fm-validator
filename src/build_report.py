@@ -366,6 +366,12 @@ def build_report(data_path, output_path):
     # viewers such as Google Sheets or Excel Online).
     for _f in findings:
         _t=(_f.get('title') or _f.get('label') or '').strip()
+        # Patch 56: a failed Tier 1 check is titled by its rule ("No hidden rows or columns ..."), which reads as the opposite of the
+        # finding. Use the first sentence of what the check found instead (Fm-00060, T1-013).
+        if re.match(r'^T1-\d+$',str(_f.get('id') or '')) and _t[:3]=='No ':
+            _tw=str(_f.get('condition') or _f.get('reason') or '').replace('\n',' ').strip()
+            if _tw:
+                _t=re.split(r'(?<=[.;])\s',_tw)[0][:240]
         if not _t or _t==_f.get('id'):
             _w=str(_f.get('condition') or _f.get('what_wrong') or _f.get('reason') or _f.get('detail') or '').replace('\n',' ').strip()
             if _w:
