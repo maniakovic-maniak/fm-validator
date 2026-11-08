@@ -40,6 +40,20 @@ function cellsOf(f) {
   return out;
 }
 
+// Patch 58: a finding that says in its own words it repeats another ("As reported under T2-S3-005", "Same as T2-S3-005")
+// is linked to that finding even when the cells are not quoted. Nothing is merged or dropped.
+const EXPLICIT_RE = /\b(?:as reported under|reported under|same (?:issue )?as|duplicate of|restates?|already (?:reported|raised) (?:under|as|in))\s+(T[012]-[A-Z0-9]+(?:-[A-Z0-9]+)*)/gi;
+function explicitPairs(findings) {
+  const byId = new Map(); findings.forEach((f, i) => { if (f.id && !byId.has(f.id)) byId.set(f.id, i); });
+  const pairs = [];
+  findings.forEach((f, i) => {
+    const text = [f.condition, f.reason, f.what_wrong, f.detail].filter(Boolean).join(' ');
+    EXPLICIT_RE.lastIndex = 0; let m;
+    while ((m = EXPLICIT_RE.exec(text)) !== null) { const j = byId.get(m[1].toUpperCase()); if (j !== undefined && j !== i) pairs.push([i, j]); }
+  });
+  return pairs;
+}
+
 function linkRelatedFindings(findings) {
   const sets = findings.map(cellsOf);
   const index = new Map();              // cell -> [finding index]
@@ -70,6 +84,14 @@ function linkRelatedFindings(findings) {
     if (!strong.has(j)) strong.set(j, new Set());
     strong.get(i).add(j); strong.get(j).add(i);
   }
+  const cellLinked = new Map();        // index -> Set of indexes linked through shared cells (before the explicit pass)
+  for (const [i, set] of strong) cellLinked.set(i, new Set(set));
+  for (const [i, j] of explicitPairs(findings)) {
+    parent[find(i)] = find(j);
+    if (!strong.has(i)) strong.set(i, new Set());
+    if (!strong.has(j)) strong.set(j, new Set());
+    strong.get(i).add(j); strong.get(j).add(i);
+  }
   const groups = new Map();
   for (const i of strong.keys()) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); }
 
@@ -86,8 +108,12 @@ function linkRelatedFindings(findings) {
       const shown = direct.slice(0, MAX_LISTED).join(', ') + (direct.length > MAX_LISTED ? ` and ${direct.length - MAX_LISTED} more` : '');
       // Patch 55: sharing a cell does not mean sharing a fix. Two checks on one cell can need different repairs (a reference
       // repair and a tax-assumption correction), so the note says only that the cells overlap; each finding keeps its own fix and retest.
-      const note = ` (Same cell(s) are also reported by ${shown}. These are separate findings: each keeps its own fix and retest.)`;
-      if (!String(findings[i].condition || '').includes('Same cell(s) are also reported by')) findings[i].condition = (findings[i].condition || '') + note;
+      const viaCells = direct.some(id => { const j = findings.findIndex(x => x.id === id); return j >= 0 && (cellLinked.get(i) || new Set()).has(j); });
+      const note = viaCells
+        ? ` (Same cell(s) are also reported by ${shown}. These are separate findings: each keeps its own fix and retest.)`
+        : ` (This finding repeats or restates ${shown}. They are listed once as one issue; the repeat adds no new evidence.)`;
+      const cur = String(findings[i].condition || '');
+      if (!cur.includes('Same cell(s) are also reported by') && !cur.includes('repeats or restates')) findings[i].condition = cur + note;
     }
     linked.push({ groupId: groupId || 'RC-large', ids });
   }

@@ -43,6 +43,7 @@ const { checkCrossCasting } = require('./src/utils/cross-cast-check');
 const { checkColumnPatternConsistency } = require('./src/utils/column-pattern-consistency-check');
 const { assignRecordTypes, mergeDuplicateCriticalQueries } = require('./src/utils/record-type-classifier');
 const { linkRelatedFindings } = require('./src/utils/related-findings');
+const { applyRemedyNotes } = require('./src/utils/remedy-notes');
 const { annotateMasterFindings } = require('./src/utils/master-findings');
 const { runShadow: runEffectivePriorityShadow, logLine: effectivePriorityLogLine } = require('./src/utils/effective-priority');
 const { applyFindingClasses, groupSameRemediation } = require('./src/utils/finding-class');
@@ -2884,6 +2885,9 @@ async function run() {
   let remedyChecks = { checked: 0, verified: 0, withheld: 0, unverified: 0, details: [] };
   try { remedyChecks = applyRemedyChecks(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (remedyChecks.withheld) console.log(`   \u2139\ufe0f  Remedy check: ${remedyChecks.withheld} of ${remedyChecks.checked} suggested fix(es) withheld (${remedyChecks.verified} verified, ${remedyChecks.unverified} not checkable)`); }
   catch (e) { console.error('   \u26a0\ufe0f  Remedy check failed (remedies left as written):', e.message); }
+    // Patch 58: one qualifying sentence on three fixes the Fm-00063 partner review found incomplete (no change to severity).
+    try { const _rn = applyRemedyNotes(allFlagged); if (_rn.length) console.log(`   \u2139\ufe0f  Remedy notes added to: ${_rn.join(', ')}`); }
+    catch (e) { console.error('   \u26a0\ufe0f  Remedy notes failed (remedies left as written):', e.message); }
   assignRecordTypes(allFlagged);
   // Patch 37: a Query the audited file already answers ("confirm these cells are references to that cell") is closed with its evidence.
   try { const _qr = resolveAnswerableQueries(allFlagged, { workbook: parsed._raw, cellScoreIndex: tier0.cellScoreIndex }); if (_qr.examined) console.log(`   \u2139\ufe0f  Query resolver: ${_qr.answered.length} answered by the file (${_qr.answered.join(', ') || 'none'}), ${_qr.partial.length} part answered, ${_qr.typed.length} found a typed value, ${_qr.open.length} left open`); }
