@@ -5,13 +5,17 @@
 // matrix or the completion figure: the log line is for deciding whether a rule "low-confidence Pass becomes Uncertain" is
 // worth switching on, once enough real runs have been looked at.
 const BANDS = [0.6, 0.65, 0.7];
+// Patch 59: inside a run Tier 2 confidence is a percent (30-95); only the Validation Matrix shows it as 0-1. Patch 57 compared
+// 65 with 0.65 and so never counted anything. Values above 1 are read as percent.
+const toUnit = c => (c > 1 ? c / 100 : c);
 const HIGH_SEV = new Set(['fatal', 'critical', 'high']);
 
 /** @param {Array<{id:string,status:string,confidence:number|null}>} ruleResults  @param {Map<string,string>|Object} severityById */
 function lowConfidencePasses(ruleResults, severityById) {
   const sevOf = id => (severityById instanceof Map ? severityById.get(id) : (severityById || {})[id]);
   const passes = (ruleResults || []).filter(r => r && r.status === 'pass' && String(r.id || '').startsWith('T2-')
-    && HIGH_SEV.has(String(sevOf(r.id) || '').toLowerCase()) && typeof r.confidence === 'number');
+    && HIGH_SEV.has(String(sevOf(r.id) || '').toLowerCase()) && typeof r.confidence === 'number' && r.confidence > 0)
+    .map(r => Object.assign({}, r, { confidence: toUnit(r.confidence) }));
   const byBand = {};
   for (const b of BANDS) byBand[b] = passes.filter(r => r.confidence <= b).map(r => r.id);
   return { totalHighSeverityPasses: passes.length, byBand, ids: byBand[BANDS[0]] };
