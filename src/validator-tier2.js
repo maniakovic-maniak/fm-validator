@@ -697,7 +697,7 @@ const DEEP_ACCOUNTING_CATEGORIES = {
   // schedule terms, so a genuine dedicated schedule (when one exists)
   // still wins the match — matching the established ordering
   // discipline documented above for exactly this reason.
-  'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T', 'Financial Statements', 'P&L', 'Profit and Loss'],
+  'Depreciation & Tax': ['Depreciation and Tax', 'Depreciation & Tax', 'Tax Schedule', 'D&T', 'Financial Statements', 'P&L', 'Profit and Loss', 'Profit & Loss', 'CAPEX Summary'], // Patch 60: 'PROFIT & LOSS' did not match 'Profit and Loss' (The Bend, Fm-00066: Batch 2 ran with no depreciation/tax data)
   'Leases':             ['Lease Schedule', 'Leases', 'Lease', 'Financial Statements', 'P&L', 'Profit and Loss'],
 };
 

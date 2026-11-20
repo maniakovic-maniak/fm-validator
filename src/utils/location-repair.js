@@ -25,6 +25,16 @@ function sheetsMentioned(text, sheetNames) {
   return arr.filter(n => !arr.some(m => m !== n && m.includes(n)));
 }
 
+// The one cell the text names on the given sheet, or null. Accepts "Sheet!V5", "'Sheet'!V5" and "Sheet V5"; a range counts
+// as its first cell. Two different cells on the sheet is ambiguous, so it returns null.
+function cellOnSheet(text, sheet) {
+  const sh = escapeRe(sheet);
+  const re = new RegExp("(?:^|[^A-Za-z0-9_])'?" + sh + "'?(?:\\s*!\\s*|\\s+)\\$?([A-Z]{1,3})\\$?(\\d{1,7})(?![A-Za-z0-9_(])", 'g');
+  const cells = new Set(); let m;
+  while ((m = re.exec(text))) cells.add(m[1] + m[2]);
+  return cells.size === 1 ? [...cells][0] : null;
+}
+
 function repairLocations(rows, sheetNames) {
   const names = (sheetNames || []).filter(Boolean);
   const byLower = new Map(names.map(n => [n.toLowerCase(), n]));
@@ -32,7 +42,17 @@ function repairLocations(rows, sheetNames) {
   for (const r of rows) {
     const cur = String(r.sheet == null ? '' : r.sheet).trim();
     const real = byLower.get(cur.toLowerCase());
-    if (real) { r.sheet = real; out.unchanged++; continue; }
+    if (real) {
+      r.sheet = real;
+      // Patch 60: a real sheet with the cell left at "A1" (Fm-00066: 76 of 228). Read the cell from the text only when the
+      // text names exactly one cell ON THIS SHEET ("DASHBOARD V5" or "DASHBOARD!V5"); two cells or none leaves it as returned.
+      const cur2 = String(r.cell == null ? '' : r.cell).trim().toUpperCase();
+      if (cur2 === '' || cur2 === 'A1') {
+        const cell = cellOnSheet([r.condition, r.reason, r.what_wrong, r.detail].filter(Boolean).join(' '), real);
+        if (cell && cell !== 'A1') { r.cell = cell; r.location_basis = 'cell_from_text'; out.fromRef++; continue; }
+      }
+      out.unchanged++; continue;
+    }
     const text = [r.condition, r.reason, r.what_wrong, r.detail].filter(Boolean).join(' ');
     // (1) an explicit Sheet!Cell reference
     // a reference counts only when the text points at ONE sheet; a finding quoting several sheets ("X!AQ76 ... the same
@@ -56,4 +76,4 @@ function repairLocations(rows, sheetNames) {
   return out;
 }
 
-module.exports = { repairLocations, sheetsMentioned, WORKBOOK, CELL_RE };
+module.exports = { cellOnSheet, repairLocations, sheetsMentioned, WORKBOOK, CELL_RE };

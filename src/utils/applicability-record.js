@@ -40,7 +40,12 @@ function buildApplicabilityRecord(findings, facts = {}) {
   const rows = [];
   for (const f of findings || []) {
     if (!f || f.record_type !== 'Not Applicable' || !f._applicability) continue;
-    rows.push({ id: f.id, subject: f._applicability.subject, decision: 'Not applicable to this model', basis: f._applicability.basis, reason: f._applicability.reason });
+    // Patch 60: the reason repeated the subject sentence word for word (Fm-00066), so every row read the same twice
+    const subject = f._applicability.subject;
+    let reason = f._applicability.reason;
+    const norm = x => String(x).replace(/\s+/g, ' ').trim();
+    if (norm(reason).toLowerCase().startsWith(norm(subject).toLowerCase().slice(0, 120))) reason = norm(reason).slice(norm(subject).length).trim();
+    rows.push({ id: f.id, subject, decision: 'Not applicable to this model', basis: f._applicability.basis, reason });
   }
   const store = (facts.sheetNames || []).filter(n => MACRO_STORE_SHEET.test(n));
   if (store.length && facts.hasVba) {

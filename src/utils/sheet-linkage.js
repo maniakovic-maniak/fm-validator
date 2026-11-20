@@ -38,7 +38,8 @@ const FIN_STATEMENT_KEYWORDS = [
 const EXCLUDE_KEYWORDS = [
   'cover', 'read me', 'readme', 'toc', 'table of contents', 'instruction',
   'check', 'audit', 'control', 'version', 'change log', 'changelog',
-  'glossary', 'note', 'legend', 'vba', 'disclaimer'
+  'glossary', 'note', 'legend', 'vba', 'disclaimer',
+  'decision' // Patch 60: a decision log (The Bend 'HUMAN DECISIONS', Fm-00066) records choices; it is not meant to feed the statements
 ];
 
 function isFinStatementSheet(name) {

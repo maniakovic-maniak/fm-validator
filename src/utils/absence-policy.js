@@ -50,13 +50,19 @@ function isConfirmedAbsence(r) {
 // Patch 55a: the reviewer's own answer opens with "Not applicable" (Fm-00060: T2-S10-376/480/508/702). That is an explicit
 // statement, so it needs no absence wording. Its text must open with the phrase; a mention further in does not count.
 const EXPLICIT_NA_RE = /^\s*not applicable\b/i;
+// The reviewer saying it could not see, was not given, or could not verify something: an evidence gap, not applicability.
+const SEEN_GAP_RE = /(scope limitation|evidence gap|not provided|was not (included|supplied|available)|no data (is |was )?available|data (is |was )?not available|not available (in|from|for|to)|not visible|not located|was not found|cannot (be )?(verified|confirmed|checked|assessed)|can ?not currently confirm|requires? (a )?(full|direct|visual|formula)|not (identified|detected) among|in the (sheets|data|rows) reviewed|reviewed (row )?data|extracted row data)/i;
 function isNotApplicableAbsence(r) {
   if (!r || r.status !== 'uncertain') return false;
   const text = textOf(r);
-  if (EXPLICIT_NA_RE.test(text)) return true;
+  // Patch 60: "not applicable" must be about the model, not about what the reviewer could see. A reviewer that writes
+  // "Not applicable - scope limitation, no register was provided" or "no data available ... not applicable" is describing an
+  // evidence gap (Fm-00066: 7 of 11 entries). Those stay Uncertain.
+  if (EXPLICIT_NA_RE.test(text)) return !SEEN_GAP_RE.test(text + ' ' + contextOf(r));
   if (!STRICT_START_RE.test(text) || !isAbsenceFinding(text)) return false;
   if (/^\s*not present in the workbook/i.test(text)) return false;
   if (LIMITATION_RE.test(text)) return false;
+  if (SEEN_GAP_RE.test(contextOf(r))) return false;
   return NOT_APPLICABLE_RE.test(contextOf(r));
 }
 
