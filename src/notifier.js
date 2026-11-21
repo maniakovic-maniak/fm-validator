@@ -201,10 +201,10 @@ async function sendNotification(outcome) {
  * graceful skip if unconfigured, and checking both a thrown exception
  * and the response's own .error field, since Resend can fail either way.
  */
-async function sendOrderConfirmation(order) {
+async function sendOrderConfirmation(order, idempotencyKey) {
   if (!process.env.RESEND_API_KEY) {
     console.log('   (Skipping order confirmation email — RESEND_API_KEY not set.)');
-    return;
+    return { error: 'Email delivery unavailable' };
   }
   const { orderId, fullName, originalName, grandTotal } = order;
   const subject = `Your order ${escHtml(orderId)} has been received`;
@@ -315,16 +315,17 @@ async function sendOrderConfirmation(order) {
       replyTo: 'mikhail@plsfx.ai',
       subject,
       html
-    });
+    }, idempotencyKey ? { idempotencyKey } : undefined);
   } catch (e) {
     console.error(`   ⚠️  Order confirmation email failed to send: ${e.message}`);
-    return;
+    return { error: 'Email delivery unavailable' };
   }
   if (sendResult && sendResult.error) {
     console.error(`   ⚠️  Order confirmation email was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
-    return;
+    return { error: 'Email delivery unavailable' };
   }
   console.log(`Order confirmation sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
+  return { success: true };
 }
 
 /**
@@ -476,17 +477,18 @@ async function sendReportReadyEmail(order) {
  * Admin new-order notification — same pattern as the existing new-run
  * notifications, sent to NOTIFY_EMAIL rather than the customer.
  */
-async function sendAdminOrderNotification(order) {
+async function sendAdminOrderNotification(order, idempotencyKey) {
   if (!process.env.RESEND_API_KEY) {
     console.log('   (Skipping admin order notification — RESEND_API_KEY not set.)');
-    return;
+    return { error: 'Email delivery unavailable' };
   }
   const { orderId, fullName, company, originalName, grandTotal } = order;
   const subject = `New order: ${escHtml(orderId)} — ${escHtml(originalName)}`;
   const totalDisplay = `AU$${grandTotal.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px">
-      <h2 style="color:#1A2B4A">New submission form order</h2>
+      <h2 style="color:#1A2B4A">${order.paymentReviewRequired ? 'PAID ORDER HELD — source needs attention' : 'New submission form order'}</h2>
+      ${order.paymentReviewRequired ? `<p>${escHtml(order.heldReason)}</p>` : ''}
       <p><strong>Order ID:</strong> ${escHtml(orderId)}</p>
       <p><strong>Customer:</strong> ${escHtml(fullName)} (${escHtml(company)})</p>
       <p><strong>File:</strong> ${escHtml(originalName)}</p>
@@ -501,16 +503,17 @@ async function sendAdminOrderNotification(order) {
       to: process.env.NOTIFY_EMAIL,
       subject,
       html
-    });
+    }, idempotencyKey ? { idempotencyKey } : undefined);
   } catch (e) {
     console.error(`   ⚠️  Admin order notification failed to send: ${e.message}`);
-    return;
+    return { error: 'Email delivery unavailable' };
   }
   if (sendResult && sendResult.error) {
     console.error(`   ⚠️  Admin order notification was not accepted by Resend: ${JSON.stringify(sendResult.error)}`);
-    return;
+    return { error: 'Email delivery unavailable' };
   }
   console.log(`Admin order notification sent: ${subject}${sendResult && sendResult.data && sendResult.data.id ? ` (Resend id: ${sendResult.data.id})` : ''}`);
+  return { success: true };
 }
 
 /**
@@ -665,6 +668,16 @@ async function sendDemoRequestEmail(demoRequest) {
  * status must be one of: 'pending_review', 'in_review', 'review_complete'
  */
 const ORDER_STATUS_CONTENT = {
+  payment_failed: {
+    label: 'PAYMENT UNSUCCESSFUL',
+    subject: () => 'Your PLSFX payment was unsuccessful',
+    body: intent => `<p>Hi ${escHtml(intent.fullName)},</p><p>Stripe has confirmed that your payment was unsuccessful. No paid review order was created. Return to <a href="https://plsfx.ai">PLSFX</a> to upload your model and try again, or contact <a href="mailto:support@plsfx.ai">support@plsfx.ai</a>.</p><p>Checkout reference: ${escHtml(intent.id)}</p>`,
+  },
+  payment_review_required: {
+    label: 'PAYMENT RECEIVED — REVIEW REQUIRED',
+    subject: order => `Your payment for ${escHtml(order.orderId)} needs our attention`,
+    body: order => `<p>Hi ${escHtml(order.fullName)},</p><p>Your payment has been received for order ${escHtml(order.orderId)}. We are holding the review because the uploaded source could not be verified. Please contact <a href="mailto:support@plsfx.ai">support@plsfx.ai</a> with this order number. Please do not pay again.</p>`,
+  },
   pending_review: {
     label: 'PENDING REVIEW',
     subject: (order) => `Your order ${escHtml(order.orderId)} is pending review`,
@@ -694,7 +707,7 @@ const ORDER_STATUS_CONTENT = {
   },
 };
 
-async function sendOrderStatusUpdateEmail(order, status) {
+async function sendOrderStatusUpdateEmail(order, status, idempotencyKey) {
   const content = ORDER_STATUS_CONTENT[status];
   if (!content) {
     console.error(`   \u26a0\ufe0f  Cannot send order status email - unrecognized status: ${status}`);
@@ -807,7 +820,7 @@ async function sendOrderStatusUpdateEmail(order, status) {
       replyTo: 'mikhail@plsfx.ai',
       subject,
       html,
-    });
+    }, idempotencyKey ? { idempotencyKey } : undefined);
   } catch (e) {
     console.error(`   \u26a0\ufe0f  Order status email [${status}] failed to send: ${e.message}`);
     return { error: e.message };
@@ -820,4 +833,13 @@ async function sendOrderStatusUpdateEmail(order, status) {
   return { success: true };
 }
 
-module.exports = { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail, sendOrderStatusUpdateEmail };
+function stripeNotifications() {
+  return {
+    failure: (intent, key) => sendOrderStatusUpdateEmail(intent, 'payment_failed', key),
+    confirmation: (order, key) => sendOrderConfirmation(order, key),
+    admin: (order, key) => sendAdminOrderNotification(order, key),
+    pending: (order, key) => sendOrderStatusUpdateEmail(order, 'pending_review', key),
+    paymentIssue: (order, key) => sendOrderStatusUpdateEmail(order, 'payment_review_required', key),
+  };
+}
+module.exports = { stripeNotifications, sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail, sendOrderStatusUpdateEmail };

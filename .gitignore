@@ -39,3 +39,6 @@ ecosystem.config.js
 /demo-requests/
 /promo-codes/
 /promo-usage/
+
+# Private checkout capabilities, source bindings and payment ledger
+/payment-state/

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>PLSFX payment status</title>
+<style>body{margin:0;background:#0d1526;color:#edf2fc;font:17px/1.6 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}main{max-width:610px;padding:40px}h1{line-height:1.2;font-size:32px}a{color:#9edbff}#resume{display:inline-block;padding:12px 20px;background:#86d3f4;color:#101726;border-radius:8px;font-weight:700;text-decoration:none}#resume[hidden]{display:none}.small{font-size:14px;color:#b5c3db}</style></head>
+<body><main><p class="small">PLSFX · SECURE CHECKOUT</p><h1 id="heading">Checking your payment</h1><p id="message">Please wait while we check the server's payment record.</p><p id="order"></p><p><a id="resume" hidden rel="noreferrer">Resume secure checkout</a></p><p><a href="https://plsfx.ai">Return to PLSFX</a></p><p class="small">Need help? Contact <a href="mailto:support@plsfx.ai">support@plsfx.ai</a>. Please do not pay again while your payment is processing.</p></main>
+<script>
+'use strict';
+const params = new URLSearchParams(location.search);
+const id = params.get('checkoutId'), token = params.get('token');
+const heading = document.getElementById('heading'), message = document.getElementById('message'), order = document.getElementById('order'), resume = document.getElementById('resume');
+let count = 0;
+async function check() {
+  resume.hidden = true;
+  try {
+    if (!/^ci_[a-f0-9]{64}$/.test(id || '') || !/^[a-f0-9]{64}$/.test(token || '')) throw Error('Invalid payment status link. Contact support@plsfx.ai.');
+    const result = await fetch('../api/stripe/checkouts/' + id + '?token=' + encodeURIComponent(token), { cache: 'no-store', referrerPolicy: 'no-referrer' });
+    const data = await result.json();
+    if (!result.ok || !data.success) throw Error(data.message || 'Payment status is temporarily unavailable. Contact support@plsfx.ai.');
+    order.textContent = data.orderId ? 'Order reference: ' + data.orderId : '';
+    if (data.status === 'paid') { heading.textContent = 'Payment received'; message.textContent = 'Your order has been recorded. Our team will review your model and email you with progress.'; return; }
+    if (data.status === 'review_required') { heading.textContent = 'Payment received — review needed'; message.textContent = 'We need to check your uploaded file before the review can start. Please contact support@plsfx.ai with your order reference. Please do not pay again.'; return; }
+    if (['expired', 'failed'].includes(data.status)) { heading.textContent = 'Checkout ended'; message.textContent = 'This checkout has ended without a verified successful payment. You can return to PLSFX and upload your model again.'; return; }
+    heading.textContent = data.status === 'processing' ? 'Payment processing' : 'Payment not yet confirmed';
+    message.textContent = data.status === 'processing' ? 'Stripe is processing your payment. We will email you when it is confirmed.' : 'If you left Checkout before finishing, use the secure link below to resume the same checkout.';
+    if (data.status === 'open' && data.resumeUrl) { const u = new URL(data.resumeUrl); if (u.protocol === 'https:' && u.hostname === 'checkout.stripe.com' && !u.port && !u.username && !u.password) { resume.href = u.href; resume.hidden = false; } }
+    if (++count < 20) setTimeout(check, 3000);
+  } catch (e) { heading.textContent = 'Unable to confirm payment'; message.textContent = e.message; }
+}
+check();
+</script></body></html>

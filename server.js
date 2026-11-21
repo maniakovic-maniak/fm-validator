@@ -18,7 +18,7 @@ const { spawnSync: _nurseSpawnSync } = require('child_process');
 const { acquireSlot }                = require('./src/utils/concurrency-limiter');
 const { setProgress, clearProgress, getProgress } = require('./src/utils/run-progress');
 const { verifyUploadIntegrity }      = require('./src/utils/upload-integrity-check');
-const { createPromoCode, listPromoCodes, validatePromoCode, claimUsage } = require('./src/utils/promo-code-store');
+const { createPromoCode, listPromoCodes, validatePromoCode } = require('./src/utils/promo-code-store');
 
 // Core pipeline modules
 const { parseExcel, scanFormulaErrors }                             = require('./src/parser');
@@ -127,12 +127,37 @@ const { checkDuplicateCalculationLogic: _checkDupLogicEarly } = require('./src/u
 const { runTier2, resolveDeepAccountingSheets } = require('./src/validator-tier2');
 const { buildReportFile }                        = require('./src/report-tab');
 const { sendNotification, sendOrderConfirmation, sendReportReadyEmail, sendAdminOrderNotification, sendDemoRequestEmail, sendOrderStatusUpdateEmail } = require('./src/notifier');
-const { createOrder, getOrder, updateOrder }      = require('./src/utils/order-store');
+const { getOrder, updateOrder }      = require('./src/utils/order-store');
 const { createDemoRequest, listDemoRequests }     = require('./src/utils/demo-store');
-const { chargeViaEway }                           = require('./src/utils/eway-payment');
+const { createCheckoutStore } = require('./src/utils/checkout-store');
+const { createStripeService } = require('./src/utils/stripe-payment');
+const { requireInternalApiKey, assertPaidSource } = require('./src/utils/payment-access');
+const { KEY_VERSION } = require('./src/utils/pricing-formula-count');
+const checkoutStore = createCheckoutStore();
 
 const app       = express();
 const PORT      = process.env.PORT || 3000;
+
+// ── Passenger sub-URI normalisation ──────────────────────────────────────────
+// When mounted at wonderlabkids.net/fm-validator, Passenger passes Node apps
+// the FULL path including the '/fm-validator' prefix (unlike its behaviour
+// for some other app types). Strip it here once so every route below works
+// identically whether the app is accessed with or without the prefix
+// (localhost dev = no prefix, production = prefixed).
+const BASE_PATH = process.env.APP_BASE_PATH || '/fm-validator';
+app.use((req, res, next) => {
+  if (req.url === BASE_PATH || req.url.startsWith(BASE_PATH + '/') || req.url.startsWith(BASE_PATH + '?')) {
+    req.url = req.url.slice(BASE_PATH.length) || '/';
+    if (req.url.startsWith('?')) req.url = '/' + req.url;
+  }
+  next();
+});
+
+
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
+  try { res.json(await getStripeService().handleWebhook(req.body, req.headers['stripe-signature'])); }
+  catch (err) { paymentError(res, err); }
+});
 
 // Ensure required directories exist on startup
 ['uploads', 'processed'].forEach(dir => {
@@ -184,7 +209,7 @@ app.use('/api/validate', limiter);
 // reachable with no login at all once the public form goes live.
 app.use('/api/verify-upload', limiter);
 app.use('/api/unique-formulas', limiter);
-app.use('/api/submit-order', limiter);
+app.use('/api/stripe/checkout', limiter);
 
 // Tighter, additional limit specifically on FAILED payment attempts —
 // this endpoint moves real money, and card-testing/fraud has a
@@ -199,7 +224,7 @@ const paymentAttemptLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
-app.use('/api/submit-order', paymentAttemptLimiter);
+app.use('/api/stripe/checkout', paymentAttemptLimiter);
 
 // ── API key auth middleware ────────────────────────────────────────────────
 function requireApiKey(req, res, next) {
@@ -230,22 +255,7 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
-
-// ── Passenger sub-URI normalisation ──────────────────────────────────────────
-// When mounted at wonderlabkids.net/fm-validator, Passenger passes Node apps
-// the FULL path including the '/fm-validator' prefix (unlike its behaviour
-// for some other app types). Strip it here once so every route below works
-// identically whether the app is accessed with or without the prefix
-// (localhost dev = no prefix, production = prefixed).
-const BASE_PATH = process.env.APP_BASE_PATH || '/fm-validator';
-app.use((req, res, next) => {
-  if (req.url === BASE_PATH || req.url.startsWith(BASE_PATH + '/') || req.url.startsWith(BASE_PATH + '?')) {
-    req.url = req.url.slice(BASE_PATH.length) || '/';
-    if (req.url.startsWith('?')) req.url = '/' + req.url;
-  }
-  next();
-});
+app.use(express.json({ limit: '32kb' }));
 
 app.use(express.static('public'));
 
@@ -259,7 +269,7 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const timestamp = Date.now();
     const { name, ext } = sanitizeFilename(file.originalname);
-    cb(null, `${name}-${timestamp}${ext}`);
+    cb(null, `${name}-${timestamp}-${require('crypto').randomUUID()}${ext}`);
   }
 });
 
@@ -288,7 +298,7 @@ app.get('/api/health',    (req, res) => res.json({ status: 'ok', timestamp: new 
 // route logic below. Values are illustrative placeholders.
 const FSCORE_BAND_PRICE = { Low: 3, Moderate: 4, High: 6, Critical: 7 };
 
-// Shared by both /api/unique-formulas and /api/submit-order's server-side
+// Shared by /api/unique-formulas and Stripe Checkout's server-side
 // price re-verification — extracted specifically so both call sites can
 // never drift out of sync with each other.
 //
@@ -359,6 +369,7 @@ app.post('/api/verify-upload', requireApiKey, upload.single('file'), async (req,
     res.status(200).json({
       passed: true, code: null, checks: sanitizeChecksForResponse(result.checks),
       storedAs: path.basename(filePath),
+      uploadToken: checkoutStore.registerUpload(path.basename(filePath), originalName),
     });
   } catch (err) {
     console.error('   \u26a0\ufe0f  Upload verification crashed:', err.message);
@@ -380,13 +391,12 @@ app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (re
     // any directory-traversal attempt (e.g. "../../etc/passwd") before
     // this ever touches the filesystem — never trust a client-supplied
     // filename directly in a path join.
-    const safeFilename = path.basename(req.body.storedAs);
-    filePath = path.join(__dirname, 'uploads', safeFilename);
-    originalName = safeFilename;
-    shouldCleanup = false; // not ours to delete — /api/verify-upload owns this file's lifecycle
-    if (!fs.existsSync(filePath)) {
-      return res.status(400).json({ status: 'error', message: 'Referenced file not found — it may have expired or already been processed. Please re-upload.' });
-    }
+    try {
+      const verified = checkoutStore.verifyUpload(req.body.storedAs, req.body.uploadToken);
+      filePath = checkoutStore.sourcePath(verified.storedAs);
+      originalName = verified.originalName;
+      shouldCleanup = false;
+    } catch (err) { return paymentError(res, err); }
   } else {
     return res.status(400).json({ status: 'error', message: 'No file uploaded' });
   }
@@ -421,129 +431,35 @@ app.post('/api/unique-formulas', requireApiKey, upload.single('file'), async (re
 // existing-customer lookup, no deliverability verification.
 const EMAIL_SYNTAX_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-app.post('/api/submit-order', requireApiKey, async (req, res) => {
-  const { storedAs, fullName, company, email, eWayEncryptedPayload, quotedGrandTotal, promoCode } = req.body || {};
-  const clientIp = getClientIp(req);
-
-  // ── Validate the basics before touching the filesystem or Anthropic-adjacent work ──
-  if (!storedAs || typeof storedAs !== 'string') {
-    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'No file reference provided.' });
+// Stripe payment state is separate from orders until a verified payment arrives.
+let stripeService;
+async function quoteForCheckout(filePath, discount) {
+  const tier0 = await runTier0(await parseExcel(filePath));
+  const count = tier0.stats && tier0.stats.pricing;
+  if (!count || count.version !== KEY_VERSION || !Number.isSafeInteger(count.uniqueFormulaCount) || count.uniqueFormulaCount < 0 || !count.fscoreDist || Object.keys(count.fscoreDist).length !== 4 || !Object.keys(FSCORE_BAND_PRICE).every(b => Number.isSafeInteger(count.fscoreDist[b]) && count.fscoreDist[b] >= 0) || Object.values(count.fscoreDist).reduce((a, b) => a + b, 0) !== count.uniqueFormulaCount) {
+    throw Object.assign(new Error('Could not verify the formula pricing count.'), { code: 'INVALID_PRICING', status: 422 });
   }
-  if (!fullName || !company || !email) {
-    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Full name, company, and email are all required.' });
-  }
-  if (!EMAIL_SYNTAX_RE.test(String(email).trim())) {
-    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Please provide a valid email address.' });
-  }
-  if (!eWayEncryptedPayload) {
-    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'No payment information provided.' });
-  }
-  if (!Number.isFinite(quotedGrandTotal)) {
-    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Missing or invalid quoted price.' });
-  }
-
-  // ── Resolve the file safely — same path-traversal guard as /api/unique-formulas ──
-  const safeFilename = path.basename(storedAs);
-  const filePath = path.join(__dirname, 'uploads', safeFilename);
-  if (!fs.existsSync(filePath)) {
-    // Matches the confirmed decision directly: no order ID is ever
-    // created for a file that isn't a genuine, currently-staged,
-    // already-verified upload.
-    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Referenced file not found — it may have expired. Please re-upload and try again.' });
-  }
-
-  // ── If a promo code was applied, re-validate it server-side - the
-  //    exact same reasoning as the price re-verification below: never
-  //    trust the client's "this code is valid and applied" state for
-  //    an actual charge. It may have expired or been used by this same
-  //    email between the Apply tap and this submission. ──
-  let discount = null;
-  if (promoCode && String(promoCode).trim()) {
-    const promoResult = validatePromoCode(promoCode, email);
-    if (!promoResult.valid) {
-      return res.status(400).json({ success: false, code: 'PROMO_CODE_INVALID', message: promoResult.reason });
-    }
-    discount = { type: promoResult.discountType, value: promoResult.discountValue };
-  }
-
-  // ── Security requirement, not optional: re-verify the price server-side
-  //    against the actual file, never trust a client-supplied amount ──
-  let grandTotal, uniqueFormulaTotal, fscoreDist, fileSizeBytes;
-  try {
-    const parsed = await parseExcel(filePath);
-    const tier0 = await runTier0(parsed);
-    const pricingCount = (tier0.stats && tier0.stats.pricing) || { uniqueFormulaCount: 0, fscoreDist: { Low: 0, Moderate: 0, High: 0, Critical: 0 } };
-    fscoreDist = pricingCount.fscoreDist;
-    uniqueFormulaTotal = pricingCount.uniqueFormulaCount;
-    fileSizeBytes = fs.statSync(filePath).size;
-    ({ grandTotal } = calculatePricing(fscoreDist, discount));
-  } catch (err) {
-    console.error('   \u26a0\ufe0f  Price re-verification failed:', err.message);
-    return res.status(500).json({ success: false, code: 'VALIDATION_ERROR', message: 'Could not verify pricing for this file. Please try again.' });
-  }
-
-  if (grandTotal !== quotedGrandTotal) {
-    console.error(`   \u26a0\ufe0f  Price mismatch on order attempt: quoted ${quotedGrandTotal}, actual ${grandTotal} (${safeFilename}, ip ${clientIp})`);
-    return res.status(400).json({ success: false, code: 'PRICE_MISMATCH', message: 'The quoted price no longer matches this file. Please refresh and try again.' });
-  }
-
-  // ── Charge via eWay — PLACEHOLDER, see src/utils/eway-payment.js ──
-  let chargeResult;
-  try {
-    chargeResult = await chargeViaEway(eWayEncryptedPayload, grandTotal);
-  } catch (err) {
-    // Distinguishing a genuine decline from "not wired up yet" matters —
-    // once real eWay integration lands, only genuine declines should
-    // reach this path.
-    console.error('   \u26a0\ufe0f  Payment processing error:', err.message);
-    return res.status(502).json({ success: false, code: 'PAYMENT_DECLINED', message: 'Payment could not be processed. Please try again shortly.' });
-  }
-  if (!chargeResult || !chargeResult.success) {
-    return res.status(402).json({ success: false, code: 'PAYMENT_DECLINED', message: (chargeResult && chargeResult.declineReason) || 'Your payment was declined.' });
-  }
-
-  // ── Payment succeeded — create the order and trigger both emails ──
-  let order;
-  try {
-    order = createOrder({
-      fullName, company, email,
-      originalName: safeFilename,
-      storedAs: safeFilename,
-      grandTotal,
-      uniqueFormulaTotal,
-      fscoreDist,
-      fileSizeBytes,
-      transactionId: chargeResult.transactionId,
-      ip: clientIp,
-      promoCode: discount ? String(promoCode).trim() : null,
-    });
-  } catch (err) {
-    console.error('   \u26a0\ufe0f  Order creation failed after successful payment:', err.message);
-    return res.status(500).json({ success: false, code: 'VALIDATION_ERROR', message: 'Payment succeeded but the order could not be recorded. Please contact support with your transaction reference.' });
-  }
-
-  // Only claim the code's usage now that both payment and order
-  // creation have genuinely succeeded - a code should never be
-  // consumed for an order that didn't actually go through.
-  if (discount) {
-    try {
-      claimUsage(promoCode, email, order.orderId);
-    } catch (err) {
-      // The order itself is already real and paid for at this point -
-      // a failure to record usage shouldn't fail the whole request,
-      // just needs visibility for manual follow-up.
-      console.error('   \u26a0\ufe0f  Order succeeded but promo code usage could not be recorded:', err.message);
-    }
-  }
-
-  logAuditEvent({ event: 'order_created', orderId: order.orderId, originalName: safeFilename, ip: clientIp, grandTotal });
-
-  sendOrderConfirmation(order).catch(() => {});
-  sendAdminOrderNotification(order).catch(() => {});
-  updateOrder(order.orderId, { status: 'pending_review' });
-  sendOrderStatusUpdateEmail(order, 'pending_review').catch(() => {});
-
-  res.json({ success: true, orderId: order.orderId });
+  return { ...calculatePricing(count.fscoreDist, discount), uniqueFormulaTotal: count.uniqueFormulaCount, fscoreDist: count.fscoreDist };
+}
+function getStripeService() {
+  if (!stripeService) stripeService = createStripeService({ store: checkoutStore, quote: quoteForCheckout, notifications: require('./src/notifier').stripeNotifications() });
+  return stripeService;
+}
+function paymentError(res, err) {
+  const status = err.status || 503;
+  return res.status(status).json({ success: false, code: err.code || 'PAYMENT_UNAVAILABLE', message: err.status ? err.message : 'Payment service temporarily unavailable. Please retry or contact support@plsfx.ai.' });
+}
+app.post('/api/submit-order', (req, res) => res.status(410).json({ success: false, code: 'LEGACY_PAYMENT_RETIRED', message: 'Please refresh the site and use secure Checkout.' }));
+app.post('/api/stripe/checkout', async (req, res) => {
+  try { res.json(await getStripeService().createCheckout(req.body)); } catch (err) { paymentError(res, err); }
+});
+app.get('/api/stripe/checkouts/:checkoutId', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  try { res.json(getStripeService().status(req.params.checkoutId, req.query.token)); } catch (err) { paymentError(res, err); }
+});
+app.get('/checkout/stripe-return', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" });
+  res.sendFile(path.join(__dirname, 'src', 'views', 'stripe-return.html'));
 });
 
 app.post('/api/submit-demo-request', requireApiKey, async (req, res) => {
@@ -576,7 +492,7 @@ app.post('/api/submit-demo-request', requireApiKey, async (req, res) => {
   res.json({ success: true, demoRequestId: demoRequest.id });
 });
 
-app.get('/api/demo-requests', requireApiKey, (req, res) => {
+app.get('/api/demo-requests', requireInternalApiKey, (req, res) => {
   res.json({ demoRequests: listDemoRequests() });
 });
 
@@ -592,7 +508,7 @@ app.post('/api/validate-promo-code', requireApiKey, (req, res) => {
   res.json(result);
 });
 
-app.post('/api/promo-codes', requireApiKey, (req, res) => {
+app.post('/api/promo-codes', requireInternalApiKey, (req, res) => {
   const { code, expiryDate, discountType, discountValue, singleUse } = req.body || {};
   try {
     const record = createPromoCode({
@@ -608,11 +524,11 @@ app.post('/api/promo-codes', requireApiKey, (req, res) => {
   }
 });
 
-app.get('/api/promo-codes', requireApiKey, (req, res) => {
+app.get('/api/promo-codes', requireInternalApiKey, (req, res) => {
   res.json({ promoCodes: listPromoCodes() });
 });
 
-app.get('/api/view-log/:orderId', requireApiKey, (req, res) => {
+app.get('/api/view-log/:orderId', requireInternalApiKey, (req, res) => {
   const order = getOrder(req.params.orderId);
   if (!order || !order.runLogFilename) {
     return res.status(404).json({ error: 'No log available for this order yet.' });
@@ -628,7 +544,7 @@ app.get('/api/view-log/:orderId', requireApiKey, (req, res) => {
   res.type('text/plain').send(fs.readFileSync(logPath, 'utf8'));
 });
 
-app.get('/api/download-report/:orderId', requireApiKey, (req, res) => {
+app.get('/api/download-report/:orderId', requireInternalApiKey, (req, res) => {
   const order = getOrder(req.params.orderId);
   if (!order || !order.reportName) {
     return res.status(404).json({ error: 'No report available for this order yet.' });
@@ -641,7 +557,7 @@ app.get('/api/download-report/:orderId', requireApiKey, (req, res) => {
   return res.status(404).json({ error: 'Report file no longer exists on disk (local reports are removed after the 30-day retention period).' });
 });
 
-app.post('/api/send-report-email/:orderId', requireApiKey, async (req, res) => {
+app.post('/api/send-report-email/:orderId', requireInternalApiKey, async (req, res) => {
   const order = getOrder(req.params.orderId);
   if (!order) {
     return res.status(404).json({ error: 'Order not found.' });
@@ -659,7 +575,7 @@ app.post('/api/send-report-email/:orderId', requireApiKey, async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/run-progress/:runId', (req, res) => {
+app.get('/api/run-progress/:runId', requireInternalApiKey, (req, res) => {
   const progress = getProgress(req.params.runId);
   if (!progress) {
     return res.status(404).json({ error: 'No progress found for this run.' });
@@ -667,7 +583,14 @@ app.get('/api/run-progress/:runId', (req, res) => {
   res.json(progress);
 });
 
-app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res) => {
+app.post('/api/validate', requireInternalApiKey, upload.single('file'), async (req, res) => {
+  try {
+    if (req.body.orderId || req.body.storedAs) {
+      if (req.file) throw Object.assign(new Error('Use the original paid upload for a customer order.'), { status: 409, code: 'SOURCE_MISMATCH' });
+      assertPaidSource(getOrder(req.body.orderId), req.body.storedAs, path.join(__dirname, 'uploads'));
+    }
+  } catch (err) { if (req.file) fs.unlink(req.file.path, () => {}); return paymentError(res, err); }
+
   let filePath, originalName, shouldCleanup;
 
   if (req.file) {
@@ -697,6 +620,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
   let slot              = null;
   try {
     slot = await acquireSlot(originalName);
+    if (req.body.orderId) assertPaidSource(getOrder(req.body.orderId), req.body.storedAs, path.join(__dirname, 'uploads'));
   } catch (slotErr) {
     // acquireSlot() only reaches here on a genuine filesystem error
     // (e.g. EACCES/ENOSPC) — the normal "slot currently taken" case is
@@ -707,6 +631,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
     console.error('   ❌ Could not acquire a validation slot:', slotErr.message);
     logAuditEvent({ event: 'slot_acquisition_failed', originalName, ip: clientIp, error: slotErr.message, runLog: runLog.filename });
     runLog.stop();
+    if (slot) slot.release();
     if (shouldCleanup) fs.unlink(filePath, () => {});
     return res.status(500).json({ status: 'error', message: 'Could not start validation — server resource issue. Please try again shortly.' });
   }
@@ -3597,6 +3522,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         // full-parse run as a genuine miss (route and coverage as validator-tier2.js recorded them).
         reviewCoverage: t2Results._evidence ? { route: t2Results._evidence.route, coverage: t2Results._evidence.coverage || null } : null,
         status: 'review_complete',
+        reviewCompletedAt: new Date().toISOString(),
       });
       if (completedOrder) sendOrderStatusUpdateEmail(completedOrder, 'review_complete').catch(() => {});
     }
@@ -3704,6 +3630,11 @@ runRetentionSweep({ uploadsDir, processedDir }).catch(e => console.error('Startu
 cron.schedule('0 * * * *', () => {
   runRetentionSweep({ uploadsDir, processedDir }).catch(e => console.error('Retention sweep failed:', e.message));
 });
+
+if (process.env.STRIPE_RECONCILIATION_ENABLED === 'true') {
+  const reconcile = () => getStripeService().reconcilePending().then(results => { if (results.length) console.log('Stripe reconciliation:', results); }).catch(() => console.error('Stripe reconciliation needs operator review.'));
+  reconcile(); cron.schedule('15 * * * *', reconcile);
+}
 
 app.listen(PORT, () => console.log(`FM Validator running on http://localhost:${PORT}`));
 module.exports = app;

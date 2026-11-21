@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const CODES_DIR = path.join(__dirname, '..', '..', 'promo-codes');
-const USAGE_DIR = path.join(__dirname, '..', '..', 'promo-usage');
+const CODES_DIR = process.env.PROMO_DATA_DIR ? path.join(process.env.PROMO_DATA_DIR, 'codes') : path.join(__dirname, '..', '..', 'promo-codes');
+const USAGE_DIR = process.env.PROMO_DATA_DIR ? path.join(process.env.PROMO_DATA_DIR, 'usage') : path.join(__dirname, '..', '..', 'promo-usage');
+const { digest } = require('./checkout-store');
 
 let dirsReady = false;
 try {
@@ -25,7 +26,9 @@ function normalizeEmail(email) {
 }
 
 function codeFilePath(code) {
-  return path.join(CODES_DIR, `${normalizeCode(code)}.json`);
+  const normalized = normalizeCode(code);
+  if (!/^[A-Z0-9_-]{1,64}$/.test(normalized)) throw new Error('Invalid promo code');
+  return path.join(CODES_DIR, `${normalized}.json`);
 }
 
 /**
@@ -44,6 +47,7 @@ function createPromoCode({ code, expiryDate, discountType, discountValue, single
   }
 
   const normalized = normalizeCode(code);
+  if (!/^[A-Z0-9_-]{1,64}$/.test(normalized)) throw new Error('Use 1–64 letters, digits, underscores or hyphens.');
   const filePath = codeFilePath(normalized);
   const record = {
     code: String(code).trim(),
@@ -95,12 +99,13 @@ function usageFilePath(code, email) {
   // email's @ and .) - base64url-encode the whole key rather than try
   // to sanitize it piecemeal, so this never collides or breaks on an
   // unusual but valid email address.
-  const safeKey = Buffer.from(key, 'utf8').toString('base64url');
+  const safeKey = digest(key);
   return path.join(USAGE_DIR, `${safeKey}.json`);
 }
 
 function hasUserUsedCode(code, email) {
-  return fs.existsSync(usageFilePath(code, email));
+  const legacy = Buffer.from(`${normalizeCode(code)}__${normalizeEmail(email)}`, 'utf8').toString('base64url');
+  return fs.existsSync(usageFilePath(code, email)) || fs.existsSync(path.join(USAGE_DIR, `${legacy}.json`));
 }
 
 function countUsage(normalizedCodeValue) {
@@ -137,7 +142,7 @@ function claimUsage(code, email, orderId) {
   const record = {
     code: normalizeCode(code),
     normalizedCode: normalizeCode(code),
-    email: normalizeEmail(email),
+    emailHash: digest(normalizeEmail(email)),
     orderId,
     usedAt: new Date().toISOString(),
   };
@@ -165,7 +170,7 @@ function validatePromoCode(code, email) {
   if (record.singleUse && hasUserUsedCode(record.normalizedCode, email)) {
     return { valid: false, reason: 'That code has already been used on this email address.' };
   }
-  return { valid: true, discountType: record.discountType, discountValue: record.discountValue, code: record.code };
+  return { valid: true, discountType: record.discountType, discountValue: record.discountValue, code: record.code, singleUse: record.singleUse };
 }
 
 module.exports = {

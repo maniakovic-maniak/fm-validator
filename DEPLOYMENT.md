@@ -712,3 +712,9 @@ Fm-00068 reported 79 Tier 2 findings "not found in this run"; 62 of them came fr
 1. src/utils/finding-history.js: computeCrossRunStats and recordRun take notTestedRuleIds. An earlier open finding whose rule was out of scope this run is kept open and unchanged and counted as "not tested", not "not found". If the finding returns later it is still open, not a reappearance. server.js passes ruleExclusions.excludedIds (not applicable, evidence required, extended not run). index.js (command line) passes nothing, so it behaves as before. src/build_report.py adds "N not tested this run" to both "Since last run" lines.
 2. src/utils/location-repair.js + src/validator-tier2.js: a finding on a real sheet that names no cell (and does not name A1 on purpose) is recorded as sheet-level, counted as an honest reason, and no longer in the "genuinely unusable" percentage. The stored cell is not changed (history fingerprints use it), so the report still shows A1 for these rows. Not done: correcting a wrong sheet from the text (riskier; shadow only if wanted later).
 No Tier 2 input or cost change. Revert points: the four files above. Test: `node test-patch62.js`.
+
+## Stripe Checkout rollout
+
+See [STRIPE_CHECKOUT.md](STRIPE_CHECKOUT.md) for required merchant/environment
+configuration, narrow public proxy routes, webhook verification, persistent
+storage, recovery commands and coordinated frontend acceptance.

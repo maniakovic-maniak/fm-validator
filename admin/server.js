@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
@@ -47,7 +48,10 @@ const longRunningDispatcher = new Agent({
   bodyTimeout: 30 * 60 * 1000,
 });
 
+const { requireAdminAuth, assertPaidSource } = require('../src/utils/payment-access');
 const app = express();
+app.use(requireAdminAuth);
+function mainFetch(url, options = {}) { return fetch(url, { ...options, headers: { ...options.headers, 'x-api-key': process.env.VALIDATOR_API_KEY || '' } }); }
 
 // Nurse pipeline, Reason step: weekly, on this process (internal ops, isolated from
 // the customer-facing cluster) - same scheduling mechanism (node-cron) as the main
@@ -67,11 +71,7 @@ function runNurseReasonJob() {
 runNurseReasonJob();
 cron.schedule('0 0 * * 0', runNurseReasonJob);
 const PORT = process.env.ADMIN_PORT || 3001;
-// The main app's own port — this is a server-to-server call, not a
-// browser request, so it never carries an Origin header at all. That
-// correctly falls into requireApiKey's existing dev-mode fallback
-// (VALIDATOR_API_KEY currently unset). If that variable is ever set in
-// the future, this call will need an x-api-key header added.
+// Server-to-server requests carry VALIDATOR_API_KEY; browser origins are not auth.
 const MAIN_APP_URL = process.env.MAIN_APP_URL || 'http://localhost:3000';
 // Real runs take 10-20+ minutes (confirmed throughout this project's
 // testing) — matching the same generous timeout already used for
@@ -258,7 +258,7 @@ app.get('/api/run-progress/:orderId', async (req, res) => {
     // reads one small JSON file and should be fast. If it ever isn't,
     // we want that to fail quickly and visibly, not silently wait up to
     // 30 minutes for what's supposed to be a near-instant check.
-    const response = await fetch(`${MAIN_APP_URL}/api/run-progress/${req.params.orderId}`);
+    const response = await mainFetch(`${MAIN_APP_URL}/api/run-progress/${req.params.orderId}`);
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (err) {
@@ -268,7 +268,7 @@ app.get('/api/run-progress/:orderId', async (req, res) => {
 
 app.get('/api/view-log/:orderId', async (req, res) => {
   try {
-    const response = await fetch(`${MAIN_APP_URL}/api/view-log/${req.params.orderId}`);
+    const response = await mainFetch(`${MAIN_APP_URL}/api/view-log/${req.params.orderId}`);
     if (!response.ok) {
       const data = await response.json();
       return res.status(response.status).json(data);
@@ -282,7 +282,7 @@ app.get('/api/view-log/:orderId', async (req, res) => {
 
 app.get('/api/download-report/:orderId', async (req, res) => {
   try {
-    const response = await fetch(`${MAIN_APP_URL}/api/download-report/${req.params.orderId}`);
+    const response = await mainFetch(`${MAIN_APP_URL}/api/download-report/${req.params.orderId}`);
     const contentType = response.headers.get('content-type') || '';
     if (!response.ok) {
       const data = await response.json();
@@ -323,7 +323,8 @@ app.post('/api/orders/:orderId/clear-hold', async (req, res) => {
   try {
     const order = getOrder(req.params.orderId);
     if (!order) return res.status(404).json({ success: false, error: 'Order not found.' });
-    updateOrder(req.params.orderId, { held: false, heldReason: null });
+    if (order.paymentReviewRequired) assertPaidSource(order, order.storedAs, path.join(__dirname, '..', 'uploads'), { allowReviewHold: true });
+    updateOrder(req.params.orderId, { held: false, heldReason: null, ...(order.paymentReviewRequired ? { paymentReviewRequired: false, status: 'pending_review' } : {}) });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -332,7 +333,7 @@ app.post('/api/orders/:orderId/clear-hold', async (req, res) => {
 
 app.post('/api/send-report-email/:orderId', async (req, res) => {
   try {
-    const response = await fetch(`${MAIN_APP_URL}/api/send-report-email/${req.params.orderId}`, { method: 'POST' });
+    const response = await mainFetch(`${MAIN_APP_URL}/api/send-report-email/${req.params.orderId}`, { method: 'POST' });
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (err) {
@@ -348,6 +349,8 @@ app.post('/api/send-report-email/:orderId', async (req, res) => {
  */
 app.post('/api/run/:orderId', async (req, res) => {
   const order = getOrder(req.params.orderId);
+  try { assertPaidSource(order, order && order.storedAs, path.join(__dirname, '..', 'uploads')); }
+  catch (err) { return res.status(err.status || 409).json({ error: err.message }); }
   if (!order) {
     return res.status(404).json({ error: 'Order not found.' });
   }
@@ -376,7 +379,7 @@ app.post('/api/run/:orderId', async (req, res) => {
 
     const response = await undiciFetch(`${MAIN_APP_URL}/api/validate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.VALIDATOR_API_KEY || '' },
       body: JSON.stringify({ storedAs: order.storedAs, orderId: req.params.orderId }),
       signal: controller.signal,
       dispatcher: longRunningDispatcher,
@@ -497,4 +500,4 @@ app.get('/api/fix-queue', (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`FM Validator Admin running on http://localhost:${PORT}`));
+app.listen(PORT, '127.0.0.1', () => console.log(`FM Validator Admin running on http://localhost:${PORT}`));

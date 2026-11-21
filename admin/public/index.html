@@ -424,7 +424,7 @@
       <tr>
         <td>${o.orderId}</td>
         <td>${formatDate(o.createdAt)}</td>
-        <td class="name-cell">${o.originalName || '\u2014'}</td>
+        <td class="name-cell">${escapeHtml(o.originalName || '\u2014')}</td>
         <td>${formatSize(o.fileSizeBytes)}</td>
         <td class="uf-cell" onclick="this.classList.toggle('open')">
           ${o.uniqueFormulaTotal ?? '\u2014'}
@@ -433,7 +433,7 @@
           </div>
         </td>
         <td class="${o.promoCode ? 'price-discounted' : ''}">${formatPrice(o.grandTotal)}</td>
-        <td>${o.promoCode || '\u2014'}</td>
+        <td>${escapeHtml(o.promoCode || '\u2014')}</td>
         <td>${runStateCell(o.orderId)}</td>
         <td>${actionItemsCell(o)}</td>
       </tr>
@@ -458,9 +458,9 @@
       <div class="action-icons">
         <button class="action-icon" ${hasLog ? `onclick="viewLog('${order.orderId}')"` : 'disabled'} title="View log">${ICON_LOG}</button>
         <button class="action-icon" ${hasReport ? `onclick="downloadReport('${order.orderId}')"` : 'disabled'} title="Download report">${ICON_DOWNLOAD}</button>
-        <button class="action-icon" ${canSend ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="${sendTitle}">${ICON_EMAIL}</button>
+        <button class="action-icon" ${canSend ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="${escapeHtml(sendTitle)}">${ICON_EMAIL}</button>
         <button class="action-icon" ${hasReport ? `onclick="triggerPartnerReview('${order.orderId}')"` : 'disabled'} title="Request Partner Review">${ICON_PARTNER_REVIEW}</button>
-        ${order.held ? `<button class="action-icon" onclick="clearHold('${order.orderId}')" title="${sendTitle} — click to review and clear">${ICON_CLEAR_HOLD}</button>` : ''}
+        ${order.held ? `<button class="action-icon" onclick="clearHold('${order.orderId}')" title="${escapeHtml(sendTitle)} — click to review and clear">${ICON_CLEAR_HOLD}</button>` : ''}
       </div>
     `;
   }
