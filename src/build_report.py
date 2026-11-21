@@ -1260,7 +1260,7 @@ def build_report(data_path, output_path):
         _ev = _rrec.get('evidence') or {}
         _rc = _ev.get('recalculation') or {}
         if _rc.get('status') == 'completed':
-            r3 = kv_row(r3,'Independent recalculation',f"Completed: {_rc.get('cells_checked',0):,} cells compared, {_rc.get('mismatches',0)} mismatch(es), {_rc.get('coverage_pct') if _rc.get('coverage_pct') is not None else 'n/a'}% of formula cells covered")
+            r3 = kv_row(r3,'Independent recalculation',f"Completed: {_rc.get('cells_checked',0):,} cells compared, {_rc.get('mismatches',0)} mismatch(es), {_rc.get('coverage_pct') if _rc.get('coverage_pct') is not None else 'n/a'}% of formula cells covered" + (f". Engine: {_rc.get('engine_version')}" if _rc.get('engine_version') else ''))
             _nr = _rc.get('not_recalculated') or {}
             _nrp = [f"{v:,} {l}" for v,l in ((_nr.get('offset',0),'OFFSET cell(s)'),(_nr.get('bare_multicell_name',0),'cell(s) using a bare multi-cell named range'),(_nr.get('external_reference',0),'external-reference cell(s)'),(_nr.get('downstream_of_those',0),'cell(s) downstream of those')) if v]
             if _nrp: r3 = kv_row(r3,'Not recalculated',' | '.join(_nrp))

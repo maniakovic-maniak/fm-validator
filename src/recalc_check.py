@@ -537,6 +537,14 @@ except ImportError:  # run as a script from another directory
     import recalc_compare as rc
 
 
+def _engine_version():
+    try:
+        from importlib.metadata import version
+        return "Formualizer " + version("formualizer")
+    except Exception:
+        return None
+
+
 def run(path, relative_tolerance=None, absolute_tolerance=None, thresholds_path=None):
     # Patch 28: the comparison policy lives in recalc_compare.POLICY (0.1% relative; absolute floor 0.01, or 0.0001
     # for saved values of size 10 or less; text, Boolean and error values exact). The arguments override it for tests.
@@ -1017,6 +1025,29 @@ def run(path, relative_tolerance=None, absolute_tolerance=None, thresholds_path=
             m["root_label"] = root_label_of.get(_k, "an engine limitation")
             mismatches_likely_masked_upstream_error.append(m)
 
+    # Patch 61: a TRUE the engine reports as FALSE only because it compares numbers exactly (Excel uses 15 digits) is held
+    # back as a known engine limitation, not raised as a difference in the model.
+    _recalc_by_key = dict(zip(target_keys, recalculated_values))
+    def _operand_value(sheet_name, ref):
+        v = _recalc_by_key.get(f"{sheet_name}!{ref}")
+        if v is None:
+            try:
+                _r, _c = openpyxl.utils.cell.coordinate_to_tuple(ref)
+                v = wb.get_value(sheet_name, _r, _c)
+            except Exception:
+                v = None
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    _quirk = [m for m in mismatches_clean if m.get("type") == "boolean" and rc.is_float_equality_quirk(
+        m.get("cached"), m.get("recalculated"), formula_by_key.get(f"{m['sheet']}!{m['cell']}"),
+        lambda ref, _s=m["sheet"]: _operand_value(_s, ref))]
+    if _quirk:
+        _qk = {id(m) for m in _quirk}
+        mismatches_clean = [m for m in mismatches_clean if id(m) not in _qk]
+        for m in _quirk:
+            m = dict(m)
+            m["root_label"] = "a floating-point equality test (Excel compares to 15 digits, this engine exactly)"
+            mismatches_likely_masked_upstream_error.append(m)
+
     ledger = rc.build_ledger(
         formula_count,
         {"matched": counts["matched"], "mismatched": len(mismatches_clean), "held_back": len(mismatches_likely_masked_upstream_error), "volatile": len(volatile_mismatches),
@@ -1043,6 +1074,7 @@ def run(path, relative_tolerance=None, absolute_tolerance=None, thresholds_path=
     return {
         "status": "success",
         "elapsed_s": round(time.time() - t_start, 2),
+        "engine_version": _engine_version(),
         "decision_tests": decision_tests,
         "formula_cells_checked": len(targets),
         "external_reference_cells_excluded": len(external_ref_cells),

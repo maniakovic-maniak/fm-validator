@@ -37,6 +37,12 @@ if (!only || 'decision'.includes(only) || only.includes('decision')) {
   results.push({ name: 'tests/test_decision_threshold.py', ok, stale: false, secs: 0, tail: ok ? '' : (r.stdout + r.stderr).slice(-300) });
   console.log(`${ok ? 'ok  ' : 'FAIL'} tests/test_decision_threshold.py`);
 }
+if (!only || 'float'.includes(only) || only.includes('float') || only.includes('recalc')) {
+  const r = spawnSync('python3', ['-I', path.join(root, 'tests', 'test_recalc_float_equality.py')], { cwd: root, encoding: 'utf8' });
+  const ok = r.status === 0;
+  results.push({ name: 'tests/test_recalc_float_equality.py', ok, stale: false, secs: 0, tail: ok ? '' : (r.stdout + r.stderr).slice(-300) });
+  console.log(`${ok ? 'ok  ' : 'FAIL'} tests/test_recalc_float_equality.py`);
+}
 const failed = results.filter(r => !r.ok && !r.stale), staleFailed = results.filter(r => !r.ok && r.stale);
 console.log(`\n${results.length - failed.length - staleFailed.length} passed, ${failed.length} failed, ${staleFailed.length} known-stale, ${skipped.length} skipped (real model file not on this machine)`);
 failed.forEach(r => console.log(`  FAILED ${r.name}: ${r.tail}`));

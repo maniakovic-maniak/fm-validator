@@ -158,3 +158,40 @@ def build_ledger(population, counts, excluded):
     ledger["reconciles"] = (int(population) == accounted)
     ledger["compared"] = ledger["matched"] + ledger["mismatched"] + ledger["held_back"]
     return ledger
+
+
+# Patch 61: a test such as =AU116=E116 where AU116 is a SUM. Excel compares numbers to 15 significant digits, so a sum that
+# is 1 to that precision equals 1; this engine compares exactly and says FALSE. When the saved result is TRUE, the engine
+# says FALSE, and both sides of a simple one-cell-against-one-cell (or cell-against-number) equality agree to 15 digits,
+# the difference is the engine's precision rule, not a model difference.
+_REF = r"\$?[A-Z]{1,3}\$?\d+"
+SIMPLE_EQUALITY_RE = re.compile(r"^=\s*(" + _REF + r")\s*=\s*(" + _REF + r"|-?\d+(?:\.\d+)?)\s*$")
+
+
+def equality_operands(formula):
+    """('AU116', 'E116') for =AU116=E116, ('B5', '1') for =B5=1; None for any other formula."""
+    m = SIMPLE_EQUALITY_RE.match(str(formula or ""))
+    if not m:
+        return None
+    return m.group(1).replace("$", ""), m.group(2).replace("$", "")
+
+
+def equal_to_15_digits(a, b):
+    if isinstance(a, bool) or isinstance(b, bool) or not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        return False
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return False
+    return format(float(a), ".15g") == format(float(b), ".15g")
+
+
+def is_float_equality_quirk(cached, recalculated, formula, operand_value):
+    """operand_value(ref) returns the recalculated number for a cell reference on the same sheet, or None."""
+    if cached is not True or recalculated is not False:
+        return False
+    ops = equality_operands(formula)
+    if not ops:
+        return False
+    vals = []
+    for o in ops:
+        vals.append(float(o) if re.fullmatch(r"-?\d+(?:\.\d+)?", o) else operand_value(o))
+    return equal_to_15_digits(vals[0], vals[1])

@@ -45,6 +45,7 @@ function recalcEvidence(r) {
     verified_pct: verified_ratio === null ? null : Math.round(verified_ratio * 100),
     attempted_ratio, verified_ratio,
     mismatches: Number(r.mismatch_count) || 0, unresolved_errors: unresolved,
+    engine_version: typeof r.engine_version === 'string' ? r.engine_version : null,
   };
 }
 

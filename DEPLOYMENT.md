@@ -697,3 +697,12 @@ src/utils/low-confidence-pass.js. Inside a run Tier 2 confidence is a percent (3
 3. src/utils/location-repair.js: when the sheet is real but the cell is "A1", the cell is read from the finding text if the text names exactly one cell on that sheet ("DASHBOARD V5" or "DASHBOARD!V5"). Two cells, none, or an existing real cell leave the row as returned. Fm-00066 had 76 A1 fallbacks (14% unusable).
 4. src/utils/sheet-linkage.js: sheets whose name contains "decision" are treated as log sheets, not orphans (The Bend's HUMAN DECISIONS was the one P1).
 No Tier 2 input or cost change. Counts will move: fewer Not Applicable, more Uncertain; a few P2/Query items from unusable locations gain a cell. Revert points: the four files above. Test: `node test-patch60.js`.
+
+## Patch 61 - recalculation engine version and float-equality tests (from The Bend, Fm-00066 and Fm-00067)
+Production ran Formualizer 0.8.4 (unpinned). On The Bend that version gave 139 recalculation mismatches (9 numeric, 130 text or true/false); Formualizer 0.14.0 gives 31, none numeric (Carlsberg 2 -> 0). The 9 numeric ones came from the older engine's COUNTIFS handling, not from the model.
+1. requirements.txt (new): pins formualizer==0.14.0 and openpyxl==3.1.5.
+2. src/recalc_check.py + src/recalc_compare.py: a TRUE saved result that the engine reports as FALSE, on a simple equality such as =AU116=E116 whose two sides agree to 15 significant digits (Excel's rule), is held back as a known engine limitation (reported through T0-RECALC-003, a Query), not raised as a difference. On The Bend all 31 remaining differences are this.
+3. The recalculation result now carries the engine version; the Scope and Reliance row "Independent recalculation" ends with "Engine: Formualizer x.y.z"; the run record carries it.
+No Tier 2 input or cost change. Ledger counts move from mismatched to held back.
+VPS upgrade (separate step, after the patch is deployed): `python3 -m pip install --break-system-packages formualizer==0.14.0`, then `python3 -m pip show formualizer | head -2` and `pm2 restart all --update-env`. Rollback: `python3 -m pip install --break-system-packages formualizer==0.8.4`. Not run on Hidden Gem (skipped by the 500,000-cell limit). ESO not tested on 0.14.0 here.
+Revert points: src/recalc_check.py, src/recalc_compare.py, src/utils/run-record.js, src/build_report.py. Tests: `node test-patch61.js`, `python3 tests/test_recalc_float_equality.py`.

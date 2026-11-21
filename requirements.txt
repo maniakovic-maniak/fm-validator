@@ -1,0 +1,6 @@
+# Python packages the audit relies on. Pinned: Patch 61. Production ran an unpinned Formualizer 0.8.4 while a newer
+# release (0.14.0) recalculates The Bend with 0 numeric mismatches against 9 on 0.8.4.
+formualizer==0.14.0
+openpyxl==3.1.5
+msoffcrypto-tool
+oletools
