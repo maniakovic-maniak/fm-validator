@@ -709,6 +709,8 @@ def build_report(data_path, output_path):
     _crn_closed_llm = crossRunStats.get('closedLlmCount', 0)
     _crn_new_llm = crossRunStats.get('newLlmCount', 0)
     _crn_regressed_llm = crossRunStats.get('regressedLlmCount', 0)
+    _crn_nt_llm = crossRunStats.get('notTestedLlmCount', 0)
+    _crn_nt_det = crossRunStats.get('notTestedDeterministicCount', 0)
     # FIX: found via a real bug-scan run. Previously inferred from the
     # counts above (new>0, everything else 0) — but a genuine first run
     # on a perfectly clean model has ZERO findings of every kind, which
@@ -730,6 +732,8 @@ def build_report(data_path, output_path):
         # unchanged model, so a genuine change here means the model or
         # the validator's own code genuinely changed.
         _crn_text_det = f'{_crn_closed_det} not found in this run · {_crn_new_det} new · {_crn_still_open} still open since the last run'
+        if _crn_nt_det > 0:
+            _crn_text_det += f' · {_crn_nt_det} not tested this run'
         if _crn_regressed_det > 0:
             _crn_text_det += f' · \u26a0 {_crn_regressed_det} reappeared (not found in an earlier run, now found again)'
         merge_bold_prefix(ws1,f'B{r}:I{r}','Since last run (deterministic checks):   ',_crn_text_det,sz=10,col=CHARCOAL,bg=(LIGHT_RED if _crn_regressed_det>0 else PANEL_GREY),v='center')
@@ -738,8 +742,10 @@ def build_report(data_path, output_path):
         # alarm-red background even when its own "regressed" count is
         # nonzero, since this is expected, routine model variance, not
         # a reliability signal the way the deterministic line is.
-        if _crn_closed_llm > 0 or _crn_new_llm > 0 or _crn_regressed_llm > 0:
+        if _crn_closed_llm > 0 or _crn_new_llm > 0 or _crn_regressed_llm > 0 or _crn_nt_llm > 0:
             _crn_text_llm = f'{_crn_closed_llm} not found in this run · {_crn_new_llm} new'
+            if _crn_nt_llm > 0:
+                _crn_text_llm += f' · {_crn_nt_llm} not tested this run (procedure out of scope this time)'
             if _crn_regressed_llm > 0:
                 _crn_text_llm += f' · {_crn_regressed_llm} reappeared'
             _crn_text_llm += ' — Tier 2 (LLM) findings can vary between runs even with an unchanged model, since Tier 2 re-reasons from scratch each time; not necessarily a sign of genuine progress or regression.'

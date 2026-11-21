@@ -50,6 +50,9 @@ function repairLocations(rows, sheetNames) {
       if (cur2 === '' || cur2 === 'A1') {
         const cell = cellOnSheet([r.condition, r.reason, r.what_wrong, r.detail].filter(Boolean).join(' '), real);
         if (cell && cell !== 'A1') { r.cell = cell; r.location_basis = 'cell_from_text'; out.fromRef++; continue; }
+        // Patch 62: a real sheet, no cell named anywhere in the text (and A1 not named on purpose) is a sheet-level finding.
+        // The cell value is left as it was (history fingerprints use it); only the basis is recorded.
+        if (!cell) { r.location_basis = 'sheet_level'; out.sheetLevel = (out.sheetLevel || 0) + 1; }
       }
       out.unchanged++; continue;
     }

@@ -287,6 +287,7 @@ function withLock(modelKey, fn) {
 function recordRun(modelKey, findings, run = {}) {
   const runId = run.runId ? String(run.runId) : null;
   const startedAt = run.startedAt || new Date().toISOString();
+  const csOpts = { notTestedRuleIds: run.notTestedRuleIds || [] };
   const attempt = withLock(modelKey, () => {
     const rec = readRecord(modelKey);
     const last = (rec.meta && rec.meta.lastRun) || null;
@@ -295,31 +296,31 @@ function recordRun(modelKey, findings, run = {}) {
       const prior = JSON.stringify(entriesBefore).length <= MAX_PRIOR_BYTES ? entriesBefore : null;
       writeRecord(modelKey, { version: 2, meta: { lastRun: { runId, startedAt, recordedAt: new Date().toISOString(), priorEntries: prior }, recentRunIds: [...recent.filter(x => x !== runId), runId].filter(Boolean).slice(-20) }, entries: stats.updatedHistory });
     };
-    if (rec.unreadable) { const stats = computeCrossRunStats(findings, {}); commit({}, stats); return Object.assign(stats, { baseline: 'advanced', recordNote: 'The earlier history file could not be read, so this run starts a new baseline.' }); }
+    if (rec.unreadable) { const stats = computeCrossRunStats(findings, {}, csOpts); commit({}, stats); return Object.assign(stats, { baseline: 'advanced', recordNote: 'The earlier history file could not be read, so this run starts a new baseline.' }); }
     if (runId && last && last.runId === runId) {
       // Retry of the run recorded last: compare with the baseline as it was BEFORE that run, then replace its contribution.
       if (last.priorEntries) {
-        const stats = computeCrossRunStats(findings, last.priorEntries);
+        const stats = computeCrossRunStats(findings, last.priorEntries, csOpts);
         commit(last.priorEntries, stats);
         return Object.assign(stats, { baseline: 'replaced_retry', recordNote: 'This run was recorded before (a retry); its earlier entry was replaced, not added to.' });
       }
-      const stats = computeCrossRunStats(findings, rec.entries);
+      const stats = computeCrossRunStats(findings, rec.entries, csOpts);
       return Object.assign(stats, { baseline: 'not_advanced_retry_no_snapshot', recordNote: 'This run was recorded before (a retry) and the earlier baseline was too large to keep, so the comparison is with the run already recorded; history was not changed.' });
     }
     if (runId && recent.includes(runId)) {
-      const stats = computeCrossRunStats(findings, rec.entries);
+      const stats = computeCrossRunStats(findings, rec.entries, csOpts);
       return Object.assign(stats, { baseline: 'not_advanced_older', recordNote: 'This run was recorded earlier and a newer run has been recorded since; history was not changed.' });
     }
     if (last && last.startedAt && startedAt < last.startedAt) {
-      const stats = computeCrossRunStats(findings, rec.entries);
+      const stats = computeCrossRunStats(findings, rec.entries, csOpts);
       return Object.assign(stats, { baseline: 'not_advanced_older', recordNote: 'A newer run of this model was recorded while this one was running, so "since last run" is compared with that newer run and history was not changed.' });
     }
-    const stats = computeCrossRunStats(findings, rec.entries);
+    const stats = computeCrossRunStats(findings, rec.entries, csOpts);
     commit(rec.entries, stats);
     return Object.assign(stats, { baseline: 'advanced', recordNote: null });
   });
   if (attempt.locked) return attempt.value;
-  const stats = computeCrossRunStats(findings, readRecord(modelKey).entries);
+  const stats = computeCrossRunStats(findings, readRecord(modelKey).entries, csOpts);
   return Object.assign(stats, { baseline: 'not_saved_busy', recordNote: `History was not updated: ${attempt.error}.` });
 }
 
@@ -365,8 +366,12 @@ function splitDeterministicVsLlm(entries) {
   return { deterministic, llm };
 }
 
-function computeCrossRunStats(findings, history) {
+function computeCrossRunStats(findings, history, opts = {}) {
   history = normaliseEntries(history);
+  // Patch 62: rules whose procedure was left out of scope this run (not applicable, evidence required, extended not run)
+  // were not tested, so an earlier finding from them is neither fixed nor missed: it is kept as it was and counted apart.
+  const notTestedIds = new Set((opts.notTestedRuleIds || []).map(String));
+  const notTested = [];
   const current = currentFingerprints(findings);
   const nowIso = new Date().toISOString();
 
@@ -412,6 +417,10 @@ function computeCrossRunStats(findings, history) {
   }
 
   for (const [fp, priorEntry] of Object.entries(history)) {
+    if (priorEntry.status === 'open' && !current.has(fp) && !claimed.has(fp) && notTestedIds.has(String(baseRuleId(priorEntry.rootCauseId)))) {
+      notTested.push({ fingerprint: fp, ...priorEntry });
+      continue;
+    }
     if (priorEntry.status === 'open' && !current.has(fp) && !claimed.has(fp)) {
       // Not found this run. That is all it means: the model may have been fixed, the reviewer may not have raised it
       // again, or the check may not have run. "closed" in the arrays and counts below is kept as a name for the report
@@ -433,9 +442,13 @@ function computeCrossRunStats(findings, history) {
   const closedSplit = splitDeterministicVsLlm(closed);
   const newSplit = splitDeterministicVsLlm(newOnes);
   const regressedSplit = splitDeterministicVsLlm(regressed);
+  const notTestedSplit = splitDeterministicVsLlm(notTested);
 
   return {
-    closed, new: newOnes, regressed, stillOpen, updatedHistory, isFirstRun,
+    closed, new: newOnes, regressed, stillOpen, notTested, updatedHistory, isFirstRun,
+    notTestedFindingCount: distinctFindingCount(notTested),
+    notTestedDeterministicCount: distinctFindingCount(notTestedSplit.deterministic),
+    notTestedLlmCount: distinctFindingCount(notTestedSplit.llm),
     closedFindingCount: distinctFindingCount(closed),
     newFindingCount: distinctFindingCount(newOnes),
     regressedFindingCount: distinctFindingCount(regressed),

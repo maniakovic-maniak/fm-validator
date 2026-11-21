@@ -3385,7 +3385,7 @@ app.post('/api/validate', requireApiKey, upload.single('file'), async (req, res)
         const modelIdentity = normalizeModelIdentity(originalName);
         // Patch 39: one run is recorded once (a retry replaces it), a run that started earlier never overwrites a newer
         // baseline, and the update is locked. "Not found" is stored as not_observed, never as resolved.
-        const stats = recordRunHistory(modelIdentity, allFlagged, { runId, startedAt: runStartedAt });
+        const stats = recordRunHistory(modelIdentity, allFlagged, { runId, startedAt: runStartedAt, notTestedRuleIds: ruleExclusions.excludedIds || [] });
         if (stats.recordNote) console.log(`   \u2139\ufe0f  History: ${stats.recordNote}`);
         return stats;
       } catch (e) {

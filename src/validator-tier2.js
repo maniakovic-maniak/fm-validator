@@ -1365,12 +1365,17 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
         return 'workbook_level';
       }
 
+      // Patch 62: a real sheet and no cell named in the text: the finding is about the sheet as a whole.
+      if (r.location_basis === 'sheet_level' && r.sheet && validSheetSet.has(String(r.sheet).toLowerCase())) {
+        return 'sheet_level';
+      }
+
       // Category D - everything left over. This is the only bucket that
       // should actually raise a warning.
       return 'genuinely_unexplained';
     }
 
-    const locationCategories = { scope_not_applicable: 0, mode_a_limitation: 0, workbook_level: 0, genuinely_unexplained: 0 };
+    const locationCategories = { scope_not_applicable: 0, mode_a_limitation: 0, workbook_level: 0, sheet_level: 0, genuinely_unexplained: 0 };
     const unexplainedRows = [];
     for (const r of badLocationRows) {
       const cat = classifyLocationIssue(r);
@@ -1383,8 +1388,8 @@ async function runTier2(parsed, { domain = '', domainFile = '', modelContext = '
       console.log(`   \u26a0\ufe0f  ${unexplainedRows.length} of ${normalised.length} Tier 2 finding(s) (${pct}%) have a genuinely unusable location — cell defaulted to "A1" with no honest scope/limitation reason given, or sheet is blank/not a real sheet name in this workbook.`);
       console.log(`      Breakdown: ${a1CellCount} used the "A1" cell fallback, ${badSheetCount} had a blank or invalid sheet name (some findings may count toward both).`);
     }
-    if (locationCategories.scope_not_applicable + locationCategories.mode_a_limitation + locationCategories.workbook_level > 0) {
-      console.log(`   \u2139\ufe0f  ${badLocationRows.length - unexplainedRows.length} additional Tier 2 finding(s) show "A1" for an honest, correct reason (not a bug): ${locationCategories.scope_not_applicable} scope-not-applicable, ${locationCategories.mode_a_limitation} Mode A limitation stated directly, ${locationCategories.workbook_level} workbook-level.`);
+    if (locationCategories.scope_not_applicable + locationCategories.mode_a_limitation + locationCategories.workbook_level + locationCategories.sheet_level > 0) {
+      console.log(`   \u2139\ufe0f  ${badLocationRows.length - unexplainedRows.length} additional Tier 2 finding(s) show "A1" for an honest, correct reason (not a bug): ${locationCategories.scope_not_applicable} scope-not-applicable, ${locationCategories.mode_a_limitation} Mode A limitation stated directly, ${locationCategories.workbook_level} workbook-level, ${locationCategories.sheet_level} sheet-level (real sheet, no single cell).`);
     }
 
     // What the reviewer was given, for the Validation Matrix's Evidence Reviewed column.
