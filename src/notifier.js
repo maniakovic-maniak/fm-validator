@@ -279,8 +279,8 @@ async function sendOrderConfirmation(order, idempotencyKey) {
               <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#eef1f8;">Hi ${escHtml(fullName)},</p>
               <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Thanks for submitting <strong>${escHtml(originalName)}</strong> for review. Your order ID is <strong>${escHtml(orderId)}</strong> - keep this for reference.</p>
               <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#eef1f8;">Total charged: ${totalDisplay}</p>
-              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Your model is now in our queue for review. We'll email you again as soon as your report is ready, along with the full breakdown of findings.</p>
-              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">If you have any questions in the meantime, just reply to this email.</p>
+              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Your model is now queued for automated processing. We will check the generated report before emailing it to you. Estimated report delivery is 1–2 business days, depending on the file. Timing can vary.</p>
+              <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">If you have a deadline or need an update, email <a href="mailto:support@plsfx.ai">support@plsfx.ai</a> or reply to this email.</p>
 
               <p class="text-secondary" style="margin:28px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">- The PlsFx team</p>
             </td>
@@ -312,7 +312,7 @@ async function sendOrderConfirmation(order, idempotencyKey) {
     sendResult = await getResendClient().emails.send({
       from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: order.email,
-      replyTo: 'mikhail@plsfx.ai',
+      replyTo: 'support@plsfx.ai',
       subject,
       html
     }, idempotencyKey ? { idempotencyKey } : undefined);
@@ -453,7 +453,7 @@ async function sendReportReadyEmail(order) {
     sendResult = await getResendClient().emails.send({
       from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: order.email,
-      replyTo: 'mikhail@plsfx.ai',
+      replyTo: 'support@plsfx.ai',
       subject,
       html,
       attachments: [{
@@ -638,7 +638,7 @@ async function sendDemoRequestEmail(demoRequest) {
     sendResult = await getResendClient().emails.send({
       from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: email,
-      replyTo: 'mikhail@plsfx.ai',
+      replyTo: 'support@plsfx.ai',
       subject,
       html,
       attachments: [{
@@ -684,7 +684,7 @@ const ORDER_STATUS_CONTENT = {
     body: (order) => `
       <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#eef1f8;">Hi ${escHtml(order.fullName)},</p>
       <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Your submission of <strong>${escHtml(order.originalName)}</strong> (order ${escHtml(order.orderId)}) has been received and is now queued for review.</p>
-      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">We'll email you again as soon as processing begins.</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Estimated report delivery is 1–2 business days, depending on the file. Timing can vary. If you have a deadline or need an update, email <a href="mailto:support@plsfx.ai">support@plsfx.ai</a>.</p>
     `,
   },
   in_review: {
@@ -697,12 +697,12 @@ const ORDER_STATUS_CONTENT = {
     `,
   },
   review_complete: {
-    label: 'REVIEW COMPLETE',
-    subject: (order) => `Your review for ${escHtml(order.originalName)} is complete`,
+    label: 'REPORT PREPARED',
+    subject: (order) => `Your report for ${escHtml(order.originalName)} is awaiting final checks`,
     body: (order) => `
       <p class="text-primary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#eef1f8;">Hi ${escHtml(order.fullName)},</p>
-      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Your review for <strong>${escHtml(order.originalName)}</strong> (order ${escHtml(order.orderId)}) is complete and the report has been generated.</p>
-      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">The full report is ready and will be sent to you within 24 hours.</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">Automated processing of <strong>${escHtml(order.originalName)}</strong> (order ${escHtml(order.orderId)}) is complete and your report has been prepared.</p>
+      <p class="text-secondary" style="margin:0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#a9b1c4;">We will check the report before emailing it to you. If you have a deadline or need an update, email <a href="mailto:support@plsfx.ai">support@plsfx.ai</a>.</p>
     `,
   },
 };
@@ -817,7 +817,7 @@ async function sendOrderStatusUpdateEmail(order, status, idempotencyKey) {
     sendResult = await getResendClient().emails.send({
       from: 'PLSFX model review <no-reply@report.plsfx.ai>',
       to: order.email,
-      replyTo: 'mikhail@plsfx.ai',
+      replyTo: 'support@plsfx.ai',
       subject,
       html,
     }, idempotencyKey ? { idempotencyKey } : undefined);

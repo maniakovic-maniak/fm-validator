@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
 <title>Submission Form Admin</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -94,8 +95,10 @@
     width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
     cursor: pointer; color: var(--text-2);
   }
+  .action-icon--sending { width: auto; min-width: 72px; padding: 0 8px; font-size: 11px; white-space: nowrap; }
   .action-icon:hover:not(:disabled) { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
   .action-icon:disabled { opacity: 0.3; cursor: not-allowed; }
+  .action-icon--sending:disabled { opacity: 1; cursor: wait; }
   .log-modal-overlay {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
     align-items: center; justify-content: center; z-index: 100;
@@ -353,6 +356,7 @@
   let orders = [];
   let sortKey = 'createdAt';
   let sortDir = -1;
+  const reportSendsInFlight = new Set();
 
   function formatDate(iso) {
     const d = new Date(iso);
@@ -452,13 +456,14 @@
     // Held orders keep view/download/partner-review available - a human needs to be
     // able to open the report to actually review it - only sending to the client is
     // blocked until the hold is cleared.
-    const canSend = hasReport && !order.held;
+    const sending = reportSendsInFlight.has(order.orderId);
+    const canSend = hasReport && !order.held && !sending;
     const sendTitle = order.held ? `Held: ${order.heldReason || 'awaiting review'}` : 'Send email';
     return `
       <div class="action-icons">
         <button class="action-icon" ${hasLog ? `onclick="viewLog('${order.orderId}')"` : 'disabled'} title="View log">${ICON_LOG}</button>
         <button class="action-icon" ${hasReport ? `onclick="downloadReport('${order.orderId}')"` : 'disabled'} title="Download report">${ICON_DOWNLOAD}</button>
-        <button class="action-icon" ${canSend ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="${escapeHtml(sendTitle)}">${ICON_EMAIL}</button>
+        <button class="action-icon${sending ? ' action-icon--sending' : ''}" data-send-order="${escapeHtml(order.orderId)}" ${canSend ? `onclick="sendReportEmail('${order.orderId}')"` : 'disabled'} title="${escapeHtml(sending ? 'Sending…' : sendTitle)}" aria-label="${escapeHtml(sending ? 'Sending…' : sendTitle)}" aria-busy="${sending}">${sending ? 'Sending…' : ICON_EMAIL}</button>
         <button class="action-icon" ${hasReport ? `onclick="triggerPartnerReview('${order.orderId}')"` : 'disabled'} title="Request Partner Review">${ICON_PARTNER_REVIEW}</button>
         ${order.held ? `<button class="action-icon" onclick="clearHold('${order.orderId}')" title="${escapeHtml(sendTitle)} — click to review and clear">${ICON_CLEAR_HOLD}</button>` : ''}
       </div>
@@ -497,15 +502,21 @@
   }
 
   async function sendReportEmail(orderId) {
+    if (reportSendsInFlight.has(orderId)) return;
     if (!confirm('Send the report email to this customer?')) return;
+    reportSendsInFlight.add(orderId);
     try {
+      render();
       const res = await fetch(`api/send-report-email/${orderId}`, { method: 'POST' });
       const data = await res.json();
-      if (data.success) alert('Email sent successfully.');
-      else if (data.skipped) alert('Email sending is not configured on this server.');
+      if (res.ok && data.success) alert('Email accepted for sending. Check the receiving inbox or email provider for delivery.');
+      else if (res.ok && data.skipped) alert('Email sending is not configured on this server.');
       else alert('Could not send email: ' + (data.error || 'unknown error'));
     } catch (err) {
-      alert('Could not send email: ' + err.message);
+      alert('Email status could not be confirmed. Check the email provider before retrying.');
+    } finally {
+      reportSendsInFlight.delete(orderId);
+      render();
     }
   }
 
