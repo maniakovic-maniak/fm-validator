@@ -84,7 +84,7 @@ function createStripeService({ config = stripeConfig(), stripe = new Stripe(conf
       store.reservePromo(intent); store.assertSource(intent);
       intent.createAttemptedAt ||= now(); save(intent);
       const metadata = { checkout_id: intent.id, source_sha256: intent.sourceSha256, pricing_version: intent.pricingVersion };
-      const params = { mode: 'payment', ui_mode: 'hosted', customer_email: intent.email, client_reference_id: intent.id,
+      const params = { mode: 'payment', ui_mode: 'hosted_page', customer_email: intent.email, client_reference_id: intent.id,
         success_url: returnUrl(intent), cancel_url: returnUrl(intent), expires_at: intent.expiresAt,
         integration_identifier: intent.integrationIdentifier, automatic_tax: { enabled: false }, adaptive_pricing: { enabled: false },
         line_items: [{ quantity: 1, price_data: { currency: 'aud', product: intent.productId, unit_amount: intent.amountCents, tax_behavior: 'inclusive' } }], metadata,

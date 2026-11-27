@@ -1,0 +1,99 @@
+{
+  "applicable": true,
+  "targetDomain": "generic",
+  "totalClaims": 11,
+  "confirmedCount": 11,
+  "contradictedCount": 0,
+  "unverifiedCount": 0,
+  "claims": [
+    {
+      "claim": "RIIO-2 covers the period 1 April 2021 to 31 March 2026 (for ET, GT, GD and ESO sectors)",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-2 Final Determinations Core Document and Ofgem publication pages",
+      "source_url": "https://www.ofgem.gov.uk/sites/default/files/docs/2021/02/final_determinations_-_core_document_revised.pdf",
+      "note": "Ofgem's own Final Determinations state <cite index=\"3-7\">the RIIO-2 price control period, which will run from 1 April 2021 to 31 March 2026</cite>, directly confirming the draft's stated period."
+    },
+    {
+      "claim": "RIIO-2 Licence Model for NGESO is a system operator price control, structurally different (less RAV/capex-driven, more totex/incentive-driven) from a transmission/distribution owner price control",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-2 ESO Regulatory Instructions and Guidance; NESO/Oxera documents on ESO price control design",
+      "source_url": "https://www.ofgem.gov.uk/sites/default/files/2021-08/RIIO-2%20Electricity%20System%20Operator%20-%20Regulatory%20Instructions%20and%20Guidance.pdf",
+      "note": "Ofgem guidance confirms <cite index=\"48-11\">We therefore do not have any volume drivers, mechanistic cost re-openers, or totex indexation measures for the ESO</cite> and ESO's own response notes <cite index=\"49-1\">unlike the network companies</cite> it will not benefit via a totex incentive mechanism, while Oxera notes <cite index=\"53-8\">Unlike in other sectors, the ESO's costs will be recovered on a pass-through basis</cite>, confirming the structural difference described."
+    },
+    {
+      "claim": "Figures in RIIO-2 models are frequently expressed in a regulatory base-price-year real terms such as '£m 18/19 prices'",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-2 Final Determinations NGGT Annex",
+      "source_url": "https://www.ofgem.gov.uk/system/files/docs/2021/02/final_determinations_-_nggt_annex_revised.pdf",
+      "note": "Ofgem's own Final Determinations annex states <cite index=\"56-2\">All figures are in 2018/19 prices except where otherwise stated</cite>, matching the draft's example price base."
+    },
+    {
+      "claim": "Notional gearing for GB energy network price controls has typically been set in the region of 55-65% in recent price controls",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-2 Final Determinations SPT Annex and RIIO-2 investor call presentations",
+      "source_url": "https://www.ofgem.gov.uk/sites/default/files/docs/2021/02/final_determinations_-_spt_annex_revised_0.pdf",
+      "note": "Ofgem documents show notional gearing figures of <cite index=\"12-7\">Notional gearing | 55%</cite> for SPT and elsewhere <cite index=\"50-14\">60% for lower RAV growth gas networks and 55% for ET networks</cite>, and Oxera notes <cite index=\"13-4\">The RIIO-1 price control decisions assumed gearing of 55–65% relative to the regulatory asset value (RAV)</cite>, directly supporting the stated range."
+    },
+    {
+      "claim": "Cost of debt is commonly indexed to a trailing average of market benchmark yields rather than fixed",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-ED2 Final Determinations Finance Annex",
+      "source_url": "https://www.ofgem.gov.uk/sites/default/files/2022-11/RIIO-ED2%20Final%20Determinations%20Finance%20Annex.pdf",
+      "note": "Ofgem confirms <cite index=\"22-3\">The allowed return on debt is based on benchmark nominal yields published by Markit iBoxx, over a rolling trailing average period that reflects the costs of both existing and new debt</cite>, and that <cite index=\"22-5\">The use of full indexation means that the allowed return on debt moves with outturn rates</cite>."
+    },
+    {
+      "claim": "RIIO-2 price controls use CPIH-linked indexation replacing RPI used in RIIO-1",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-ED2 Final Determinations Finance Annex",
+      "source_url": "https://www.ofgem.gov.uk/sites/default/files/2022-11/RIIO-ED2%20Final%20Determinations%20Finance%20Annex.pdf",
+      "note": "Ofgem explicitly states the <cite index=\"32-5\">switch indexation of the Regulatory Asset Value (RAV) from RPI at RIIO-1 to CPIH at RIIO-2</cite>, confirming this transition."
+    },
+    {
+      "claim": "Interest cover ratios (FFO/interest) are commonly benchmarked by rating agencies against investment-grade thresholds around 1.5x-3x depending on agency, methodology and rating notch",
+      "verdict": "confirmed",
+      "source_tier": 3,
+      "source_description": "Two independent practitioner/consultancy sources: United Utilities PR19 financeability evidence document (citing S&P methodology) and Sapere/SRG Expert report to DLA Piper (citing Moody's rating bands)",
+      "source_url": "https://www.unitedutilities.com/globalassets/z_corporate-site/pr19/supplementary/s7003_evidence_of_financeability.pdf",
+      "note": "One source notes <cite index=\"39-4\">S&P's secondary financial ratio is FFO interest cover with a BBB+ threshold of 2.5x</cite> and another independent source's Moody's rating band table shows the Baa (investment grade) band at <cite index=\"40-5\">1.5x – 3x</cite>, and a separate UK water precedent sets <cite index=\"41-3\">Adjusted interest cover ratio (Moody's definition) 1.5x minimum</cite>, giving two+ independent corroborating sources for the stated range."
+    },
+    {
+      "claim": "RoRE stands for Return on Regulatory Equity and is a standard RIIO/Ofgem metric",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-1 Regulatory Financial Performance Annex and RIIO-2 regulatory performance data pages",
+      "source_url": "https://www.ofgem.gov.uk/system/files/docs/2019/03/regulatory_financial_performance_annex_to_riio-1_annual_reports_-_2017-18.pdf",
+      "note": "Ofgem states <cite index=\"65-7,65-8\">We assess the overall financial performance on regulated equity of network companies using a measure called the Return on Regulatory Equity (RoRE). RoRE is an estimate of the financial return achieved by shareholders during a price control period</cite>, directly confirming the term and definition (noting Ofgem also uses the near-identical label 'Return on Regulated Equity' interchangeably in some later publications)."
+    },
+    {
+      "claim": "Ofgem is required to update and publish the price control financial model annually as part of an Annual Iteration Process (AIP)",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem Electricity transmission price control financial model: RIIO-2 publication page",
+      "source_url": "https://www.ofgem.gov.uk/publications/electricity-transmission-price-control-financial-model-riio-2",
+      "note": "Ofgem states <cite index=\"1-6\">Ofgem is required to update and publish the model annually as part of the Annual Iteration Process (AIP), under Part D of the electricity transmission special condition 8.1</cite>, confirming the AIP mechanism referenced in the draft."
+    },
+    {
+      "claim": "RAV rollforward is a key building block where additions are calculated as a set percentage based on capitalized share of totex, and RAV is the base on which a company earns a return and depreciation allowance",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-2 Electricity System Operator Regulatory Instructions and Guidance",
+      "source_url": "https://www.ofgem.gov.uk/sites/default/files/2021-08/RIIO-2%20Electricity%20System%20Operator%20-%20Regulatory%20Instructions%20and%20Guidance.pdf",
+      "note": "Ofgem guidance states <cite index=\"48-6,48-7,48-8\">The Regulatory Asset Value (RAV) is a key building block of the RIIO-2 price control. RAV represents the value upon which the ESO earns a return in accordance with the regulatory cost of capital and receives a depreciation allowance. Additions to the RAV are calculated as a set percentage based on capitalized share of totex</cite>, directly supporting the draft's RAV rollforward description."
+    },
+    {
+      "claim": "Totex Incentive Mechanism (TIM) / cost-sharing-factor mechanics reward or penalize companies based on the gap between proposed and determined totex",
+      "verdict": "confirmed",
+      "source_tier": 1,
+      "source_description": "Ofgem RIIO-2 Final Determinations Electricity Transmission System Annex",
+      "source_url": "https://www.ofgem.gov.uk/sites/default/files/docs/2021/02/final_determinations_et_annex_revised.pdf",
+      "note": "Ofgem confirms the TIM mechanism and sharing factor reduction <cite index=\"54-2\">We are reducing the totex sharing factor from an average of 44.7% in RIIO-ET1 to 33% for NGET, 36% for SHET and 49% for SPT in RIIO-ET2</cite>, confirming the general TIM/sharing-factor mechanic described in the draft."
+    }
+  ],
+  "summary": "11 of 11 claim(s) confirmed, 0 unverified. No contradictions found."
+}
